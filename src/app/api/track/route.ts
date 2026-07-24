@@ -49,8 +49,20 @@ interface TrackBody {
 }
 
 function corsHeaders(origin: string | null): Record<string, string> {
-  const allowed = process.env.LP_ALLOWED_ORIGIN?.trim();
-  const value = !allowed || allowed === "*" ? (origin ?? "*") : allowed;
+  // LP_ALLOWED_ORIGIN accepts a comma-separated list (we have two landing pages).
+  const raw = process.env.LP_ALLOWED_ORIGIN?.trim();
+  const allowList =
+    raw && raw !== "*" ? raw.split(",").map((o) => o.trim()).filter(Boolean) : [];
+
+  let value: string;
+  if (allowList.length === 0) {
+    value = origin ?? "*"; // not restricted
+  } else if (origin && allowList.includes(origin)) {
+    value = origin; // echo back the matching allowed origin
+  } else {
+    value = allowList[0]; // unknown origin → don't grant it
+  }
+
   return {
     "Access-Control-Allow-Origin": value,
     "Access-Control-Allow-Methods": "POST, OPTIONS",
