@@ -47,6 +47,8 @@ export default async function ConfigPage() {
   const status = integrationStatus();
   const lastSync = await getLastSync();
   const backend = activeBackend();
+  const dbConnected = backend !== "local";
+  const dbLabel = backend === "postgres" ? "Postgres" : backend === "supabase" ? "Supabase" : "JSON local";
   const users = await listUsers();
   const sessionUser = await getCurrentUser();
   const currentUser = sessionUser?.username ?? null;
@@ -84,11 +86,11 @@ export default async function ConfigPage() {
         <CardContent className="space-y-4">
           <div>
             <StatusRow
-              label="Banco de dados (Supabase)"
-              ok={status.supabase}
+              label="Banco de dados"
+              ok={dbConnected}
               hint={
-                backend === "supabase"
-                  ? "Servindo os dados do dashboard"
+                dbConnected
+                  ? `${dbLabel} conectado — servindo os dados`
                   : "Usando o arquivo JSON local (modo desenvolvimento)"
               }
             />
@@ -260,14 +262,14 @@ export default async function ConfigPage() {
                 Dados
               </CardTitle>
               <CardDescription>
-                Backend ativo: <strong>{backend === "supabase" ? "Supabase" : "JSON local"}</strong>.
-                {backend === "supabase"
+                Backend ativo: <strong>{dbLabel}</strong>.
+                {dbConnected
                   ? " Restaurar o exemplo apaga os dados do banco."
-                  : " Defina SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY para usar o Postgres."}
+                  : " Defina DATABASE_URL (Postgres) para persistir os dados de verdade."}
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <ResetButton destructive={backend === "supabase"} />
+              <ResetButton destructive={dbConnected} />
             </CardContent>
           </Card>
         </>

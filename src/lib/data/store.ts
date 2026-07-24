@@ -11,8 +11,10 @@
 
 import "server-only";
 import { isSupabaseConfigured } from "../supabase/client";
+import { isPostgresConfigured } from "../db/pg";
 import { localBackend } from "./local-store";
 import { supabaseBackend } from "./supabase-store";
+import { postgresBackend } from "./postgres-store";
 import type { DataBackend, LpDelta, StoredUser } from "./backend";
 import type { Role } from "../auth/roles";
 import type {
@@ -27,7 +29,9 @@ import type {
 } from "../types";
 
 function backend(): DataBackend {
-  return isSupabaseConfigured() ? supabaseBackend : localBackend;
+  if (isPostgresConfigured()) return postgresBackend; // DATABASE_URL (EasyPanel/Postgres)
+  if (isSupabaseConfigured()) return supabaseBackend;
+  return localBackend;
 }
 
 /** Which backend is serving data right now (shown in the Config screen). */

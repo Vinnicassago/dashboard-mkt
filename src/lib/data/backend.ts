@@ -16,7 +16,7 @@ import type { Role } from "../auth/roles";
  * this shape (via `store.ts`), so swapping JSON ⇄ Supabase changes nothing else.
  */
 export interface DataBackend {
-  readonly name: "local" | "supabase";
+  readonly name: "local" | "supabase" | "postgres";
 
   getData(): Promise<DashboardData>;
   resetToSeed(): Promise<DashboardData>;
