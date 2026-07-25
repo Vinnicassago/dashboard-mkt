@@ -33,6 +33,16 @@ export const n = (v: unknown) => Number(v ?? 0);
 export const s = (v: unknown) => String(v ?? "");
 export const day = (v: unknown) => s(v).slice(0, 10);
 
+/**
+ * Normalise a datetime to an ISO string. Supabase hands us ISO strings; the
+ * Postgres driver hands us a Date object — both end up as clean ISO here.
+ */
+export const iso = (v: unknown): string => {
+  if (v == null) return "";
+  if (v instanceof Date) return v.toISOString();
+  return String(v);
+};
+
 export const FALLBACK_CAMPAIGN: Campaign = {
   id: "campanha",
   name: "Campanha",
@@ -86,7 +96,7 @@ export const fromIgDaily = (r: IgAccountDaily): Row => ({
 
 export const toPost = (r: Row): IgPost => ({
   id: s(r.id),
-  publishedAt: s(r.published_at),
+  publishedAt: iso(r.published_at),
   type: s(r.type) as IgMediaType,
   caption: s(r.caption),
   permalink: s(r.permalink),
@@ -174,7 +184,7 @@ export const fromLp = (l: LpDaily): Row => ({
 
 export const toLead = (r: Row): Lead => ({
   id: s(r.id),
-  createdAt: s(r.created_at),
+  createdAt: iso(r.created_at),
   name: s(r.name),
   email: r.email ? s(r.email) : undefined,
   phone: r.phone ? s(r.phone) : undefined,
@@ -182,7 +192,7 @@ export const toLead = (r: Row): Lead => ({
   utmCampaign: r.utm_campaign ? s(r.utm_campaign) : undefined,
   utmContent: r.utm_content ? s(r.utm_content) : undefined,
   status: s(r.status) as LeadStatus,
-  meetingAt: r.meeting_at ? s(r.meeting_at) : undefined,
+  meetingAt: r.meeting_at ? iso(r.meeting_at) : undefined,
   fbc: r.fbc ? s(r.fbc) : undefined,
   fbp: r.fbp ? s(r.fbp) : undefined,
   gaClientId: r.ga_client_id ? s(r.ga_client_id) : undefined,
@@ -224,13 +234,13 @@ export const toStoredUser = (r: Row): StoredUser => ({
   username: s(r.username),
   passwordHash: s(r.password_hash),
   role: toRole(r.role),
-  createdAt: s(r.created_at),
+  createdAt: iso(r.created_at),
 });
 
 export const toPublicUser = (r: Row): PublicUser => ({
   username: s(r.username),
   role: toRole(r.role),
-  createdAt: s(r.created_at),
+  createdAt: iso(r.created_at),
 });
 
 export const fromStoredUser = (u: StoredUser): Row => ({
@@ -248,7 +258,7 @@ export const toEvent = (r: Row): LeadEvent => ({
   action: s(r.action) as LeadEventAction,
   fromStatus: r.from_status ? (s(r.from_status) as LeadStatus) : undefined,
   toStatus: r.to_status ? (s(r.to_status) as LeadStatus) : undefined,
-  createdAt: s(r.created_at),
+  createdAt: iso(r.created_at),
 });
 
 export const fromEvent = (e: LeadEvent): Row => ({

@@ -6,15 +6,13 @@ import { SCHEMA_SQL } from "./schema";
  * Direct PostgreSQL connection (used when DATABASE_URL is set — e.g. the
  * Postgres service on EasyPanel/Hostinger). This is the alternative to Supabase.
  *
- * Type parsers make Postgres hand values to the shared mappers as strings:
- *  - date (1082)         → keep the raw 'YYYY-MM-DD' text (default would be a Date)
- *  - timestamptz (1184)  → ISO 8601 string
- * numeric stays a string (mappers call Number()), jsonb is parsed to an object.
+ * Only `date` (OID 1082) is overridden — keep the raw 'YYYY-MM-DD' text, since
+ * the default would return a Date at local midnight (timezone-shifty). For
+ * timestamptz we LET the driver return a proper Date (its parser is correct);
+ * the mappers turn that into ISO with `iso()`. numeric stays a string (mappers
+ * call Number()); jsonb is parsed to an object.
  */
 types.setTypeParser(1082, (v) => v);
-types.setTypeParser(1184, (v) =>
-  v == null ? v : new Date(String(v).replace(" ", "T")).toISOString(),
-);
 
 export function isPostgresConfigured(): boolean {
   return Boolean(process.env.DATABASE_URL);
