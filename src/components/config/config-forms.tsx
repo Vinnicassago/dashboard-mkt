@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useTransition } from "react";
+import { useActionState, useState, useTransition } from "react";
 import { useFormStatus } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Download, RefreshCw, RotateCcw, Upload } from "lucide-react";
@@ -9,6 +9,7 @@ import {
   addManualIgDay,
   importAdsCsv,
   resetSeedAction,
+  resyncAdsCleanAction,
   setGoalsAction,
   syncNowAction,
   type ActionState,
@@ -219,20 +220,64 @@ export function GoalsForm({ current }: { current: Partial<Record<string, number>
 export function SyncPanel() {
   const [state, action] = useActionState(syncNowAction, null);
   return (
-    <form action={action} className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <select name="source" defaultValue="all" className={cn(inputCls, "w-auto")}>
-          <option value="all">Tudo</option>
-          <option value="ads">Só tráfego pago</option>
-          <option value="instagram">Só Instagram</option>
-        </select>
-        <SubmitButton>
-          <RefreshCw className="size-4" />
-          Sincronizar agora
-        </SubmitButton>
-      </div>
+    <div className="space-y-3">
+      <form action={action} className="space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <select name="source" defaultValue="all" className={cn(inputCls, "w-auto")}>
+            <option value="all">Tudo</option>
+            <option value="ads">Só tráfego pago</option>
+            <option value="instagram">Só Instagram</option>
+          </select>
+          <SubmitButton>
+            <RefreshCw className="size-4" />
+            Sincronizar agora
+          </SubmitButton>
+        </div>
+        <Message state={state} />
+      </form>
+      <CleanResyncAdsButton />
+    </div>
+  );
+}
+
+/**
+ * Fix for double-counted spend: wipes ad_daily + creatives (where CSV imports
+ * and API rows live under different keys and get summed) and re-pulls cleanly
+ * from Meta. Leads and everything else are untouched.
+ */
+function CleanResyncAdsButton() {
+  const [pending, startTransition] = useTransition();
+  const [state, setState] = useState<ActionState | null>(null);
+  const router = useRouter();
+  return (
+    <div className="space-y-1.5 border-t pt-3">
+      <button
+        type="button"
+        disabled={pending}
+        onClick={() => {
+          if (
+            !window.confirm(
+              "Isso APAGA os dados de anúncios (gasto, criativos) e baixa tudo de novo, limpo, direto da Meta.\n\nSeus leads e o restante NÃO são afetados. Continuar?",
+            )
+          ) {
+            return;
+          }
+          startTransition(async () => {
+            const result = await resyncAdsCleanAction();
+            setState(result);
+            router.refresh();
+          });
+        }}
+        className="inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-medium text-muted-foreground hover:text-foreground disabled:opacity-50"
+      >
+        <RefreshCw className={cn("size-4", pending && "animate-spin")} />
+        {pending ? "Limpando e ressincronizando…" : "Zerar anúncios e ressincronizar"}
+      </button>
+      <p className="text-xs text-muted-foreground">
+        Use se os números de tráfego pago estiverem dobrados (dados de CSV somados com os da Meta).
+      </p>
       <Message state={state} />
-    </form>
+    </div>
   );
 }
 

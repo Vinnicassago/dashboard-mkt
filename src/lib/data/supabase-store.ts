@@ -331,6 +331,16 @@ export const supabaseBackend: DataBackend = {
     return rows.length;
   },
 
+  async clearAdData() {
+    const db = supabase();
+    // PostgREST requires a filter on delete, so match "pk is not null" (all rows).
+    const ad = await db.from("ad_daily").delete().not("ad_id", "is", null);
+    check(ad.error, "clear ad_daily");
+    const cr = await db.from("creatives").delete().not("ad_id", "is", null);
+    check(cr.error, "clear creatives");
+    await touch(false);
+  },
+
   async upsertIgAccountDaily(rows: IgAccountDaily[]) {
     if (rows.length === 0) return 0;
     const { error } = await supabase()

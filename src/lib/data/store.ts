@@ -51,6 +51,9 @@ export const upsertAdDaily = (rows: AdDaily[]) => backend().upsertAdDaily(rows);
 
 export const upsertCreatives = (rows: Creative[]) => backend().upsertCreatives(rows);
 
+/** Remove all ad rows (ad_daily + creatives) before a clean re-sync from the Meta API. */
+export const clearAdData = () => backend().clearAdData();
+
 export const upsertIgAccountDaily = (rows: IgAccountDaily[]) =>
   backend().upsertIgAccountDaily(rows);
 

@@ -206,6 +206,12 @@ export const postgresBackend: DataBackend = {
     return rows.length;
   },
 
+  async clearAdData() {
+    await run("delete from ad_daily");
+    await run("delete from creatives");
+    await touch(false);
+  },
+
   async upsertIgAccountDaily(rows: IgAccountDaily[]) {
     await upsertMany("ig_account_daily", IG_DAILY_COLS, rows.map(fromIgDaily), ["date"], withoutPk(IG_DAILY_COLS, ["date"]));
     await touch(false);

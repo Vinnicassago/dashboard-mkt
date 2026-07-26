@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import {
   addLead,
   addLeadEvent,
+  clearAdData,
   resetToSeed,
   upsertAdDaily,
   upsertGoal,
@@ -144,6 +145,43 @@ export async function resetSeedAction(): Promise<ActionState> {
   await resetToSeed();
   revalidateAll();
   return { ok: true, message: "Dados de exemplo restaurados." };
+}
+
+/**
+ * Fix double-counting: wipe the ad tables (ad_daily + creatives) — where
+ * CSV-imported rows and API rows live under different keys and get summed —
+ * then re-pull cleanly from the Meta API so only the real numbers remain.
+ * Leads and everything else are untouched.
+ */
+export async function resyncAdsCleanAction(): Promise<ActionState> {
+  if (!(await can("data:write"))) return DENIED;
+  try {
+    await clearAdData();
+    const report = await runSync({ source: "ads" });
+    revalidateAll();
+    if (!report.ads) {
+      return {
+        ok: false,
+        message:
+          "Dados de anúncios apagados, mas a Meta não está configurada — defina META_AD_ACCOUNT_ID e META_ADS_ACCESS_TOKEN e clique em Sincronizar agora.",
+      };
+    }
+    if (!report.ads.ok) {
+      return {
+        ok: false,
+        message: `Dados apagados, mas a sincronização falhou: ${report.ads.detail}. Corrija e clique em Sincronizar agora.`,
+      };
+    }
+    return {
+      ok: true,
+      message: `Anúncios zerados e ressincronizados da Meta · ${report.ads.detail}`,
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "Falha ao zerar e ressincronizar.",
+    };
+  }
 }
 
 /** Run the Meta collection on demand (same code path as the daily cron). */

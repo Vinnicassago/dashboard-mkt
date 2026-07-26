@@ -23,6 +23,8 @@ export interface DataBackend {
 
   upsertAdDaily(rows: AdDaily[]): Promise<number>;
   upsertCreatives(rows: Creative[]): Promise<number>;
+  /** Wipe all ad rows (ad_daily + creatives) — clears CSV imports before a clean API re-sync. */
+  clearAdData(): Promise<void>;
   upsertIgAccountDaily(rows: IgAccountDaily[]): Promise<number>;
   upsertIgPosts(rows: IgPost[]): Promise<number>;
 

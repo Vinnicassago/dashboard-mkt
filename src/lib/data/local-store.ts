@@ -122,6 +122,14 @@ export const localBackend: DataBackend = {
     return rows.length;
   },
 
+  async clearAdData() {
+    commit((data) => {
+      data.adDaily = [];
+      data.creatives = [];
+      data.isSeed = false;
+    });
+  },
+
   async upsertIgAccountDaily(rows: IgAccountDaily[]) {
     commit((data) => {
       const index = new Map(data.igAccountDaily.map((r) => [r.date, r]));
