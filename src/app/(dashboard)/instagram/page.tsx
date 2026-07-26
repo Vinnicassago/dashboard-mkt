@@ -6,8 +6,9 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { CHART } from "@/components/charts/colors";
 import { getData } from "@/lib/data/store";
 import { pageRange } from "@/lib/page-range";
-import { followerSeries, inRange } from "@/lib/metrics";
-import { formatCompact, formatInt } from "@/lib/format";
+import { followerSeries, igAccountTotals, inRange, previousRange } from "@/lib/metrics";
+import { absDelta, pctDelta } from "@/components/kpi/delta";
+import { formatCompact, formatInt, formatPercent } from "@/lib/format";
 
 export default async function InstagramPage({
   searchParams,
@@ -29,27 +30,49 @@ export default async function InstagramPage({
     );
   }
 
-  const current = rows.at(-1)?.followers ?? 0;
-  const first = rows[0]?.followers ?? 0;
-  const netNew = current - first;
-  const reach = rows.reduce((s, r) => s + r.reach, 0);
-  const views = rows.reduce((s, r) => s + r.views, 0);
-  const interactions = rows.reduce((s, r) => s + r.totalInteractions, 0);
-  const profileTaps = rows.reduce((s, r) => s + r.profileLinkTaps, 0);
+  const cur = igAccountTotals(data.igAccountDaily, range);
+  const prev = range ? igAccountTotals(data.igAccountDaily, previousRange(range)) : undefined;
 
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
-        <KpiCard label="Seguidores" value={formatInt(current)} Icon={Users} />
         <KpiCard
-          label="Novos no período"
-          value={`+${formatInt(netNew)}`}
-          Icon={TrendingUp}
+          label="Seguidores"
+          value={formatInt(cur.followersEnd)}
+          Icon={Users}
+          delta={absDelta(cur.netNew)}
         />
-        <KpiCard label="Alcance" value={formatCompact(reach)} Icon={Radio} />
-        <KpiCard label="Views" value={formatCompact(views)} Icon={Eye} />
-        <KpiCard label="Interações" value={formatCompact(interactions)} Icon={Heart} />
-        <KpiCard label="Cliques no link" value={formatInt(profileTaps)} Icon={ExternalLink} />
+        <KpiCard
+          label="Alcance"
+          value={formatCompact(cur.reach)}
+          Icon={Radio}
+          delta={prev ? pctDelta(cur.reach, prev.reach) : undefined}
+        />
+        <KpiCard
+          label="Views"
+          value={formatCompact(cur.views)}
+          Icon={Eye}
+          delta={prev ? pctDelta(cur.views, prev.views) : undefined}
+        />
+        <KpiCard
+          label="Interações"
+          value={formatCompact(cur.interactions)}
+          Icon={Heart}
+          delta={prev ? pctDelta(cur.interactions, prev.interactions) : undefined}
+        />
+        <KpiCard
+          label="Engaj. da conta"
+          value={formatPercent(cur.engagementRate)}
+          Icon={TrendingUp}
+          hint="interações ÷ alcance"
+          delta={prev ? pctDelta(cur.engagementRate, prev.engagementRate) : undefined}
+        />
+        <KpiCard
+          label="Cliques no link"
+          value={formatInt(cur.profileLinkTaps)}
+          Icon={ExternalLink}
+          delta={prev ? pctDelta(cur.profileLinkTaps, prev.profileLinkTaps) : undefined}
+        />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">

@@ -144,14 +144,62 @@ export async function syncInstagram({
   );
   const followersNow = Number(profile.followers_count ?? 0);
 
-  // ---- daily account metrics: one request per day (total_value only) ----
   const existing = new Map(
     (await getData()).igAccountDaily.map((r) => [r.date, r]),
   );
   const today = new Date().toISOString().slice(0, 10);
+  const dates = lastNDays(days);
+
+  // ---- follower history ----------------------------------------------
+  // /me only gives the follower count for "now". To fill the past days we try
+  // the `follower_count` insight (daily new followers; needs 100+ followers)
+  // and rebuild the cumulative total backwards from today. If it is
+  // unavailable (new/small account) we fall back to the snapshots already
+  // stored, carrying the nearest known value across gaps — never a stray 0,
+  // which is what made the old chart drop to zero on backfilled days.
+  const followerByDate = new Map<string, number>();
+  const gainByDate = new Map<string, number>();
+  try {
+    const fc = await metaGet<InsightsResponse>(
+      graphUrl(GRAPH_IG, `/${userId}/insights`, {
+        metric: "follower_count",
+        period: "day",
+        since: dayBounds(dates[0]).since,
+        until: dayBounds(dates[dates.length - 1]).until,
+        access_token: token,
+      }),
+    );
+    const entry = fc.data?.find((d) => d.name === "follower_count");
+    for (const v of entry?.values ?? []) {
+      if (v.end_time && typeof v.value === "number") {
+        gainByDate.set(v.end_time.slice(0, 10), v.value);
+      }
+    }
+  } catch {
+    // follower_count unavailable — snapshot fallback below.
+  }
+
+  if (gainByDate.size > 0) {
+    let running = followersNow;
+    for (let i = dates.length - 1; i >= 0; i--) {
+      followerByDate.set(dates[i], running);
+      running -= gainByDate.get(dates[i]) ?? 0;
+    }
+  } else {
+    const known = dates.map((d) =>
+      d === today ? followersNow : existing.get(d)?.followers ?? 0,
+    );
+    let carry = known.find((v) => v > 0) ?? followersNow;
+    for (let i = 0; i < dates.length; i++) {
+      if (known[i] > 0) carry = known[i];
+      followerByDate.set(dates[i], carry);
+    }
+  }
+
+  // ---- daily account metrics: one request per day (total_value only) ----
   const rows: IgAccountDaily[] = [];
 
-  for (const date of lastNDays(days)) {
+  for (const date of dates) {
     const { since, until } = dayBounds(date);
     const res = await metaGet<InsightsResponse>(
       graphUrl(GRAPH_IG, `/${userId}/insights`, {
@@ -164,12 +212,9 @@ export async function syncInstagram({
       }),
     ).catch(() => ({ data: [] }) as InsightsResponse);
 
-    const prev = existing.get(date);
     rows.push({
       date,
-      // Follower history can only be built going forward: we know today's count,
-      // and keep whatever we already recorded for past days.
-      followers: date === today ? followersNow : (prev?.followers ?? 0),
+      followers: followerByDate.get(date) ?? followersNow,
       reach: readMetric(res.data, "reach"),
       views: readMetric(res.data, "views"),
       accountsEngaged: readMetric(res.data, "accounts_engaged"),

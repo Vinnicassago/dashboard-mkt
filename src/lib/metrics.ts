@@ -360,6 +360,143 @@ export function postPerformance(posts: IgPost[], range?: DateRange): PostPerf[] 
     .sort((a, b) => b.publishedAt.localeCompare(a.publishedAt));
 }
 
+// ---- instagram: account totals (period-over-period ready) ----------
+
+export interface IgAccountTotals {
+  followersEnd: number;
+  followersStart: number;
+  netNew: number;
+  reach: number;
+  views: number;
+  interactions: number;
+  profileLinkTaps: number;
+  accountsEngaged: number;
+  engagementRate: number; // interactions / reach
+}
+
+/** Sum an Instagram account window, reusable for the current and previous period. */
+export function igAccountTotals(rows: IgAccountDaily[], range?: DateRange): IgAccountTotals {
+  const sorted = [...rows]
+    .filter((r) => inRange(r.date, range))
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const sum = (pick: (r: IgAccountDaily) => number) => sorted.reduce((s, r) => s + pick(r), 0);
+  const reach = sum((r) => r.reach);
+  const interactions = sum((r) => r.totalInteractions);
+  const followersEnd = sorted.at(-1)?.followers ?? 0;
+  const followersStart = sorted[0]?.followers ?? 0;
+  return {
+    followersEnd,
+    followersStart,
+    netNew: followersEnd - followersStart,
+    reach,
+    views: sum((r) => r.views),
+    interactions,
+    profileLinkTaps: sum((r) => r.profileLinkTaps),
+    accountsEngaged: sum((r) => r.accountsEngaged),
+    engagementRate: div(interactions, reach),
+  };
+}
+
+// ---- instagram: performance by post format -------------------------
+
+const IG_TYPE_LABEL: Record<IgPost["type"], string> = {
+  feed: "Feed",
+  carrossel: "Carrossel",
+  reel: "Reel",
+  story: "Story",
+};
+
+export interface FormatPerf {
+  type: IgPost["type"];
+  label: string;
+  count: number;
+  avgReach: number;
+  avgEngagement: number; // mean of per-post engagement rate
+  saveRate: number; // total saved / total reach
+  shareRate: number; // total shares / total reach
+  avgWatchTime?: number; // reels only (seconds)
+}
+
+/** Group posts by format so the planner can compare reel vs carousel vs feed. */
+export function formatPerformance(posts: IgPost[], range?: DateRange): FormatPerf[] {
+  const byType = new Map<IgPost["type"], IgPost[]>();
+  for (const p of posts.filter((p) => inRange(dayOf(p.publishedAt), range))) {
+    const list = byType.get(p.type) ?? [];
+    list.push(p);
+    byType.set(p.type, list);
+  }
+  const out: FormatPerf[] = [];
+  for (const [type, list] of byType) {
+    const n = list.length;
+    const totReach = list.reduce((s, p) => s + p.reach, 0);
+    const totSaved = list.reduce((s, p) => s + p.saved, 0);
+    const totShares = list.reduce((s, p) => s + p.shares, 0);
+    const watch = list.filter((p) => typeof p.avgWatchTime === "number");
+    out.push({
+      type,
+      label: IG_TYPE_LABEL[type],
+      count: n,
+      avgReach: div(totReach, n),
+      avgEngagement: div(
+        list.reduce((s, p) => s + postEngagementRate(p), 0),
+        n,
+      ),
+      saveRate: div(totSaved, totReach),
+      shareRate: div(totShares, totReach),
+      avgWatchTime: watch.length
+        ? div(
+            watch.reduce((s, p) => s + (p.avgWatchTime ?? 0), 0),
+            watch.length,
+          )
+        : undefined,
+    });
+  }
+  // best-engaging format first (the "champion" to double down on)
+  return out.sort((a, b) => b.avgEngagement - a.avgEngagement);
+}
+
+// ---- instagram: best weekday to post -------------------------------
+
+const WEEKDAY_LABEL = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+
+export interface WeekdayPerf {
+  weekday: number; // 0=Sun … 6=Sat
+  label: string;
+  count: number;
+  avgReach: number;
+  avgEngagement: number;
+}
+
+/** Average engagement/reach per weekday, to hint the best publishing days. */
+export function weekdayPerformance(posts: IgPost[], range?: DateRange): WeekdayPerf[] {
+  const byDay = new Map<number, IgPost[]>();
+  for (const p of posts.filter((p) => inRange(dayOf(p.publishedAt), range))) {
+    const wd = new Date(p.publishedAt).getUTCDay();
+    const list = byDay.get(wd) ?? [];
+    list.push(p);
+    byDay.set(wd, list);
+  }
+  const out: WeekdayPerf[] = [];
+  for (let wd = 0; wd < 7; wd++) {
+    const list = byDay.get(wd);
+    if (!list?.length) continue;
+    out.push({
+      weekday: wd,
+      label: WEEKDAY_LABEL[wd],
+      count: list.length,
+      avgReach: div(
+        list.reduce((s, p) => s + p.reach, 0),
+        list.length,
+      ),
+      avgEngagement: div(
+        list.reduce((s, p) => s + postEngagementRate(p), 0),
+        list.length,
+      ),
+    });
+  }
+  return out;
+}
+
 // ---- landing page ---------------------------------------------------
 
 export interface LpKpis {
