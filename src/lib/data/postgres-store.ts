@@ -49,7 +49,7 @@ import {
 
 // Column lists (order matches the from* mapper output keys).
 const CAMPAIGN_COLS = ["id", "name", "objective", "status", "start_date", "end_date", "budget_total", "daily_budget"];
-const IG_DAILY_COLS = ["date", "followers", "reach", "views", "profile_link_taps", "accounts_engaged", "total_interactions", "profile_views"];
+const IG_DAILY_COLS = ["date", "followers", "reach", "views", "profile_link_taps", "accounts_engaged", "total_interactions", "profile_views", "reach_followers", "reach_non_followers"];
 const POST_COLS = ["id", "published_at", "type", "caption", "permalink", "reach", "views", "likes", "comments", "saved", "shares", "avg_watch_time", "total_watch_time"];
 const CREATIVE_COLS = ["ad_id", "name", "format", "thumbnail_url", "video_plays", "thru_plays"];
 const AD_COLS = ["date", "ad_id", "campaign", "adset", "spend", "impressions", "reach", "frequency", "clicks", "leads"];

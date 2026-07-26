@@ -34,6 +34,8 @@ export interface IgAccountDaily {
   accountsEngaged: number;
   totalInteractions: number;
   profileViews: number; // visits to the profile
+  reachFollowers?: number; // reach among existing followers
+  reachNonFollowers?: number; // reach among non-followers (discovery)
 }
 
 export type IgMediaType = "feed" | "carrossel" | "reel" | "story";

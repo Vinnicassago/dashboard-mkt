@@ -2,6 +2,7 @@ import { Users, TrendingUp, Eye, Radio, Heart, ExternalLink, Percent, UserRound,
 import { KpiCard } from "@/components/kpi/kpi-card";
 import { TimeSeriesChart } from "@/components/charts/time-series-chart";
 import { ChartCard } from "@/components/ui/chart-card";
+import { HorizontalBars } from "@/components/charts/horizontal-bars";
 import { EmptyState } from "@/components/ui/empty-state";
 import { CHART } from "@/components/charts/colors";
 import { getData } from "@/lib/data/store";
@@ -86,6 +87,21 @@ export default async function InstagramPage({
           delta={prev ? pctDelta(cur.engagementRate, prev.engagementRate) : undefined}
         />
       </div>
+
+      {cur.hasReachSplit ? (
+        <ChartCard
+          title="Descoberta — alcance por tipo de conta"
+          description={`${formatPercent(cur.discoveryRate)} do alcance foi de não-seguidores (gente nova).`}
+        >
+          <HorizontalBars
+            data={[
+              { label: "Seguidores", value: cur.reachFollowers, color: CHART.series[0] },
+              { label: "Não-seguidores", value: cur.reachNonFollowers, color: CHART.good },
+            ]}
+            valueFormat="compact"
+          />
+        </ChartCard>
+      ) : null}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <ChartCard title="Seguidores" description="Total de seguidores ao longo do tempo.">

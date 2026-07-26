@@ -83,6 +83,8 @@ export const toIgDaily = (r: Row): IgAccountDaily => ({
   accountsEngaged: n(r.accounts_engaged),
   totalInteractions: n(r.total_interactions),
   profileViews: n(r.profile_views),
+  reachFollowers: r.reach_followers == null ? undefined : n(r.reach_followers),
+  reachNonFollowers: r.reach_non_followers == null ? undefined : n(r.reach_non_followers),
 });
 
 export const fromIgDaily = (r: IgAccountDaily): Row => ({
@@ -94,6 +96,8 @@ export const fromIgDaily = (r: IgAccountDaily): Row => ({
   accounts_engaged: r.accountsEngaged,
   total_interactions: r.totalInteractions,
   profile_views: r.profileViews,
+  reach_followers: r.reachFollowers ?? null,
+  reach_non_followers: r.reachNonFollowers ?? null,
 });
 
 export const toPost = (r: Row): IgPost => ({

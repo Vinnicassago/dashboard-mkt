@@ -25,7 +25,9 @@ create table if not exists ig_account_daily (
   profile_link_taps integer not null default 0,
   accounts_engaged integer not null default 0,
   total_interactions integer not null default 0,
-  profile_views integer not null default 0
+  profile_views integer not null default 0,
+  reach_followers integer,
+  reach_non_followers integer
 );
 
 create table if not exists ig_posts (
@@ -134,4 +136,6 @@ create index if not exists lead_events_lead_idx on lead_events (lead_id);
 -- novas com segurança, sem tocar nos dados). Rodam a cada boot via ensureSchema.
 alter table ig_account_daily add column if not exists profile_views integer not null default 0;
 alter table ig_posts add column if not exists total_watch_time numeric;
+alter table ig_account_daily add column if not exists reach_followers integer;
+alter table ig_account_daily add column if not exists reach_non_followers integer;
 `;

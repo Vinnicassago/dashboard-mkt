@@ -35,7 +35,13 @@ const ACCOUNT_METRICS = [
 interface InsightEntry {
   name: string;
   period?: string;
-  total_value?: { value?: number };
+  total_value?: {
+    value?: number;
+    breakdowns?: Array<{
+      dimension_keys?: string[];
+      results?: Array<{ dimension_values?: string[]; value?: number }>;
+    }>;
+  };
   values?: Array<{ value?: number; end_time?: string }>;
 }
 
@@ -60,6 +66,17 @@ function readMetric(data: InsightEntry[] | undefined, name: string): number {
   }
   const v = entry.values?.[0]?.value;
   return typeof v === "number" ? v : 0;
+}
+
+/** Read one dimension of a `total_value.breakdowns` insight (e.g. reach by follow_type). */
+function readBreakdown(
+  data: InsightEntry[] | undefined,
+  name: string,
+  dimensionValue: string,
+): number | undefined {
+  const results = data?.find((d) => d.name === name)?.total_value?.breakdowns?.[0]?.results;
+  const hit = results?.find((r) => r.dimension_values?.[0] === dimensionValue);
+  return typeof hit?.value === "number" ? hit.value : undefined;
 }
 
 function dayBounds(isoDate: string): { since: number; until: number } {
@@ -201,7 +218,7 @@ export async function syncInstagram({
 
   for (const date of dates) {
     const { since, until } = dayBounds(date);
-    const [res, pv] = await Promise.all([
+    const [res, pv, rb] = await Promise.all([
       metaGet<InsightsResponse>(
         graphUrl(GRAPH_IG, `/${userId}/insights`, {
           metric: ACCOUNT_METRICS,
@@ -224,6 +241,19 @@ export async function syncInstagram({
           access_token: token,
         }),
       ).catch(() => ({ data: [] }) as InsightsResponse),
+      // alcance dividido em seguidor vs nao-seguidor (descoberta). Tambem isolado:
+      // se o breakdown nao existir na conta/versao, nao afeta as metricas acima.
+      metaGet<InsightsResponse>(
+        graphUrl(GRAPH_IG, `/${userId}/insights`, {
+          metric: "reach",
+          period: "day",
+          metric_type: "total_value",
+          breakdown: "follow_type",
+          since,
+          until,
+          access_token: token,
+        }),
+      ).catch(() => ({ data: [] }) as InsightsResponse),
     ]);
 
     rows.push({
@@ -235,6 +265,8 @@ export async function syncInstagram({
       totalInteractions: readMetric(res.data, "total_interactions"),
       profileLinkTaps: readMetric(res.data, "profile_links_taps"),
       profileViews: readMetric(pv.data, "profile_views"),
+      reachFollowers: readBreakdown(rb.data, "reach", "FOLLOWER"),
+      reachNonFollowers: readBreakdown(rb.data, "reach", "NON_FOLLOWER"),
     });
   }
 

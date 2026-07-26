@@ -374,6 +374,10 @@ export interface IgAccountTotals {
   accountsEngaged: number;
   engagementRate: number; // interactions / reach
   linkTapRate: number; // profile link taps / profile views
+  reachFollowers: number;
+  reachNonFollowers: number;
+  discoveryRate: number; // non-follower reach / total split reach
+  hasReachSplit: boolean; // whether the follow_type breakdown was available
 }
 
 /** Sum an Instagram account window, reusable for the current and previous period. */
@@ -386,6 +390,11 @@ export function igAccountTotals(rows: IgAccountDaily[], range?: DateRange): IgAc
   const interactions = sum((r) => r.totalInteractions);
   const profileLinkTaps = sum((r) => r.profileLinkTaps);
   const profileViews = sum((r) => r.profileViews ?? 0);
+  const reachFollowers = sum((r) => r.reachFollowers ?? 0);
+  const reachNonFollowers = sum((r) => r.reachNonFollowers ?? 0);
+  const hasReachSplit = sorted.some(
+    (r) => r.reachFollowers != null || r.reachNonFollowers != null,
+  );
   const followersEnd = sorted.at(-1)?.followers ?? 0;
   const followersStart = sorted[0]?.followers ?? 0;
   return {
@@ -400,6 +409,10 @@ export function igAccountTotals(rows: IgAccountDaily[], range?: DateRange): IgAc
     accountsEngaged: sum((r) => r.accountsEngaged),
     engagementRate: div(interactions, reach),
     linkTapRate: div(profileLinkTaps, profileViews),
+    reachFollowers,
+    reachNonFollowers,
+    discoveryRate: div(reachNonFollowers, reachFollowers + reachNonFollowers),
+    hasReachSplit,
   };
 }
 

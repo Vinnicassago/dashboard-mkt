@@ -244,6 +244,7 @@ function buildSeedData(): DashboardData {
     followers += gain;
     const reach = Math.round(rand(380, 900) + i * 140 + rand(0, 400));
     const views = Math.round(reach * rand(1.4, 2.2));
+    const reachFollowers = Math.round(reach * (0.7 - Math.min(i, 14) * 0.012));
     igAccountDaily.push({
       date,
       followers,
@@ -253,6 +254,8 @@ function buildSeedData(): DashboardData {
       accountsEngaged: Math.round(reach * rand(0.06, 0.13)),
       totalInteractions: Math.round(rand(40, 160) + i * 12),
       profileViews: Math.round(rand(40, 140) + i * 6),
+      reachFollowers,
+      reachNonFollowers: Math.max(0, reach - reachFollowers),
     });
   });
 
