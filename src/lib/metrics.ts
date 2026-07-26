@@ -370,8 +370,10 @@ export interface IgAccountTotals {
   views: number;
   interactions: number;
   profileLinkTaps: number;
+  profileViews: number;
   accountsEngaged: number;
   engagementRate: number; // interactions / reach
+  linkTapRate: number; // profile link taps / profile views
 }
 
 /** Sum an Instagram account window, reusable for the current and previous period. */
@@ -382,6 +384,8 @@ export function igAccountTotals(rows: IgAccountDaily[], range?: DateRange): IgAc
   const sum = (pick: (r: IgAccountDaily) => number) => sorted.reduce((s, r) => s + pick(r), 0);
   const reach = sum((r) => r.reach);
   const interactions = sum((r) => r.totalInteractions);
+  const profileLinkTaps = sum((r) => r.profileLinkTaps);
+  const profileViews = sum((r) => r.profileViews ?? 0);
   const followersEnd = sorted.at(-1)?.followers ?? 0;
   const followersStart = sorted[0]?.followers ?? 0;
   return {
@@ -391,9 +395,11 @@ export function igAccountTotals(rows: IgAccountDaily[], range?: DateRange): IgAc
     reach,
     views: sum((r) => r.views),
     interactions,
-    profileLinkTaps: sum((r) => r.profileLinkTaps),
+    profileLinkTaps,
+    profileViews,
     accountsEngaged: sum((r) => r.accountsEngaged),
     engagementRate: div(interactions, reach),
+    linkTapRate: div(profileLinkTaps, profileViews),
   };
 }
 
@@ -415,6 +421,7 @@ export interface FormatPerf {
   saveRate: number; // total saved / total reach
   shareRate: number; // total shares / total reach
   avgWatchTime?: number; // reels only (seconds)
+  totalWatchTime?: number; // reels only (sum of seconds watched)
 }
 
 /** Group posts by format so the planner can compare reel vs carousel vs feed. */
@@ -432,6 +439,7 @@ export function formatPerformance(posts: IgPost[], range?: DateRange): FormatPer
     const totSaved = list.reduce((s, p) => s + p.saved, 0);
     const totShares = list.reduce((s, p) => s + p.shares, 0);
     const watch = list.filter((p) => typeof p.avgWatchTime === "number");
+    const totWatch = list.reduce((s, p) => s + (p.totalWatchTime ?? 0), 0);
     out.push({
       type,
       label: IG_TYPE_LABEL[type],
@@ -449,6 +457,7 @@ export function formatPerformance(posts: IgPost[], range?: DateRange): FormatPer
             watch.length,
           )
         : undefined,
+      totalWatchTime: totWatch > 0 ? totWatch : undefined,
     });
   }
   // best-engaging format first (the "champion" to double down on)

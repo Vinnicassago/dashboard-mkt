@@ -122,6 +122,9 @@ export function ManualIgForm() {
         <Field label="Cliques no link">
           <input type="number" name="profileLinkTaps" min="0" className={inputCls} />
         </Field>
+        <Field label="Visitas ao perfil">
+          <input type="number" name="profileViews" min="0" className={inputCls} />
+        </Field>
         <Field label="Contas engajadas">
           <input type="number" name="accountsEngaged" min="0" className={inputCls} />
         </Field>

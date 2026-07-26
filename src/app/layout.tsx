@@ -18,8 +18,9 @@ export const metadata: Metadata = {
     "Central de análise da campanha: Instagram orgânico, tráfego pago, criativos e funil de leads até o agendamento de reunião.",
 };
 
-// Applies the saved/system theme before first paint to avoid a flash.
-const themeScript = `(function(){try{var t=localStorage.getItem('theme');if(!t){t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.setAttribute('data-theme',t);}catch(e){}})();`;
+// Applies the saved theme before first paint to avoid a flash. Default is dark:
+// only an explicit saved 'light' switches away from it (first visit = dark).
+const themeScript = `(function(){try{var t=localStorage.getItem('theme');if(t!=='light'&&t!=='dark'){t='dark';}document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','dark');}})();`;
 
 export default function RootLayout({
   children,
@@ -29,7 +30,7 @@ export default function RootLayout({
   return (
     <html
       lang="pt-BR"
-      data-theme="light"
+      data-theme="dark"
       suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} h-full`}
     >

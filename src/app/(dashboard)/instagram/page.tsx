@@ -1,4 +1,4 @@
-import { Users, TrendingUp, Eye, Radio, Heart, ExternalLink, Info } from "lucide-react";
+import { Users, TrendingUp, Eye, Radio, Heart, ExternalLink, Percent, UserRound, Info } from "lucide-react";
 import { KpiCard } from "@/components/kpi/kpi-card";
 import { TimeSeriesChart } from "@/components/charts/time-series-chart";
 import { ChartCard } from "@/components/ui/chart-card";
@@ -35,7 +35,7 @@ export default async function InstagramPage({
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         <KpiCard
           label="Seguidores"
           value={formatInt(cur.followersEnd)}
@@ -61,17 +61,29 @@ export default async function InstagramPage({
           delta={prev ? pctDelta(cur.interactions, prev.interactions) : undefined}
         />
         <KpiCard
-          label="Engaj. da conta"
-          value={formatPercent(cur.engagementRate)}
-          Icon={TrendingUp}
-          hint="interações ÷ alcance"
-          delta={prev ? pctDelta(cur.engagementRate, prev.engagementRate) : undefined}
+          label="Visitas ao perfil"
+          value={formatCompact(cur.profileViews)}
+          Icon={UserRound}
+          delta={prev ? pctDelta(cur.profileViews, prev.profileViews) : undefined}
         />
         <KpiCard
           label="Cliques no link"
           value={formatInt(cur.profileLinkTaps)}
           Icon={ExternalLink}
           delta={prev ? pctDelta(cur.profileLinkTaps, prev.profileLinkTaps) : undefined}
+        />
+        <KpiCard
+          label="Taxa de clique no link"
+          value={formatPercent(cur.linkTapRate)}
+          Icon={Percent}
+          hint="cliques ÷ visitas"
+        />
+        <KpiCard
+          label="Engaj. da conta"
+          value={formatPercent(cur.engagementRate)}
+          Icon={TrendingUp}
+          hint="interações ÷ alcance"
+          delta={prev ? pctDelta(cur.engagementRate, prev.engagementRate) : undefined}
         />
       </div>
 

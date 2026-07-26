@@ -252,6 +252,7 @@ function buildSeedData(): DashboardData {
       profileLinkTaps: Math.round(rand(6, 22) + i * 1.5),
       accountsEngaged: Math.round(reach * rand(0.06, 0.13)),
       totalInteractions: Math.round(rand(40, 160) + i * 12),
+      profileViews: Math.round(rand(40, 140) + i * 6),
     });
   });
 
@@ -288,6 +289,7 @@ function buildSeedData(): DashboardData {
       saved,
       shares,
       avgWatchTime: p.type === "reel" ? Math.round(rand(6, 18) * 10) / 10 : undefined,
+      totalWatchTime: p.type === "reel" ? Math.round(views * rand(3, 9)) : undefined,
     };
   });
 

@@ -82,6 +82,7 @@ export const toIgDaily = (r: Row): IgAccountDaily => ({
   profileLinkTaps: n(r.profile_link_taps),
   accountsEngaged: n(r.accounts_engaged),
   totalInteractions: n(r.total_interactions),
+  profileViews: n(r.profile_views),
 });
 
 export const fromIgDaily = (r: IgAccountDaily): Row => ({
@@ -92,6 +93,7 @@ export const fromIgDaily = (r: IgAccountDaily): Row => ({
   profile_link_taps: r.profileLinkTaps,
   accounts_engaged: r.accountsEngaged,
   total_interactions: r.totalInteractions,
+  profile_views: r.profileViews,
 });
 
 export const toPost = (r: Row): IgPost => ({
@@ -107,6 +109,7 @@ export const toPost = (r: Row): IgPost => ({
   saved: n(r.saved),
   shares: n(r.shares),
   avgWatchTime: r.avg_watch_time == null ? undefined : n(r.avg_watch_time),
+  totalWatchTime: r.total_watch_time == null ? undefined : n(r.total_watch_time),
 });
 
 export const fromPost = (p: IgPost): Row => ({
@@ -122,6 +125,7 @@ export const fromPost = (p: IgPost): Row => ({
   saved: p.saved,
   shares: p.shares,
   avg_watch_time: p.avgWatchTime ?? null,
+  total_watch_time: p.totalWatchTime ?? null,
 });
 
 export const toCreative = (r: Row): Creative => ({

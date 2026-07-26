@@ -2,7 +2,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { FormatPerf } from "@/lib/metrics";
-import { formatCompact, formatDecimal, formatPercent } from "@/lib/format";
+import { formatCompact, formatDecimal, formatInt, formatPercent } from "@/lib/format";
 
 /**
  * Per-format comparison cards (reel vs carousel vs feed vs story). The list
@@ -37,6 +37,9 @@ export function FormatBreakdown({ formats }: { formats: FormatPerf[] }) {
             <Row label="Taxa de compart." value={formatPercent(f.shareRate)} />
             {f.avgWatchTime != null ? (
               <Row label="Retenção" value={`${formatDecimal(f.avgWatchTime, 1)}s`} />
+            ) : null}
+            {f.totalWatchTime != null ? (
+              <Row label="Tempo total assistido" value={`${formatInt(f.totalWatchTime / 60)} min`} />
             ) : null}
           </dl>
         </Card>

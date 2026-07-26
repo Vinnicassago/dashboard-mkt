@@ -21,10 +21,10 @@
   --grid: #e1e0d9;             /* chart hairline grid */
   --axis: #c3c2b7;             /* baseline / axis */
 
-  /* Brand / primary (categorical slot 1 — blue) */
-  --primary: #2a78d6;
+  /* Brand / primary (âmbar/ouro — legível como preenchimento e como texto no claro) */
+  --primary: #9a6700;
   --primary-foreground: #ffffff;
-  --ring: #2a78d6;
+  --ring: #9a6700;
 
   /* Status (fixed both modes; pair with icon+label, never color alone) */
   --good: #0ca30c;
@@ -64,9 +64,9 @@
   --grid: #2c2c2a;
   --axis: #383835;
 
-  --primary: #3987e5;
+  --primary: #e0a52e;
   --primary-foreground: #0b0b0b;
-  --ring: #3987e5;
+  --ring: #e0a52e;
 
   --good: #0ca30c;
   --warning: #fab219;

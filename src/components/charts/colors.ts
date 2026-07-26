@@ -9,12 +9,15 @@ export const CHART = {
   primary: "var(--primary)",
   good: "var(--good)",
   critical: "var(--critical)",
+  // A marca é âmbar (var(--primary)); a série lidera com ela e evita azul (chart-1),
+  // laranja (chart-2, vizinho do âmbar) e amarelo (chart-4, duplicaria), usando
+  // cores bem separadas para preservar a distinção entre séries.
   series: [
-    "var(--chart-1)",
-    "var(--chart-2)",
+    "var(--primary)",
     "var(--chart-3)",
-    "var(--chart-4)",
     "var(--chart-5)",
+    "var(--chart-6)",
+    "var(--chart-7)",
   ],
   funnel: [
     "var(--funnel-1)",

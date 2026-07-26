@@ -23,7 +23,8 @@ create table if not exists ig_account_daily (
   views               integer not null default 0,
   profile_link_taps   integer not null default 0,
   accounts_engaged    integer not null default 0,
-  total_interactions  integer not null default 0
+  total_interactions  integer not null default 0,
+  profile_views       integer not null default 0
 );
 
 -- Instagram — posts
@@ -39,7 +40,8 @@ create table if not exists ig_posts (
   comments        integer     not null default 0,
   saved           integer     not null default 0,
   shares          integer     not null default 0,
-  avg_watch_time  numeric
+  avg_watch_time  numeric,
+  total_watch_time numeric
 );
 
 -- Criativos (anúncios)
@@ -135,6 +137,10 @@ create index if not exists leads_created_idx      on leads (created_at desc);
 create index if not exists ig_posts_pub_idx       on ig_posts (published_at desc);
 create index if not exists lead_events_created_idx on lead_events (created_at desc);
 create index if not exists lead_events_lead_idx    on lead_events (lead_id);
+
+-- Migrações idempotentes para bancos já existentes (adiciona colunas novas com segurança)
+alter table ig_account_daily add column if not exists profile_views integer not null default 0;
+alter table ig_posts         add column if not exists total_watch_time numeric;
 
 -- Row Level Security ligada em tudo (só o service role, usado pelo servidor, acessa)
 alter table campaign          enable row level security;

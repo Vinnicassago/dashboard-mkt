@@ -71,6 +71,7 @@ export async function addManualIgDay(
       profileLinkTaps: num(formData, "profileLinkTaps"),
       accountsEngaged: num(formData, "accountsEngaged"),
       totalInteractions: num(formData, "totalInteractions"),
+      profileViews: num(formData, "profileViews"),
     },
   ]);
   revalidateAll();

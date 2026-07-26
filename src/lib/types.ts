@@ -33,6 +33,7 @@ export interface IgAccountDaily {
   profileLinkTaps: number;
   accountsEngaged: number;
   totalInteractions: number;
+  profileViews: number; // visits to the profile
 }
 
 export type IgMediaType = "feed" | "carrossel" | "reel" | "story";
@@ -51,6 +52,8 @@ export interface IgPost {
   shares: number;
   // avg watch time in seconds — reels only
   avgWatchTime?: number;
+  // total seconds watched — reels only
+  totalWatchTime?: number;
 }
 
 // ------------------------- Paid traffic (Meta Ads) ------------------

@@ -201,16 +201,30 @@ export async function syncInstagram({
 
   for (const date of dates) {
     const { since, until } = dayBounds(date);
-    const res = await metaGet<InsightsResponse>(
-      graphUrl(GRAPH_IG, `/${userId}/insights`, {
-        metric: ACCOUNT_METRICS,
-        period: "day",
-        metric_type: "total_value",
-        since,
-        until,
-        access_token: token,
-      }),
-    ).catch(() => ({ data: [] }) as InsightsResponse);
+    const [res, pv] = await Promise.all([
+      metaGet<InsightsResponse>(
+        graphUrl(GRAPH_IG, `/${userId}/insights`, {
+          metric: ACCOUNT_METRICS,
+          period: "day",
+          metric_type: "total_value",
+          since,
+          until,
+          access_token: token,
+        }),
+      ).catch(() => ({ data: [] }) as InsightsResponse),
+      // profile_views isolado de proposito: se estiver indisponivel nesta conta
+      // ou versao da API, NAO pode derrubar as metricas centrais ja provadas acima.
+      metaGet<InsightsResponse>(
+        graphUrl(GRAPH_IG, `/${userId}/insights`, {
+          metric: "profile_views",
+          period: "day",
+          metric_type: "total_value",
+          since,
+          until,
+          access_token: token,
+        }),
+      ).catch(() => ({ data: [] }) as InsightsResponse),
+    ]);
 
     rows.push({
       date,
@@ -220,6 +234,7 @@ export async function syncInstagram({
       accountsEngaged: readMetric(res.data, "accounts_engaged"),
       totalInteractions: readMetric(res.data, "total_interactions"),
       profileLinkTaps: readMetric(res.data, "profile_links_taps"),
+      profileViews: readMetric(pv.data, "profile_views"),
     });
   }
 
@@ -245,7 +260,7 @@ export async function syncInstagram({
       m.is_shared_to_feed,
     );
     const metrics = ["reach", "likes", "comments", "saved", "shares", "views"];
-    if (type === "reel") metrics.push("ig_reels_avg_watch_time");
+    if (type === "reel") metrics.push("ig_reels_avg_watch_time", "ig_reels_video_view_total_time");
 
     const ins = await metaGet<InsightsResponse>(
       graphUrl(GRAPH_IG, `/${m.id}/insights`, {
@@ -255,6 +270,7 @@ export async function syncInstagram({
     ).catch(() => ({ data: [] }) as InsightsResponse);
 
     const avgWatch = readMetric(ins.data, "ig_reels_avg_watch_time");
+    const totalWatchMs = readMetric(ins.data, "ig_reels_video_view_total_time");
     posts.push({
       id: m.id,
       publishedAt: m.timestamp ?? new Date().toISOString(),
@@ -269,6 +285,7 @@ export async function syncInstagram({
       shares: readMetric(ins.data, "shares"),
       // API reports milliseconds; the dashboard shows seconds
       avgWatchTime: type === "reel" && avgWatch ? Math.round(avgWatch / 100) / 10 : undefined,
+      totalWatchTime: type === "reel" && totalWatchMs ? Math.round(totalWatchMs / 1000) : undefined,
     });
   }
 
