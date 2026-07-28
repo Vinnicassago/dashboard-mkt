@@ -182,6 +182,42 @@
     });
   }
 
+  /* ---------------- lead (disparo único, reutilizável) ---------------- */
+  // Gera/usa um event_id ÚNICO e dispara o MESMO evento pelo navegador
+  // (Pixel/GA4) e pelo servidor (CAPI) — é assim que a Meta deduplica.
+  function fireLead(info) {
+    info = info || {};
+    var eventId = info.eventId || uuid();
+
+    try {
+      if (window.fbq) window.fbq("track", "Lead", {}, { eventID: eventId });
+    } catch (err) {}
+    try {
+      if (window.gtag) window.gtag("event", "generate_lead", { event_id: eventId });
+    } catch (err) {}
+
+    post({
+      type: "lead",
+      eventId: eventId,
+      name: info.name || "",
+      email: info.email || "",
+      phone: info.phone || "",
+    });
+    return eventId;
+  }
+
+  /**
+   * Dispara um Lead manualmente — para páginas cujo formulário é controlado por
+   * JavaScript (sem <form> nativo, como um quiz). Chame no momento em que o
+   * contato é concluído, passando os dados que você já tem em mãos:
+   *   window.dashTrackLead({ name: nome, email: email, phone: whats, eventId: codigo });
+   * O eventId é opcional; se a página já tem um código de correlação, reutilize-o
+   * (ele deduplica com o Pixel). Respeita requireConsent como qualquer outro evento.
+   */
+  window.dashTrackLead = function (info) {
+    return fireLead(info || {});
+  };
+
   /* ---------------- eventos ---------------- */
   post({ type: "page_view" });
 
@@ -207,20 +243,7 @@
         return "";
       };
 
-      var eventId = uuid();
-
-      // 1) navegador — Pixel e GA4, com o MESMO event_id do servidor
-      try {
-        if (window.fbq) window.fbq("track", "Lead", {}, { eventID: eventId });
-      } catch (err) {}
-      try {
-        if (window.gtag) window.gtag("event", "generate_lead", { event_id: eventId });
-      } catch (err) {}
-
-      // 2) servidor — CAPI (deduplicado pelo event_id)
-      post({
-        type: "lead",
-        eventId: eventId,
+      fireLead({
         name: get(["name", "nome", "full_name"]),
         email: get(["email", "e-mail"]),
         phone: get(["phone", "telefone", "whatsapp", "celular"]),
