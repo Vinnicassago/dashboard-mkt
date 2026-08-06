@@ -2,9 +2,18 @@ import { LeadsDirectory, type LeadDirectoryRow } from "@/components/leads/leads-
 import { LeadActivity } from "@/components/leads/lead-activity";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getData, listLeadEvents } from "@/lib/data/store";
+import { adIdFromUtmContent } from "@/lib/metrics";
 import { can } from "@/lib/auth/guard";
 
 export const dynamic = "force-dynamic";
+
+/** Nome do criativo a partir do utm_content ("nome|adid"): resolve pelo id do
+ *  anúncio, senão mostra a parte de nome (antes do "|"). */
+function originLabel(utmContent: string | undefined, nameById: Map<string, string>): string {
+  if (!utmContent) return "—";
+  const id = adIdFromUtmContent(utmContent);
+  return (id ? nameById.get(id) : nameById.get(utmContent)) ?? utmContent.split("|")[0];
+}
 
 export default async function LeadsPage() {
   const data = await getData();
@@ -18,7 +27,7 @@ export default async function LeadsPage() {
     name: l.name,
     email: l.email,
     phone: l.phone,
-    creativeName: l.utmContent ? (nameById.get(l.utmContent) ?? l.utmContent) : "—",
+    creativeName: originLabel(l.utmContent, nameById),
     status: l.status,
     meetingAt: l.meetingAt,
   }));

@@ -104,6 +104,13 @@ export default async function TrafegoPage({
             descoberta={obj.descoberta.spend}
           />
 
+          {obj.organicLeads > 0 ? (
+            <p className="text-xs text-muted-foreground">
+              + {formatInt(obj.organicLeads)} lead(s) orgânico(s)/direto(s) — sem custo pago,
+              fora do CPL/CPR.
+            </p>
+          ) : null}
+
           <div className="grid gap-4 sm:grid-cols-2">
             {/* Conversão */}
             <div className="space-y-2 rounded-lg border p-4">

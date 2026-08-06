@@ -184,6 +184,35 @@ export function objectiveBucket(raw?: string | null): ObjectiveBucket {
 
 export const bucketOfAd = (row: AdDaily): ObjectiveBucket => objectiveBucket(row.objective);
 
+/**
+ * Extrai o id do anúncio embutido no utm_content ("nome do criativo|123456789"
+ * → "123456789"). Ids da Meta são numéricos longos; sem id embutido, undefined.
+ */
+export function adIdFromUtmContent(utmContent?: string | null): string | undefined {
+  if (!utmContent) return undefined;
+  const last = utmContent.split("|").pop()?.trim();
+  return last && /^\d{5,}$/.test(last) ? last : undefined;
+}
+
+/**
+ * Chave de junção lead→anúncio: o id extraído do utm_content, senão o próprio
+ * utm_content (compat. com dados onde o utm_content já é o adId, ex. seed).
+ */
+export function leadAdKey(lead: Lead): string | undefined {
+  return adIdFromUtmContent(lead.utmContent) ?? lead.utmContent ?? undefined;
+}
+
+const PAID_SOURCE_RE = /ads|paid|cpc|ppc|meta|facebook|^fb$/;
+
+/**
+ * O utm_source indica tráfego pago? (metaads, facebook, fb, …). Fontes orgânicas
+ * como "ig"/"instagram"/"link_in_bio" retornam false — usado para separar leads
+ * orgânicos (sem custo) do denominador do CPL pago.
+ */
+export function isPaidSource(src?: string | null): boolean {
+  return src ? PAID_SOURCE_RE.test(src.trim().toLowerCase()) : false;
+}
+
 export interface ObjectiveKpis {
   bucket: ObjectiveBucket;
   spend: number;
@@ -223,6 +252,10 @@ export interface ObjectiveBreakdown {
   conversaoShare: number; // 0–1 do gasto
   descobertaShare: number; // 0–1 do gasto
   hasDiscovery: boolean; // há gasto de descoberta no período?
+  /** leads sem atribuição a anúncio pago (orgânico/direto) — contam no total,
+   *  mas ficam FORA do CPL/CPR pago. */
+  organicLeads: number;
+  organicMeetings: number;
   /** seguidores líquidos ganhos no período (conta inteira: orgânico + pago) */
   netNewFollowers: number;
   /** custo por seguidor ESTIMADO = gasto em descoberta ÷ seguidores líquidos.
@@ -258,10 +291,22 @@ export function objectiveBreakdown(data: DashboardData, range?: DateRange): Obje
     a.reach += r.reach;
     a.clicks += r.clicks;
   }
+  let organicLeads = 0;
+  let organicMeetings = 0;
   for (const l of leads) {
-    const b = (l.utmContent && adBucket.get(l.utmContent)) || "conversao";
-    acc[b].leads += 1;
-    if (isBooked(l)) acc[b].meetings += 1;
+    const key = leadAdKey(l);
+    const joined = key ? adBucket.get(key) : undefined;
+    // Junta pelo anúncio; se não junta mas a fonte é paga, assume conversão;
+    // senão é orgânico/direto (sem custo pago) e fica fora do CPL/CPR.
+    const b: ObjectiveBucket | "organico" =
+      joined ?? (isPaidSource(l.utmSource) ? "conversao" : "organico");
+    if (b === "organico") {
+      organicLeads += 1;
+      if (isBooked(l)) organicMeetings += 1;
+    } else {
+      acc[b].leads += 1;
+      if (isBooked(l)) acc[b].meetings += 1;
+    }
   }
   for (const b of ["conversao", "descoberta"] as ObjectiveBucket[]) {
     const a = acc[b];
@@ -281,6 +326,8 @@ export function objectiveBreakdown(data: DashboardData, range?: DateRange): Obje
     conversaoShare: div(acc.conversao.spend, totalSpend),
     descobertaShare: div(acc.descoberta.spend, totalSpend),
     hasDiscovery: acc.descoberta.spend > 0,
+    organicLeads,
+    organicMeetings,
     netNewFollowers,
     costPerFollowerEst: div(acc.descoberta.spend, netNewFollowers),
   };
@@ -351,6 +398,7 @@ export interface OverviewKpis {
   leadToMeeting: number; // ratio
   showRate: number; // compareceu / booked
   hasDiscovery: boolean; // há orçamento de descoberta no período?
+  organicLeads: number; // leads orgânicos/diretos (fora do CPL/CPR pago)
 }
 
 export function overviewKpis(data: DashboardData, range?: DateRange): OverviewKpis {
@@ -377,6 +425,7 @@ export function overviewKpis(data: DashboardData, range?: DateRange): OverviewKp
     leadToMeeting: div(meetings, leads.length),
     showRate: div(attended, meetings),
     hasDiscovery: obj.hasDiscovery,
+    organicLeads: obj.organicLeads,
   };
 }
 
@@ -463,10 +512,13 @@ export function creativePerformance(
     byAd.set(r.adId, list);
   }
 
+  // Atribui reuniões ao criativo pelo id do anúncio embutido no utm_content
+  // (ou pelo utm_content cru, quando ele já é o adId, ex. seed).
   const meetingsByAd = new Map<string, number>();
   for (const l of leads) {
-    if (isBooked(l) && l.utmContent) {
-      meetingsByAd.set(l.utmContent, (meetingsByAd.get(l.utmContent) ?? 0) + 1);
+    const key = leadAdKey(l);
+    if (isBooked(l) && key) {
+      meetingsByAd.set(key, (meetingsByAd.get(key) ?? 0) + 1);
     }
   }
 
