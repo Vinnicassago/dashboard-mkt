@@ -30,6 +30,8 @@ export interface DataBackend {
 
   addLead(lead: Lead): Promise<void>;
   setLeadStatus(id: string, status: LeadStatus, meetingAt?: string): Promise<void>;
+  /** Hard-delete a lead (ex.: entradas de teste) e seus eventos de auditoria. */
+  deleteLead(id: string): Promise<void>;
   upsertGoal(goal: Goal): Promise<void>;
 
   // ---- lead audit log ----

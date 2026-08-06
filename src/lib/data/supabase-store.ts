@@ -387,6 +387,14 @@ export const supabaseBackend: DataBackend = {
     await touch();
   },
 
+  async deleteLead(id: string) {
+    const ev = await supabase().from("lead_events").delete().eq("lead_id", id);
+    check(ev.error, "delete lead events");
+    const { error } = await supabase().from("leads").delete().eq("id", id);
+    check(error, "delete lead");
+    await touch(false);
+  },
+
   async upsertGoal(goal: Goal) {
     const { error } = await supabase()
       .from("goals")

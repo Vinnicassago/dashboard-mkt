@@ -1,9 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Download, Mail, MessageCircle, Search } from "lucide-react";
+import { useMemo, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { Download, Mail, MessageCircle, Search, Trash2 } from "lucide-react";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { StatusSelect, statusMeta, statusOrder } from "@/components/tables/lead-status";
+import { deleteLeadAction } from "@/app/(dashboard)/funil/actions";
 import type { LeadStatus } from "@/lib/types";
 import { formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -56,6 +58,40 @@ function ContactCell({ row }: { row: LeadDirectoryRow }) {
   );
 }
 
+function DeleteLeadButton({ id, name }: { id: string; name: string }) {
+  const [pending, start] = useTransition();
+  const [msg, setMsg] = useState<string | null>(null);
+  const router = useRouter();
+  return (
+    <div className="flex flex-col items-end gap-0.5">
+      <button
+        type="button"
+        aria-label={`Excluir ${name}`}
+        title="Excluir lead"
+        disabled={pending}
+        onClick={() => {
+          if (!window.confirm(`Excluir o lead "${name}"? Esta ação não pode ser desfeita.`)) return;
+          start(async () => {
+            const result = await deleteLeadAction(id);
+            if (result.ok) {
+              router.refresh();
+            } else {
+              setMsg(result.message);
+            }
+          });
+        }}
+        className={cn(
+          "inline-flex size-7 items-center justify-center rounded-md border text-muted-foreground transition-colors hover:border-[var(--danger-text)] hover:text-[var(--danger-text)]",
+          pending && "opacity-50",
+        )}
+      >
+        <Trash2 className="size-3.5" />
+      </button>
+      {msg ? <span className="text-[11px] text-[var(--danger-text)]">{msg}</span> : null}
+    </div>
+  );
+}
+
 function buildColumns(canEdit: boolean): Column<LeadDirectoryRow>[] {
   return [
     {
@@ -101,6 +137,16 @@ function buildColumns(canEdit: boolean): Column<LeadDirectoryRow>[] {
       sortValue: (r) => r.meetingAt ?? "",
       render: (r) => (r.meetingAt ? formatDateTime(r.meetingAt) : "—"),
     },
+    ...(canEdit
+      ? [
+          {
+            key: "actions",
+            header: "",
+            align: "right" as const,
+            render: (r: LeadDirectoryRow) => <DeleteLeadButton id={r.id} name={r.name} />,
+          },
+        ]
+      : []),
   ];
 }
 

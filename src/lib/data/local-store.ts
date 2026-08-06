@@ -154,7 +154,8 @@ export const localBackend: DataBackend = {
 
   async addLead(lead: Lead) {
     commit((data) => {
-      data.leads = [lead, ...data.leads];
+      // upsert por id: reimportar/recadastrar o mesmo lead atualiza, não duplica
+      data.leads = [lead, ...data.leads.filter((l) => l.id !== lead.id)];
       data.isSeed = false;
     });
   },
@@ -167,6 +168,15 @@ export const localBackend: DataBackend = {
         if (meetingAt !== undefined) lead.meetingAt = meetingAt;
       }
     });
+  },
+
+  async deleteLead(id: string) {
+    const f = file();
+    f.data.leads = f.data.leads.filter((l) => l.id !== id);
+    f.leadEvents = f.leadEvents.filter((e) => e.leadId !== id);
+    f.data.updatedAt = new Date().toISOString();
+    persist(f);
+    cache = f;
   },
 
   async upsertGoal(goal: Goal) {

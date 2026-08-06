@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { addLeadEvent, getData, setLeadStatus } from "@/lib/data/store";
+import { addLeadEvent, deleteLead, getData, setLeadStatus } from "@/lib/data/store";
 import { isBooked } from "@/lib/metrics";
 import { can } from "@/lib/auth/guard";
 import { currentActor, newEventId } from "@/lib/auth/actor";
@@ -12,6 +12,23 @@ import type { LeadStatus } from "@/lib/types";
 export interface StatusResult {
   ok: boolean;
   message: string;
+}
+
+/**
+ * Exclui um lead permanentemente (ex.: entradas de teste que não devem ser
+ * contabilizadas). Remove o lead e seus eventos de auditoria. Não notifica
+ * Meta/GA4 — exclusão é interna.
+ */
+export async function deleteLeadAction(leadId: string): Promise<StatusResult> {
+  if (!(await can("leads:write"))) {
+    return { ok: false, message: "Você não tem permissão para excluir leads." };
+  }
+  const data = await getData();
+  const lead = data.leads.find((l) => l.id === leadId);
+  if (!lead) return { ok: false, message: "Lead não encontrado." };
+  await deleteLead(leadId);
+  revalidatePath("/", "layout");
+  return { ok: true, message: `Lead "${lead.name}" excluído.` };
 }
 
 /**

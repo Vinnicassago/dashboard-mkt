@@ -238,6 +238,12 @@ export const postgresBackend: DataBackend = {
     await touch();
   },
 
+  async deleteLead(id: string) {
+    await run("delete from lead_events where lead_id = $1", [id]);
+    await run("delete from leads where id = $1", [id]);
+    await touch(false);
+  },
+
   async upsertGoal(goal: Goal) {
     await upsertMany("goals", GOAL_COLS, [fromGoal(goal)], ["metric", "period"], ["target", "lower_is_better"]);
   },

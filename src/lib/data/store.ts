@@ -64,6 +64,8 @@ export const addLead = (lead: Lead) => backend().addLead(lead);
 export const setLeadStatus = (id: string, status: LeadStatus, meetingAt?: string) =>
   backend().setLeadStatus(id, status, meetingAt);
 
+export const deleteLead = (id: string) => backend().deleteLead(id);
+
 export const upsertGoal = (goal: Goal) => backend().upsertGoal(goal);
 
 export const bumpLpDaily = (date: string, delta: LpDelta) =>
