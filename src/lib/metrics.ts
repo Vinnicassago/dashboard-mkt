@@ -110,8 +110,10 @@ export const OBJECTIVE_LABEL: Record<ObjectiveBucket, string> = {
   descoberta: "Descoberta",
 };
 
-// Raw Meta objectives (ODAX + legacy) that are about reach/engagement/followers.
+// Valores de reach/engajamento/seguidores — objectives (ODAX/legado) E
+// optimization_goals de conjunto (PROFILE_VISIT, POST_ENGAGEMENT, …).
 const DISCOVERY_OBJECTIVES = new Set([
+  // objectives de campanha
   "OUTCOME_ENGAGEMENT",
   "OUTCOME_AWARENESS",
   "POST_ENGAGEMENT",
@@ -121,10 +123,23 @@ const DISCOVERY_OBJECTIVES = new Set([
   "BRAND_AWARENESS",
   "VIDEO_VIEWS",
   "EVENT_RESPONSES",
+  // optimization_goals de conjunto
+  "PROFILE_VISIT",
+  "PROFILE_AND_PAGE_ENGAGEMENT",
+  "PAGE_ENGAGEMENT",
+  "PAGE_LIKE",
+  "IMPRESSIONS",
+  "AD_RECALL_LIFT",
+  "THRUPLAY",
+  "TWO_SECOND_CONTINUOUS_VIDEO_VIEWS",
+  "ENGAGED_USERS",
+  "SOCIAL_IMPRESSIONS",
 ]);
 
-// Raw Meta objectives that drive an action down-funnel (lead/sale/site visit).
+// Valores que empurram uma ação de fundo de funil (lead/venda/visita ao site) —
+// objectives de campanha E optimization_goals de conjunto.
 const CONVERSION_OBJECTIVES = new Set([
+  // objectives de campanha
   "OUTCOME_LEADS",
   "OUTCOME_SALES",
   "OUTCOME_TRAFFIC", // envia para a LP no nosso funil → conversão (mude aqui se usar tráfego p/ perfil)
@@ -136,6 +151,17 @@ const CONVERSION_OBJECTIVES = new Set([
   "TRAFFIC",
   "PRODUCT_CATALOG_SALES",
   "STORE_VISITS",
+  // optimization_goals de conjunto
+  "OFFSITE_CONVERSIONS",
+  "QUALITY_LEAD",
+  "QUALITY_CALL",
+  "LEAD",
+  "LANDING_PAGE_VIEWS",
+  "VALUE",
+  "PURCHASE",
+  "COMPLETE_REGISTRATION",
+  "CONVERSATIONS",
+  "DERIVED_EVENTS",
 ]);
 
 /**
@@ -149,8 +175,9 @@ export function objectiveBucket(raw?: string | null): ObjectiveBucket {
   const key = raw.trim().toUpperCase();
   if (DISCOVERY_OBJECTIVES.has(key)) return "descoberta";
   if (CONVERSION_OBJECTIVES.has(key)) return "conversao";
-  // Fallback por palavra-chave para objetivos ainda não catalogados.
-  if (/ENGAGEMENT|AWARENESS|REACH|VIDEO|PROFILE|LIKE|FOLLOW/.test(key)) return "descoberta";
+  // Fallback por palavra-chave para objetivos/metas ainda não catalogados.
+  if (/ENGAGEMENT|AWARENESS|REACH|VIDEO|PROFILE|LIKE|FOLLOW|THRUPLAY|IMPRESSION/.test(key))
+    return "descoberta";
   return "conversao";
 }
 

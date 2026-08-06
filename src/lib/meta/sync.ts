@@ -43,7 +43,9 @@ export async function runSync({
         const r = await syncAds({ days: days ?? 30 });
         report.ads = {
           ok: true,
-          detail: `${r.rows} linha(s) e ${r.creatives} criativo(s) de ${r.since} a ${r.until}`,
+          detail:
+            `${r.rows} linha(s) e ${r.creatives} criativo(s) de ${r.since} a ${r.until}` +
+            (r.objectives.length ? ` · objetivos: ${r.objectives.join(", ")}` : " · objetivos: (nenhum retornado)"),
         };
         await setState(STATE_KEYS.lastSyncAds, ranAt);
       } catch (e) {

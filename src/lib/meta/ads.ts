@@ -20,6 +20,7 @@ interface InsightRow {
   date_start: string;
   ad_id?: string;
   ad_name?: string;
+  adset_id?: string;
   adset_name?: string;
   campaign_name?: string;
   objective?: string; // objetivo (efetivo) da campanha, ex. OUTCOME_LEADS
@@ -105,6 +106,49 @@ const FORMAT_BY_OBJECT_TYPE: Record<string, CreativeFormat> = {
   STATUS: "imagem",
 };
 
+interface AdsetMetaRow {
+  id: string;
+  name?: string;
+  optimization_goal?: string;
+  campaign?: { objective?: string };
+}
+
+/**
+ * `optimization_goal` (nível conjunto) + `objective` da campanha, por conjunto.
+ *
+ * Fonte CONFIÁVEL do objetivo: o campo `objective` do endpoint de insights vem
+ * VAZIO com frequência para posts impulsionados e campanhas de "visitas ao
+ * perfil", o que jogaria tudo no balde default (conversão). O optimization_goal
+ * (ex. PROFILE_VISIT, POST_ENGAGEMENT, LEAD_GENERATION, OFFSITE_CONVERSIONS) está
+ * sempre presente e diz a intenção real do conjunto.
+ */
+async function fetchAdsetMeta(account: string, token: string) {
+  const url = graphUrl(GRAPH_FB, `/${account}/adsets`, {
+    fields: "id,name,optimization_goal,campaign{objective}",
+    limit: 500,
+    access_token: token,
+  });
+  try {
+    const rows: AdsetMetaRow[] = [];
+    let next: string | undefined = url;
+    let guard = 0;
+    while (next && guard++ < 50) {
+      const page: Paged<AdsetMetaRow> = await metaGet<Paged<AdsetMetaRow>>(next);
+      rows.push(...(page.data ?? []));
+      next = page.paging?.next;
+    }
+    return new Map(
+      rows.map((r) => [
+        r.id,
+        { optimizationGoal: r.optimization_goal, campaignObjective: r.campaign?.objective },
+      ]),
+    );
+  } catch {
+    // objetivo é enriquecimento — nunca derrubar o sync inteiro por isso
+    return new Map<string, { optimizationGoal?: string; campaignObjective?: string }>();
+  }
+}
+
 /** Thumbnails + format per ad (one extra call, not per-ad). */
 async function fetchAdCreatives(account: string, token: string) {
   const url = graphUrl(GRAPH_FB, `/${account}/ads`, {
@@ -135,6 +179,8 @@ export interface AdsSyncResult {
   creatives: number;
   since: string;
   until: string;
+  /** valores de objetivo/optimization_goal crus vistos (diagnóstico). */
+  objectives: string[];
 }
 
 /** Pull the last `days` days of ad performance and store it. */
@@ -158,6 +204,7 @@ export async function syncAds({ days = 30 }: { days?: number } = {}): Promise<Ad
       "date_start",
       "ad_id",
       "ad_name",
+      "adset_id",
       "adset_name",
       "campaign_name",
       "objective",
@@ -177,21 +224,30 @@ export async function syncAds({ days = 30 }: { days?: number } = {}): Promise<Ad
 
   const raw = await fetchAllPages(url);
   const meta = await fetchAdCreatives(account, token);
+  const adsetMeta = await fetchAdsetMeta(account, token);
 
   const adRows: AdDaily[] = [];
   const creativeAcc = new Map<string, Creative>();
+  const objectivesSeen = new Set<string>();
 
   for (const r of raw) {
     const adId = r.ad_id ?? r.ad_name ?? "sem-id";
     const impressions = num(r.impressions);
     const reach = num(r.reach);
 
+    // Precedência: optimization_goal (mais confiável) → objetivo da campanha →
+    // objective do insights (pode vir vazio p/ post impulsionado).
+    const am = r.adset_id ? adsetMeta.get(r.adset_id) : undefined;
+    const objective =
+      am?.optimizationGoal || am?.campaignObjective || r.objective || undefined;
+    if (objective) objectivesSeen.add(objective);
+
     adRows.push({
       date: r.date_start.slice(0, 10),
       campaign: r.campaign_name ?? "",
       adset: r.adset_name ?? "",
       adId,
-      objective: r.objective || undefined,
+      objective,
       spend: num(r.spend),
       impressions,
       reach,
@@ -219,5 +275,11 @@ export async function syncAds({ days = 30 }: { days?: number } = {}): Promise<Ad
   await upsertAdDaily(adRows);
   await upsertCreatives(creatives);
 
-  return { rows: adRows.length, creatives: creatives.length, since, until };
+  return {
+    rows: adRows.length,
+    creatives: creatives.length,
+    since,
+    until,
+    objectives: [...objectivesSeen].sort(),
+  };
 }
