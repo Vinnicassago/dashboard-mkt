@@ -11,6 +11,7 @@ import {
   upsertIgAccountDaily,
 } from "@/lib/data/store";
 import { parseAdsCsv } from "@/lib/csv";
+import { parseLeadsCsv } from "@/lib/leads-csv";
 import { runSync, type SyncSource } from "@/lib/meta/sync";
 import { can } from "@/lib/auth/guard";
 import { currentActor, newEventId } from "@/lib/auth/actor";
@@ -50,6 +51,42 @@ export async function importAdsCsv(
     return { ok: true, message: `${rows.length} linha(s) importada(s) com sucesso${extra}.` };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : "Falha ao importar o CSV." };
+  }
+}
+
+export async function importLeadsCsv(
+  _prev: ActionState | null,
+  formData: FormData,
+): Promise<ActionState> {
+  if (!(await can("leads:write"))) return DENIED;
+  const file = formData.get("file");
+  if (!(file instanceof File) || file.size === 0) {
+    return { ok: false, message: "Selecione um arquivo CSV de leads." };
+  }
+  try {
+    const text = await file.text();
+    const { leads, skipped } = parseLeadsCsv(text);
+    const actor = await currentActor();
+    for (const lead of leads) {
+      await addLead(lead);
+      await addLeadEvent({
+        id: newEventId(),
+        leadId: lead.id,
+        leadName: lead.name,
+        actor,
+        action: "created",
+        toStatus: lead.status,
+        createdAt: lead.createdAt,
+      });
+    }
+    revalidateAll();
+    const extra = skipped > 0 ? ` (${skipped} linha(s) ignorada(s))` : "";
+    return {
+      ok: true,
+      message: `${leads.length} lead(s) importado(s)${extra}. Reimportar atualiza pelo mesmo id, sem duplicar.`,
+    };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "Falha ao importar os leads." };
   }
 }
 

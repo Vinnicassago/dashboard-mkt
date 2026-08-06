@@ -1,8 +1,9 @@
-import { Camera, Database, FileSpreadsheet, Plug, Target, UserPlus, Users } from "lucide-react";
+import { Camera, Database, FileSpreadsheet, Plug, Target, UserPlus, Users, UsersRound } from "lucide-react";
 import {
   GoalsForm,
   ImportForm,
   LeadForm,
+  LeadsImportForm,
   ManualIgForm,
   ResetButton,
   SyncPanel,
@@ -12,6 +13,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { activeBackend, getData, listUsers } from "@/lib/data/store";
 import { ADS_CSV_TEMPLATE } from "@/lib/csv";
+import { LEADS_CSV_TEMPLATE } from "@/lib/leads-csv";
 import { integrationStatus } from "@/lib/meta/config";
 import { getLastSync } from "@/lib/meta/sync";
 import { isAuthEnabled } from "@/lib/auth/config";
@@ -198,6 +200,32 @@ export default async function ConfigPage() {
           </CardHeader>
           <CardContent>
             <LeadForm creatives={creatives} />
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {/* Importar leads (CSV do rastreamento da LP) — admin/comercial */}
+      {canLeads ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <UsersRound className="size-4 text-primary" />
+              Importar leads (CSV / planilha)
+            </CardTitle>
+            <CardDescription>
+              Backfill dos leads que a landing page registrou antes do rastreio estar
+              ligado. Exporte a planilha como CSV (UTF-8) e envie. Os leads são
+              mesclados pelo <code className="font-mono">event_id</code> — reimportar
+              atualiza, não duplica, e um lead já capturado ao vivo vira a mesma linha.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <LeadsImportForm template={LEADS_CSV_TEMPLATE} />
+            <p className="text-xs text-muted-foreground">
+              Colunas reconhecidas: created_at, event_id, Status, nome, whatsapp,
+              email, utm_source, utm_campaign, utm_content, fbp, fbc. Status vazio
+              entra como &quot;lead&quot;.
+            </p>
           </CardContent>
         </Card>
       ) : null}

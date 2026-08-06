@@ -43,3 +43,8 @@ next-env.d.ts
 
 # local JSON store (MVP data before Supabase)
 /.localdata/
+
+# planilhas / exports de leads com PII — nunca versionar (LGPD)
+*.xlsx
+*.xls
+/Krone_Leads_import.csv

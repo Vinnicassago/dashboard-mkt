@@ -8,6 +8,7 @@ import {
   addLeadAction,
   addManualIgDay,
   importAdsCsv,
+  importLeadsCsv,
   resetSeedAction,
   resyncAdsCleanAction,
   setGoalsAction,
@@ -85,6 +86,48 @@ export function ImportForm({ template }: { template: string }) {
         <SubmitButton>
           <Upload className="size-4" />
           Importar CSV
+        </SubmitButton>
+        <button
+          type="button"
+          onClick={downloadTemplate}
+          className="inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-medium text-muted-foreground hover:text-foreground"
+        >
+          <Download className="size-4" />
+          Baixar modelo
+        </button>
+      </div>
+      <Message state={state} />
+    </form>
+  );
+}
+
+// ---- leads import ---------------------------------------------------
+
+export function LeadsImportForm({ template }: { template: string }) {
+  const [state, action] = useActionState(importLeadsCsv, null);
+
+  function downloadTemplate() {
+    const blob = new Blob([template], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "modelo-leads.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <form action={action} className="space-y-3">
+      <input
+        type="file"
+        name="file"
+        accept=".csv,text/csv"
+        className="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-primary/10 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary"
+      />
+      <div className="flex flex-wrap items-center gap-2">
+        <SubmitButton>
+          <Upload className="size-4" />
+          Importar leads
         </SubmitButton>
         <button
           type="button"
