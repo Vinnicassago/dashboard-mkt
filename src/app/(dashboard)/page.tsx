@@ -1,6 +1,7 @@
 import { DollarSign, CalendarCheck, Target, UserPlus, Sparkles } from "lucide-react";
 import { ExampleBanner } from "@/components/example-banner";
 import { KpiCard, type KpiDelta } from "@/components/kpi/kpi-card";
+import { ObjectiveSplitBar } from "@/components/kpi/objective-split";
 import { GoalBar } from "@/components/kpi/goal-bar";
 import { FunnelChart } from "@/components/charts/funnel-chart";
 import { TimeSeriesChart } from "@/components/charts/time-series-chart";
@@ -94,7 +95,7 @@ export default async function OverviewPage({
           hint={hint}
         />
         <KpiCard
-          label="CPL"
+          label={k.hasDiscovery ? "CPL · conversão" : "CPL"}
           value={formatCurrency(k.cpl)}
           Icon={Target}
           delta={makeDelta(k.cpl, prev?.cpl, false)}
@@ -117,6 +118,23 @@ export default async function OverviewPage({
           highlight
         />
       </div>
+
+      {/* Orçamento por objetivo — só aparece quando há gasto de descoberta */}
+      {k.hasDiscovery ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Orçamento por objetivo</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <ObjectiveSplitBar conversao={k.spendConversao} descoberta={k.spendDescoberta} />
+            <p className="text-xs text-muted-foreground">
+              CPL e Custo por reunião acima usam só o orçamento de conversão. Com a descoberta
+              incluída (blended): CPL {formatCurrency(k.cplBlended)} · Custo por reunião{" "}
+              {formatCurrency(k.cprBlended)}.
+            </p>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {/* Funnel */}
       <ChartCard

@@ -94,6 +94,170 @@ export function adKpis(rows: AdDaily[]): AdKpis {
   };
 }
 
+// ---- objective classification (conversão vs descoberta) ------------
+
+/**
+ * Two budget buckets, by ad objective:
+ *   `conversao`  — ads meant to generate leads/meetings (feed CPL/CPR).
+ *   `descoberta` — ads meant for reach/engagement/followers (profile growth).
+ * Everything here is pure: the raw Meta `objective` string lives on AdDaily and
+ * is classified on the fly, so retuning the taxonomy never needs a re-migration.
+ */
+export type ObjectiveBucket = "conversao" | "descoberta";
+
+export const OBJECTIVE_LABEL: Record<ObjectiveBucket, string> = {
+  conversao: "Conversão",
+  descoberta: "Descoberta",
+};
+
+// Raw Meta objectives (ODAX + legacy) that are about reach/engagement/followers.
+const DISCOVERY_OBJECTIVES = new Set([
+  "OUTCOME_ENGAGEMENT",
+  "OUTCOME_AWARENESS",
+  "POST_ENGAGEMENT",
+  "PAGE_LIKES",
+  "PROFILE_VISITS",
+  "REACH",
+  "BRAND_AWARENESS",
+  "VIDEO_VIEWS",
+  "EVENT_RESPONSES",
+]);
+
+// Raw Meta objectives that drive an action down-funnel (lead/sale/site visit).
+const CONVERSION_OBJECTIVES = new Set([
+  "OUTCOME_LEADS",
+  "OUTCOME_SALES",
+  "OUTCOME_TRAFFIC", // envia para a LP no nosso funil → conversão (mude aqui se usar tráfego p/ perfil)
+  "OUTCOME_APP_PROMOTION",
+  "LEAD_GENERATION",
+  "CONVERSIONS",
+  "MESSAGES",
+  "LINK_CLICKS",
+  "TRAFFIC",
+  "PRODUCT_CATALOG_SALES",
+  "STORE_VISITS",
+]);
+
+/**
+ * Classify a raw Meta objective into a budget bucket. Missing objective (legacy
+ * rows, CSV sem a coluna) cai em "conversao" para preservar o CPL/CPR histórico
+ * até um re-sync popular o campo — anúncios de descoberta só saem do denominador
+ * depois de reconhecidos.
+ */
+export function objectiveBucket(raw?: string | null): ObjectiveBucket {
+  if (!raw) return "conversao";
+  const key = raw.trim().toUpperCase();
+  if (DISCOVERY_OBJECTIVES.has(key)) return "descoberta";
+  if (CONVERSION_OBJECTIVES.has(key)) return "conversao";
+  // Fallback por palavra-chave para objetivos ainda não catalogados.
+  if (/ENGAGEMENT|AWARENESS|REACH|VIDEO|PROFILE|LIKE|FOLLOW/.test(key)) return "descoberta";
+  return "conversao";
+}
+
+export const bucketOfAd = (row: AdDaily): ObjectiveBucket => objectiveBucket(row.objective);
+
+export interface ObjectiveKpis {
+  bucket: ObjectiveBucket;
+  spend: number;
+  impressions: number;
+  reach: number;
+  clicks: number;
+  leads: number; // leads atribuídos (via utmContent) a anúncios deste balde
+  meetings: number; // reuniões atribuídas a este balde
+  ctr: number;
+  cpm: number; // spend / impressions * 1000
+  costPerReach: number; // spend / reach * 1000 (custo por mil alcançados)
+  cpl: number; // spend / leads
+  cpr: number; // spend / meetings
+}
+
+function emptyObjectiveKpis(bucket: ObjectiveBucket): ObjectiveKpis {
+  return {
+    bucket,
+    spend: 0,
+    impressions: 0,
+    reach: 0,
+    clicks: 0,
+    leads: 0,
+    meetings: 0,
+    ctr: 0,
+    cpm: 0,
+    costPerReach: 0,
+    cpl: 0,
+    cpr: 0,
+  };
+}
+
+export interface ObjectiveBreakdown {
+  conversao: ObjectiveKpis;
+  descoberta: ObjectiveKpis;
+  totalSpend: number;
+  conversaoShare: number; // 0–1 do gasto
+  descobertaShare: number; // 0–1 do gasto
+  hasDiscovery: boolean; // há gasto de descoberta no período?
+  /** seguidores líquidos ganhos no período (conta inteira: orgânico + pago) */
+  netNewFollowers: number;
+  /** custo por seguidor ESTIMADO = gasto em descoberta ÷ seguidores líquidos.
+   *  Estimativa: a Meta não atribui seguidores por anúncio; o crescimento é da
+   *  conta (orgânico + pago). Serve como eficiência de topo, não atribuição exata. */
+  costPerFollowerEst: number;
+}
+
+/**
+ * Split ad spend + attributed leads/meetings by objective bucket, and pair the
+ * discovery bucket with the account-level follower gain for an estimated
+ * cost-per-follower. This is the faithful budget view: conversion CPL/CPR no
+ * longer carry the discovery budget.
+ */
+export function objectiveBreakdown(data: DashboardData, range?: DateRange): ObjectiveBreakdown {
+  const ads = filterAds(data.adDaily, range);
+  const leads = filterLeads(data.leads, range);
+
+  // ad → bucket (o objetivo de um anúncio é estável; usa a primeira linha vista)
+  const adBucket = new Map<string, ObjectiveBucket>();
+  for (const r of ads) {
+    if (!adBucket.has(r.adId)) adBucket.set(r.adId, bucketOfAd(r));
+  }
+
+  const acc: Record<ObjectiveBucket, ObjectiveKpis> = {
+    conversao: emptyObjectiveKpis("conversao"),
+    descoberta: emptyObjectiveKpis("descoberta"),
+  };
+  for (const r of ads) {
+    const a = acc[bucketOfAd(r)];
+    a.spend += r.spend;
+    a.impressions += r.impressions;
+    a.reach += r.reach;
+    a.clicks += r.clicks;
+  }
+  for (const l of leads) {
+    const b = (l.utmContent && adBucket.get(l.utmContent)) || "conversao";
+    acc[b].leads += 1;
+    if (isBooked(l)) acc[b].meetings += 1;
+  }
+  for (const b of ["conversao", "descoberta"] as ObjectiveBucket[]) {
+    const a = acc[b];
+    a.ctr = div(a.clicks, a.impressions);
+    a.cpm = div(a.spend, a.impressions) * 1000;
+    a.costPerReach = div(a.spend, a.reach) * 1000;
+    a.cpl = div(a.spend, a.leads);
+    a.cpr = div(a.spend, a.meetings);
+  }
+
+  const totalSpend = acc.conversao.spend + acc.descoberta.spend;
+  const netNewFollowers = igAccountTotals(data.igAccountDaily, range).netNew;
+  return {
+    conversao: acc.conversao,
+    descoberta: acc.descoberta,
+    totalSpend,
+    conversaoShare: div(acc.conversao.spend, totalSpend),
+    descobertaShare: div(acc.descoberta.spend, totalSpend),
+    hasDiscovery: acc.descoberta.spend > 0,
+    netNewFollowers,
+    costPerFollowerEst: div(acc.descoberta.spend, netNewFollowers),
+  };
+}
+
 // ---- meetings (from the leads list) --------------------------------
 
 export function isBooked(l: Lead): boolean {
@@ -143,17 +307,22 @@ export function buildFunnel(data: DashboardData, range?: DateRange): FunnelStage
 // ---- headline KPI bundle for the overview --------------------------
 
 export interface OverviewKpis {
-  spend: number;
+  spend: number; // investimento total (blended) — todos os objetivos
+  spendConversao: number; // parcela de conversão
+  spendDescoberta: number; // parcela de descoberta
   leads: number;
-  cpl: number;
+  cpl: number; // FIEL: gasto de conversão ÷ leads de conversão
+  cplBlended: number; // gasto total ÷ leads (legado, para referência)
   meetings: number;
   attended: number;
-  cpr: number;
+  cpr: number; // FIEL (North Star): gasto de conversão ÷ reuniões de conversão
+  cprBlended: number; // gasto total ÷ reuniões (legado, para referência)
   ctr: number;
   clicks: number;
   impressions: number;
   leadToMeeting: number; // ratio
   showRate: number; // compareceu / booked
+  hasDiscovery: boolean; // há orçamento de descoberta no período?
 }
 
 export function overviewKpis(data: DashboardData, range?: DateRange): OverviewKpis {
@@ -162,18 +331,24 @@ export function overviewKpis(data: DashboardData, range?: DateRange): OverviewKp
   const k = adKpis(ads);
   const meetings = countMeetings(leads);
   const attended = countAttended(leads);
+  const obj = objectiveBreakdown(data, range);
   return {
     spend: k.spend,
+    spendConversao: obj.conversao.spend,
+    spendDescoberta: obj.descoberta.spend,
     leads: leads.length,
-    cpl: div(k.spend, leads.length),
+    cpl: obj.conversao.cpl,
+    cplBlended: div(k.spend, leads.length),
     meetings,
     attended,
-    cpr: cpr(k.spend, meetings),
+    cpr: obj.conversao.cpr,
+    cprBlended: cpr(k.spend, meetings),
     ctr: k.ctr,
     clicks: k.clicks,
     impressions: k.impressions,
     leadToMeeting: div(meetings, leads.length),
     showRate: div(attended, meetings),
+    hasDiscovery: obj.hasDiscovery,
   };
 }
 
@@ -303,12 +478,24 @@ export function creativePerformance(
 
 export interface GroupPerf {
   key: string;
+  bucket: ObjectiveBucket; // balde dominante (por gasto) do grupo
   spend: number;
   impressions: number;
   clicks: number;
   leads: number;
   ctr: number;
   cpl: number;
+}
+
+/** Balde de objetivo dominante (por gasto) de um conjunto de linhas. */
+function dominantBucket(rows: AdDaily[]): ObjectiveBucket {
+  let conv = 0;
+  let disc = 0;
+  for (const r of rows) {
+    if (bucketOfAd(r) === "descoberta") disc += r.spend;
+    else conv += r.spend;
+  }
+  return disc > conv ? "descoberta" : "conversao";
 }
 
 export function groupBy(
@@ -327,6 +514,7 @@ export function groupBy(
       const k = adKpis(list);
       return {
         key,
+        bucket: dominantBucket(list),
         spend: k.spend,
         impressions: k.impressions,
         clicks: k.clicks,

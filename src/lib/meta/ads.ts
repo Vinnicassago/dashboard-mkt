@@ -22,6 +22,7 @@ interface InsightRow {
   ad_name?: string;
   adset_name?: string;
   campaign_name?: string;
+  objective?: string; // objetivo (efetivo) da campanha, ex. OUTCOME_LEADS
   spend?: string;
   impressions?: string;
   reach?: string;
@@ -159,6 +160,7 @@ export async function syncAds({ days = 30 }: { days?: number } = {}): Promise<Ad
       "ad_name",
       "adset_name",
       "campaign_name",
+      "objective",
       "spend",
       "impressions",
       "reach",
@@ -189,6 +191,7 @@ export async function syncAds({ days = 30 }: { days?: number } = {}): Promise<Ad
       campaign: r.campaign_name ?? "",
       adset: r.adset_name ?? "",
       adId,
+      objective: r.objective || undefined,
       spend: num(r.spend),
       impressions,
       reach,

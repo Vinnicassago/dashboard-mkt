@@ -61,6 +61,7 @@ interface CreativeDef {
   name: string;
   format: CreativeFormat;
   adset: string;
+  objective: string; // objetivo cru da Meta (OUTCOME_LEADS, OUTCOME_ENGAGEMENT, …)
   startDay: number; // index within the date range
   weight: number; // share of daily budget
   cpm: number; // base cost per 1000 impressions (BRL)
@@ -69,12 +70,16 @@ interface CreativeDef {
 }
 
 const CREATIVE_DEFS: CreativeDef[] = [
-  { adId: "AD-01", name: 'Vídeo — "Cansado de financiar?"', format: "video", adset: "Público Frio — Interesses", startDay: 0, weight: 1.2, cpm: 22, ctr: 0.019, conv: 0.04 },
-  { adId: "AD-02", name: "Carrossel — Consórcio x Financiamento", format: "carrossel", adset: "Público Frio — Interesses", startDay: 0, weight: 1.0, cpm: 20, ctr: 0.014, conv: 0.034 },
-  { adId: "AD-03", name: "Imagem — Prova social (cliente real)", format: "imagem", adset: "Público Frio — Interesses", startDay: 0, weight: 0.8, cpm: 18, ctr: 0.0098, conv: 0.026 },
-  { adId: "AD-04", name: "Vídeo — Head explica em 30s", format: "video", adset: "Público Frio — Interesses", startDay: 3, weight: 1.1, cpm: 24, ctr: 0.021, conv: 0.045 },
-  { adId: "AD-05", name: "Carrossel — 5 mitos do consórcio", format: "carrossel", adset: "Lookalike 1% — Compradores", startDay: 6, weight: 0.9, cpm: 21, ctr: 0.0132, conv: 0.031 },
-  { adId: "AD-06", name: 'Imagem — "Agende sua reunião"', format: "imagem", adset: "Lookalike 1% — Compradores", startDay: 9, weight: 0.7, cpm: 19, ctr: 0.0082, conv: 0.048 },
+  // Conversão — geração de leads
+  { adId: "AD-01", name: 'Vídeo — "Cansado de financiar?"', format: "video", adset: "Público Frio — Interesses", objective: "OUTCOME_LEADS", startDay: 0, weight: 1.2, cpm: 22, ctr: 0.019, conv: 0.04 },
+  { adId: "AD-02", name: "Carrossel — Consórcio x Financiamento", format: "carrossel", adset: "Público Frio — Interesses", objective: "OUTCOME_LEADS", startDay: 0, weight: 1.0, cpm: 20, ctr: 0.014, conv: 0.034 },
+  { adId: "AD-03", name: "Imagem — Prova social (cliente real)", format: "imagem", adset: "Público Frio — Interesses", objective: "OUTCOME_LEADS", startDay: 0, weight: 0.8, cpm: 18, ctr: 0.0098, conv: 0.026 },
+  { adId: "AD-04", name: "Vídeo — Head explica em 30s", format: "video", adset: "Público Frio — Interesses", objective: "OUTCOME_LEADS", startDay: 3, weight: 1.1, cpm: 24, ctr: 0.021, conv: 0.045 },
+  { adId: "AD-05", name: "Carrossel — 5 mitos do consórcio", format: "carrossel", adset: "Lookalike 1% — Compradores", objective: "OUTCOME_LEADS", startDay: 6, weight: 0.9, cpm: 21, ctr: 0.0132, conv: 0.031 },
+  { adId: "AD-06", name: 'Imagem — "Agende sua reunião"', format: "imagem", adset: "Lookalike 1% — Compradores", objective: "OUTCOME_LEADS", startDay: 9, weight: 0.7, cpm: 19, ctr: 0.0082, conv: 0.048 },
+  // Descoberta — alcance/engajamento p/ ganho de seguidores (CPM baixo, quase sem lead)
+  { adId: "AD-07", name: "Reel — Bastidores do escritório", format: "video", adset: "Descoberta — Seguidores", objective: "OUTCOME_ENGAGEMENT", startDay: 2, weight: 0.9, cpm: 9, ctr: 0.004, conv: 0 },
+  { adId: "AD-08", name: "Reel — Dica rápida de consórcio", format: "video", adset: "Descoberta — Alcance", objective: "OUTCOME_AWARENESS", startDay: 5, weight: 0.8, cpm: 8, ctr: 0.003, conv: 0 },
 ];
 
 const FIRST_NAMES = [
@@ -160,6 +165,7 @@ function buildSeedData(): DashboardData {
         campaign: campaign.name,
         adset: c.adset,
         adId: c.adId,
+        objective: c.objective,
         spend: Math.round(spend * 100) / 100,
         impressions,
         reach,

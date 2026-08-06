@@ -60,6 +60,7 @@ create table if not exists ad_daily (
   ad_id text not null,
   campaign text not null default '',
   adset text not null default '',
+  objective text,
   spend numeric not null default 0,
   impressions integer not null default 0,
   reach integer not null default 0,
@@ -138,4 +139,5 @@ alter table ig_account_daily add column if not exists profile_views integer not 
 alter table ig_posts add column if not exists total_watch_time numeric;
 alter table ig_account_daily add column if not exists reach_followers integer;
 alter table ig_account_daily add column if not exists reach_non_followers integer;
+alter table ad_daily add column if not exists objective text;
 `;

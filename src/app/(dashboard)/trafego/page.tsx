@@ -3,10 +3,13 @@ import {
   Eye,
   MousePointerClick,
   Percent,
+  Radio,
   Target,
+  UserPlus,
   Users,
 } from "lucide-react";
 import { KpiCard } from "@/components/kpi/kpi-card";
+import { ObjectiveSplitBar } from "@/components/kpi/objective-split";
 import { TimeSeriesChart } from "@/components/charts/time-series-chart";
 import { ChartCard } from "@/components/ui/chart-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,7 +17,14 @@ import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { CHART } from "@/components/charts/colors";
 import { getData } from "@/lib/data/store";
 import { pageRange } from "@/lib/page-range";
-import { adKpis, dailySeries, filterAds, groupBy } from "@/lib/metrics";
+import {
+  adKpis,
+  dailySeries,
+  filterAds,
+  groupBy,
+  objectiveBreakdown,
+  OBJECTIVE_LABEL,
+} from "@/lib/metrics";
 import {
   formatCurrency,
   formatCurrency0,
@@ -22,6 +32,32 @@ import {
   formatInt,
   formatPercent,
 } from "@/lib/format";
+import { cn } from "@/lib/utils";
+
+/** Uma linha rótulo → valor dentro das colunas por objetivo. */
+function Stat({
+  label,
+  value,
+  highlight,
+}: {
+  label: string;
+  value: string;
+  highlight?: boolean;
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <span className="text-sm text-muted-foreground">{label}</span>
+      <span className={cn("tabular text-sm font-medium", highlight && "text-primary")}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+const BUCKET_DOT: Record<"conversao" | "descoberta", string> = {
+  conversao: CHART.series[0],
+  descoberta: CHART.series[1],
+};
 
 export default async function TrafegoPage({
   searchParams,
@@ -35,6 +71,7 @@ export default async function TrafegoPage({
   const k = adKpis(ads);
   const series = dailySeries(data, range);
   const byAdset = groupBy(ads, (r) => r.adset);
+  const obj = objectiveBreakdown(data, range);
 
   const spentAllTime = data.adDaily.reduce((s, r) => s + r.spend, 0);
   const budget = data.campaign.budgetTotal;
@@ -48,8 +85,77 @@ export default async function TrafegoPage({
         <KpiCard label="Alcance" value={formatInt(k.reach)} Icon={Users} />
         <KpiCard label="Cliques" value={formatInt(k.clicks)} Icon={MousePointerClick} />
         <KpiCard label="CTR" value={formatPercent(k.ctr)} Icon={Percent} />
-        <KpiCard label="CPL" value={formatCurrency(k.cpl)} Icon={Target} />
+        <KpiCard
+          label="CPL"
+          value={formatCurrency(obj.conversao.cpl)}
+          Icon={Target}
+          hint={obj.hasDiscovery ? "só conversão" : undefined}
+        />
       </div>
+
+      {/* Orçamento por objetivo — a separação Conversão × Descoberta */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Orçamento por objetivo</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <ObjectiveSplitBar
+            conversao={obj.conversao.spend}
+            descoberta={obj.descoberta.spend}
+          />
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            {/* Conversão */}
+            <div className="space-y-2 rounded-lg border p-4">
+              <div className="flex items-center gap-2">
+                <UserPlus className="size-4 text-primary" />
+                <p className="font-medium">Conversão — geração de leads</p>
+              </div>
+              <Stat label="Investimento" value={formatCurrency0(obj.conversao.spend)} />
+              <Stat label="Leads" value={formatInt(obj.conversao.leads)} />
+              <Stat label="CPL" value={formatCurrency(obj.conversao.cpl)} highlight />
+              <Stat label="Reuniões" value={formatInt(obj.conversao.meetings)} />
+              <Stat label="Custo por reunião" value={formatCurrency(obj.conversao.cpr)} highlight />
+            </div>
+
+            {/* Descoberta */}
+            <div className="space-y-2 rounded-lg border p-4">
+              <div className="flex items-center gap-2">
+                <Radio className="size-4 text-muted-foreground" />
+                <p className="font-medium">Descoberta — alcance &amp; seguidores</p>
+              </div>
+              {obj.hasDiscovery ? (
+                <>
+                  <Stat label="Investimento" value={formatCurrency0(obj.descoberta.spend)} />
+                  <Stat label="Alcance" value={formatInt(obj.descoberta.reach)} />
+                  <Stat label="CPM" value={formatCurrency(obj.descoberta.cpm)} />
+                  <Stat
+                    label="Custo / mil alcançados"
+                    value={formatCurrency(obj.descoberta.costPerReach)}
+                  />
+                  <Stat
+                    label="Seguidores no período"
+                    value={`+${formatInt(obj.netNewFollowers)}`}
+                  />
+                  <Stat
+                    label="Custo / seguidor (est.)"
+                    value={formatCurrency(obj.costPerFollowerEst)}
+                    highlight
+                  />
+                  <p className="pt-1 text-xs text-muted-foreground">
+                    Estimativa: seguidores são da conta (orgânico + pago); a Meta não atribui
+                    seguidores por anúncio.
+                  </p>
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Nenhum anúncio de descoberta no período. Todo o orçamento foi para conversão.
+                </p>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Budget pacing */}
       <Card>
@@ -104,6 +210,7 @@ export default async function TrafegoPage({
             <THead>
               <TR className="hover:bg-transparent">
                 <TH>Conjunto</TH>
+                <TH>Objetivo</TH>
                 <TH className="text-right">Gasto</TH>
                 <TH className="text-right">Impressões</TH>
                 <TH className="text-right">Cliques</TH>
@@ -116,12 +223,23 @@ export default async function TrafegoPage({
               {byAdset.map((g) => (
                 <TR key={g.key}>
                   <TD className="font-medium">{g.key}</TD>
+                  <TD>
+                    <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
+                      <span
+                        className="size-2 shrink-0 rounded-full"
+                        style={{ background: BUCKET_DOT[g.bucket] }}
+                      />
+                      {OBJECTIVE_LABEL[g.bucket]}
+                    </span>
+                  </TD>
                   <TD className="text-right tabular">{formatCurrency0(g.spend)}</TD>
                   <TD className="text-right tabular">{formatInt(g.impressions)}</TD>
                   <TD className="text-right tabular">{formatInt(g.clicks)}</TD>
                   <TD className="text-right tabular">{formatPercent(g.ctr)}</TD>
                   <TD className="text-right tabular">{formatInt(g.leads)}</TD>
-                  <TD className="text-right tabular">{formatCurrency(g.cpl)}</TD>
+                  <TD className="text-right tabular">
+                    {g.bucket === "conversao" ? formatCurrency(g.cpl) : "—"}
+                  </TD>
                 </TR>
               ))}
             </TBody>

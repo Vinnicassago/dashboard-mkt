@@ -42,6 +42,7 @@ const FIELDS = {
   adName: ["nome do anuncio", "ad name", "anuncio"],
   adset: ["nome do conjunto de anuncios", "ad set name", "conjunto de anuncios", "ad set"],
   campaign: ["nome da campanha", "campaign name", "campanha"],
+  objective: ["objetivo", "objective", "objetivo da campanha", "campaign objective"],
   spend: ["valor gasto", "valor usado", "amount spent", "spend", "valor gasto (brl)", "valor usado (brl)"],
   impressions: ["impressoes", "impressions"],
   reach: ["alcance", "reach"],
@@ -108,11 +109,13 @@ export function parseAdsCsv(text: string): ParseResult {
     const adId = (map.adId ? r[map.adId] : undefined) || adName || "sem-id";
     const impressions = map.impressions ? parseNum(r[map.impressions]) : 0;
     const reach = map.reach ? parseNum(r[map.reach]) : 0;
+    const objective = map.objective ? r[map.objective]?.trim() : undefined;
     rows.push({
       date,
       campaign: (map.campaign ? r[map.campaign] : "") || "Campanha importada",
       adset: (map.adset ? r[map.adset] : "") || "—",
       adId: String(adId).trim(),
+      objective: objective || undefined,
       spend: map.spend ? parseNum(r[map.spend]) : 0,
       impressions,
       reach: reach || impressions,
@@ -130,7 +133,8 @@ export function parseAdsCsv(text: string): ParseResult {
 
 /** A ready-to-fill CSV template matching the parser's expected columns. */
 export const ADS_CSV_TEMPLATE = [
-  "Dia,Nome do anúncio,ID do anúncio,Nome do conjunto de anúncios,Nome da campanha,Valor gasto,Impressões,Alcance,Cliques no link,Leads",
-  "2026-07-23,Vídeo — Cansado de financiar?,AD-01,Público Frio — Interesses,Consórcio — Geração de Leads,180.50,7200,5100,142,19",
-  "2026-07-23,Carrossel — Consórcio x Financiamento,AD-02,Público Frio — Interesses,Consórcio — Geração de Leads,150.00,6100,4300,88,11",
+  "Dia,Nome do anúncio,ID do anúncio,Nome do conjunto de anúncios,Nome da campanha,Objetivo,Valor gasto,Impressões,Alcance,Cliques no link,Leads",
+  "2026-07-23,Vídeo — Cansado de financiar?,AD-01,Público Frio — Interesses,Consórcio — Geração de Leads,OUTCOME_LEADS,180.50,7200,5100,142,19",
+  "2026-07-23,Carrossel — Consórcio x Financiamento,AD-02,Público Frio — Interesses,Consórcio — Geração de Leads,OUTCOME_LEADS,150.00,6100,4300,88,11",
+  "2026-07-23,Reel — Bastidores do escritório,AD-07,Descoberta — Seguidores,Consórcio — Descoberta de Perfil,OUTCOME_ENGAGEMENT,60.00,9800,8200,41,0",
 ].join("\n");

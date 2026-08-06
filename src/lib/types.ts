@@ -65,6 +65,14 @@ export interface AdDaily {
   campaign: string;
   adset: string;
   adId: string; // FK -> Creative.adId
+  /**
+   * Raw Meta objective of the campaign this ad belongs to, e.g. `OUTCOME_LEADS`
+   * (conversão) or `OUTCOME_ENGAGEMENT` (descoberta/seguidores). Comes from the
+   * insights `objective` field; may be undefined for legacy rows or CSVs that
+   * don't carry it. Classified into a budget bucket by `objectiveBucket()` in
+   * metrics.ts — never persist the derived bucket.
+   */
+  objective?: string;
   spend: number; // BRL
   impressions: number;
   reach: number;

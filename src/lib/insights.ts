@@ -4,13 +4,26 @@ import {
   overviewKpis,
   type DateRange,
 } from "./metrics";
-import { formatCurrency, formatInt, formatPercent } from "./format";
+import { formatCurrency, formatCurrency0, formatInt, formatPercent } from "./format";
 
 /** A few short, data-grounded insights for the overview. */
 export function buildInsights(data: DashboardData, range?: DateRange): string[] {
   const out: string[] = [];
   const creatives = creativePerformance(data, range).filter((c) => c.leads > 0);
   const k = overviewKpis(data, range);
+
+  if (k.hasDiscovery) {
+    const totalSpend = k.spendConversao + k.spendDescoberta;
+    const descShare = totalSpend > 0 ? k.spendDescoberta / totalSpend : 0;
+    out.push(
+      `Descoberta consumiu ${formatCurrency0(k.spendDescoberta)} (${formatPercent(
+        descShare,
+        0,
+      )}) do orçamento — fora do CPL/CPR. O CPL fiel de conversão é ${formatCurrency(
+        k.cpl,
+      )} (seria ${formatCurrency(k.cplBlended)} misturando tudo).`,
+    );
+  }
 
   if (creatives.length >= 2) {
     const byCpl = [...creatives].sort((a, b) => a.cpl - b.cpl);
