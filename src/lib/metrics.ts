@@ -125,6 +125,7 @@ const DISCOVERY_OBJECTIVES = new Set([
   "EVENT_RESPONSES",
   // optimization_goals de conjunto
   "PROFILE_VISIT",
+  "VISIT_INSTAGRAM_PROFILE", // "Visitas ao perfil do Instagram"
   "PROFILE_AND_PAGE_ENGAGEMENT",
   "PAGE_ENGAGEMENT",
   "PAGE_LIKE",
