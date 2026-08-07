@@ -481,6 +481,57 @@ export function followerSeries(rows: IgAccountDaily[], range?: DateRange): Follo
   }));
 }
 
+// ---- fadiga de criativo --------------------------------------------
+
+export type FatigueLevel = "novo" | "saudavel" | "atencao" | "fadigado";
+
+export interface Fatigue {
+  level: FatigueLevel;
+  frequency: number; // frequência média/dia recente
+  reason: string; // por que está fadigando (ou "amostra insuficiente")
+}
+
+/**
+ * Sinal de fadiga por anúncio: compara os ~3 dias mais recentes com os 3 dias
+ * anteriores. CTR caindo + CPL subindo + frequência alta = criativo queimando —
+ * renove ANTES do CPR subir (o alerta oficial da Meta só vem quando o custo já
+ * dobrou). Puro: usa as últimas datas presentes no próprio anúncio.
+ */
+export function computeFatigue(rows: AdDaily[]): Fatigue {
+  const sorted = [...rows].sort((a, b) => a.date.localeCompare(b.date));
+  const recent = sorted.slice(-3);
+  const prior = sorted.slice(-6, -3);
+  const agg = (rs: AdDaily[]) => {
+    const spend = rs.reduce((s, r) => s + r.spend, 0);
+    const impr = rs.reduce((s, r) => s + r.impressions, 0);
+    const clicks = rs.reduce((s, r) => s + r.clicks, 0);
+    const leadCount = rs.reduce((s, r) => s + r.leads, 0);
+    const freq = rs.length ? rs.reduce((s, r) => s + r.frequency, 0) / rs.length : 0;
+    return { ctr: div(clicks, impr), cpl: div(spend, leadCount), freq, impr };
+  };
+  const r = agg(recent);
+  const p = agg(prior);
+  if (recent.length < 2 || prior.length < 2 || r.impr < 500) {
+    return { level: "novo", frequency: r.freq, reason: "amostra insuficiente" };
+  }
+  const ctrDown = p.ctr > 0 && r.ctr < p.ctr * 0.85;
+  const cplUp = p.cpl > 0 && r.cpl > p.cpl * 1.25;
+  const freqHigh = r.freq >= 1.8;
+  const reasons: string[] = [];
+  if (ctrDown) reasons.push("CTR caindo");
+  if (cplUp) reasons.push("CPL subindo");
+  if (freqHigh) reasons.push(`frequência ${formatFreq(r.freq)}`);
+  const flags = [ctrDown, cplUp, freqHigh].filter(Boolean).length;
+  const level: FatigueLevel = flags >= 2 ? "fadigado" : flags === 1 ? "atencao" : "saudavel";
+  return {
+    level,
+    frequency: r.freq,
+    reason: reasons.length ? reasons.join(" · ") : "estável",
+  };
+}
+
+const formatFreq = (n: number) => n.toFixed(1).replace(".", ",");
+
 // ---- per-creative ---------------------------------------------------
 
 export interface CreativePerf {
@@ -497,6 +548,7 @@ export interface CreativePerf {
   cpc: number;
   cpl: number;
   cpr: number;
+  fatigue: Fatigue;
   hookRate?: number; // 3s plays / impressions (gancho: prende no 1º instante?)
   thruPlayRate?: number; // thruplays / impressions
   holdRate?: number; // thruPlays / 3s plays (retenção: segura quem começou a ver?)
@@ -513,6 +565,14 @@ export function creativePerformance(
     const list = byAd.get(r.adId) ?? [];
     list.push(r);
     byAd.set(r.adId, list);
+  }
+
+  // Fadiga usa os dias recentes ABSOLUTOS (independe do range selecionado).
+  const allByAd = new Map<string, AdDaily[]>();
+  for (const r of data.adDaily) {
+    const list = allByAd.get(r.adId) ?? [];
+    list.push(r);
+    allByAd.set(r.adId, list);
   }
 
   // Atribui reuniões ao criativo pelo id do anúncio embutido no utm_content
@@ -548,6 +608,7 @@ export function creativePerformance(
       cpc: k.cpc,
       cpl: k.cpl,
       cpr: div(k.spend, meetings),
+      fatigue: computeFatigue(allByAd.get(creative.adId) ?? []),
       hookRate: creative.videoPlays ? div(creative.videoPlays, k.impressions) : undefined,
       thruPlayRate: creative.thruPlays ? div(creative.thruPlays, k.impressions) : undefined,
       holdRate: creative.videoPlays ? div(creative.thruPlays ?? 0, creative.videoPlays) : undefined,
@@ -608,6 +669,122 @@ export function groupBy(
       };
     })
     .sort((a, b) => b.spend - a.spend);
+}
+
+// ---- per-adset (com reuniões e CPR reais) --------------------------
+
+export interface AdsetPerf {
+  adset: string;
+  bucket: ObjectiveBucket;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  leads: number; // pixel (AdDaily.leads) — número completo por conjunto
+  meetings: number; // atribuídas pelo id do anúncio → conjunto
+  ctr: number;
+  cpl: number; // spend / leads
+  cpr: number; // spend / meetings (custo por reunião do conjunto)
+}
+
+/**
+ * Desempenho por conjunto com REUNIÕES e CPR — a decisão de budget deve olhar o
+ * custo por reunião, não só por lead. Reuniões vêm da lista de leads, atribuídas
+ * ao conjunto pelo id do anúncio no utm_content.
+ */
+export function adsetPerformance(data: DashboardData, range?: DateRange): AdsetPerf[] {
+  const ads = filterAds(data.adDaily, range);
+  const leads = filterLeads(data.leads, range);
+
+  const adToAdset = new Map<string, string>();
+  for (const r of ads) if (!adToAdset.has(r.adId)) adToAdset.set(r.adId, r.adset);
+
+  const byAdset = new Map<string, AdDaily[]>();
+  for (const r of ads) {
+    const list = byAdset.get(r.adset) ?? [];
+    list.push(r);
+    byAdset.set(r.adset, list);
+  }
+
+  const meetingsByAdset = new Map<string, number>();
+  for (const l of leads) {
+    if (!isBooked(l)) continue;
+    const adId = leadAdKey(l);
+    const adset = adId ? adToAdset.get(adId) : undefined;
+    if (adset) meetingsByAdset.set(adset, (meetingsByAdset.get(adset) ?? 0) + 1);
+  }
+
+  return [...byAdset.entries()]
+    .map(([adset, list]) => {
+      const k = adKpis(list);
+      const meetings = meetingsByAdset.get(adset) ?? 0;
+      return {
+        adset,
+        bucket: dominantBucket(list),
+        spend: k.spend,
+        impressions: k.impressions,
+        clicks: k.clicks,
+        leads: k.leads,
+        meetings,
+        ctr: k.ctr,
+        cpl: k.cpl,
+        cpr: div(k.spend, meetings),
+      };
+    })
+    .sort((a, b) => b.spend - a.spend);
+}
+
+// ---- pacing do orçamento da campanha -------------------------------
+
+export type PacingStatus = "sub" | "on" | "over" | "unknown";
+
+export interface CampaignPacing {
+  spent: number;
+  budget: number;
+  pct: number; // consumido 0–1
+  runRatePerDay: number;
+  daysElapsed: number;
+  daysTotal?: number;
+  daysLeft?: number;
+  projectedSpend?: number; // gasto projetado até o fim, no ritmo atual
+  status: PacingStatus; // vs orçamento planejado até o fim
+  exhaustInDays?: number; // dias até esgotar o orçamento no ritmo atual
+}
+
+const daysBetween = (a: string, b: string) =>
+  Math.round((new Date(b.slice(0, 10) + "T00:00:00Z").getTime() - new Date(a.slice(0, 10) + "T00:00:00Z").getTime()) / 86_400_000);
+
+/** Ritmo de gasto vs orçamento/tempo da campanha. `nowIso` torna a função pura. */
+export function campaignPacing(data: DashboardData, nowIso: string): CampaignPacing {
+  const c = data.campaign;
+  const spent = data.adDaily.reduce((s, r) => s + r.spend, 0);
+  const budget = c.budgetTotal;
+  const today = nowIso.slice(0, 10);
+  const daysElapsed = Math.max(1, daysBetween(c.startDate || today, today) + 1);
+  const runRatePerDay = spent / daysElapsed;
+  const pct = budget > 0 ? spent / budget : 0;
+
+  const out: CampaignPacing = { spent, budget, pct, runRatePerDay, daysElapsed, status: "unknown" };
+
+  if (runRatePerDay > 0 && budget > 0) {
+    out.exhaustInDays = Math.max(0, Math.round((budget - spent) / runRatePerDay));
+  }
+  if (c.endDate) {
+    const daysTotal = Math.max(1, daysBetween(c.startDate || today, c.endDate) + 1);
+    out.daysTotal = daysTotal;
+    out.daysLeft = Math.max(0, daysBetween(today, c.endDate));
+    const projected = runRatePerDay * daysTotal;
+    out.projectedSpend = projected;
+    if (budget > 0) {
+      out.status = projected > budget * 1.1 ? "over" : projected < budget * 0.9 ? "sub" : "on";
+    }
+  }
+  return out;
+}
+
+/** Projeção linear de um valor acumulado do período inteiro pelo ritmo até agora. */
+export function projectLinear(current: number, elapsedDays: number, totalDays: number): number {
+  if (elapsedDays <= 0) return current;
+  return (current / elapsedDays) * totalDays;
 }
 
 // ---- posts ----------------------------------------------------------

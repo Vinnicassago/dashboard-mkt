@@ -20,9 +20,10 @@ import { getData } from "@/lib/data/store";
 import { pageRange } from "@/lib/page-range";
 import {
   adKpis,
+  adsetPerformance,
+  campaignPacing,
   dailySeries,
   filterAds,
-  groupBy,
   objectiveBreakdown,
   previousRange,
   OBJECTIVE_LABEL,
@@ -72,7 +73,7 @@ export default async function TrafegoPage({
   const ads = filterAds(data.adDaily, range);
   const k = adKpis(ads);
   const series = dailySeries(data, range);
-  const byAdset = groupBy(ads, (r) => r.adset);
+  const byAdset = adsetPerformance(data, range);
   const obj = objectiveBreakdown(data, range);
 
   // Período anterior (mesma duração) para os deltas dos KPIs.
@@ -80,9 +81,15 @@ export default async function TrafegoPage({
   const prevK = prevRange ? adKpis(filterAds(data.adDaily, prevRange)) : undefined;
   const prevObj = prevRange ? objectiveBreakdown(data, prevRange) : undefined;
 
+  // Metas para pintar de vermelho quem passou do teto.
+  const goalCpl = data.goals.find((g) => g.metric === "cpl")?.target;
+  const goalCpr = data.goals.find((g) => g.metric === "cpr")?.target;
+  const overCls = (over: boolean) => (over ? "text-[var(--danger-text)] font-medium" : "");
+
   const spentAllTime = data.adDaily.reduce((s, r) => s + r.spend, 0);
   const budget = data.campaign.budgetTotal;
   const pacing = budget > 0 ? Math.min(1, spentAllTime / budget) : 0;
+  const pace = campaignPacing(data, new Date().toISOString());
 
   return (
     <div className="space-y-6">
@@ -218,6 +225,26 @@ export default async function TrafegoPage({
             <span>Frequência {formatDecimal(k.frequency, 2)}</span>
             <span>Budget diário {formatCurrency0(data.campaign.dailyBudget ?? 0)}</span>
           </div>
+          {pace.status !== "unknown" && pace.projectedSpend != null ? (
+            <p
+              className={
+                pace.status === "over"
+                  ? "text-xs font-medium text-[var(--danger-text)]"
+                  : "text-xs text-muted-foreground"
+              }
+            >
+              No ritmo atual: gasto projetado {formatCurrency0(pace.projectedSpend)} até o fim —{" "}
+              {pace.status === "over"
+                ? "acima do orçamento, reduza o budget diário."
+                : pace.status === "sub"
+                  ? "abaixo do orçamento, há espaço para escalar."
+                  : "em linha com o orçamento."}
+            </p>
+          ) : pace.exhaustInDays != null ? (
+            <p className="text-xs text-muted-foreground">
+              No ritmo atual, o orçamento dura ~{pace.exhaustInDays} dias.
+            </p>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -252,38 +279,53 @@ export default async function TrafegoPage({
                 <TH>Conjunto</TH>
                 <TH>Objetivo</TH>
                 <TH className="text-right">Gasto</TH>
-                <TH className="text-right">Impressões</TH>
-                <TH className="text-right">Cliques</TH>
                 <TH className="text-right">CTR</TH>
                 <TH className="text-right">Leads</TH>
                 <TH className="text-right">CPL</TH>
+                <TH className="text-right">Reuniões</TH>
+                <TH className="text-right">CPR</TH>
               </TR>
             </THead>
             <TBody>
-              {byAdset.map((g) => (
-                <TR key={g.key}>
-                  <TD className="font-medium">{g.key}</TD>
-                  <TD>
-                    <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
-                      <span
-                        className="size-2 shrink-0 rounded-full"
-                        style={{ background: BUCKET_DOT[g.bucket] }}
-                      />
-                      {OBJECTIVE_LABEL[g.bucket]}
-                    </span>
-                  </TD>
-                  <TD className="text-right tabular">{formatCurrency0(g.spend)}</TD>
-                  <TD className="text-right tabular">{formatInt(g.impressions)}</TD>
-                  <TD className="text-right tabular">{formatInt(g.clicks)}</TD>
-                  <TD className="text-right tabular">{formatPercent(g.ctr)}</TD>
-                  <TD className="text-right tabular">{formatInt(g.leads)}</TD>
-                  <TD className="text-right tabular">
-                    {g.bucket === "conversao" ? formatCurrency(g.cpl) : "—"}
-                  </TD>
-                </TR>
-              ))}
+              {byAdset.map((g) => {
+                const isConv = g.bucket === "conversao";
+                const cplOver = isConv && goalCpl != null && g.leads > 0 && g.cpl > goalCpl;
+                const cprOver = isConv && goalCpr != null && g.meetings > 0 && g.cpr > goalCpr;
+                return (
+                  <TR key={g.adset}>
+                    <TD className="font-medium">{g.adset}</TD>
+                    <TD>
+                      <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
+                        <span
+                          className="size-2 shrink-0 rounded-full"
+                          style={{ background: BUCKET_DOT[g.bucket] }}
+                        />
+                        {OBJECTIVE_LABEL[g.bucket]}
+                      </span>
+                    </TD>
+                    <TD className="text-right tabular">{formatCurrency0(g.spend)}</TD>
+                    <TD className="text-right tabular">{formatPercent(g.ctr)}</TD>
+                    <TD className="text-right tabular">{formatInt(g.leads)}</TD>
+                    <TD className={`text-right tabular ${overCls(cplOver)}`}>
+                      {isConv && g.leads > 0 ? formatCurrency(g.cpl) : "—"}
+                    </TD>
+                    <TD className="text-right tabular">{isConv ? formatInt(g.meetings) : "—"}</TD>
+                    <TD className={`text-right tabular ${overCls(cprOver)}`}>
+                      {isConv && g.meetings > 0 ? formatCurrency(g.cpr) : "—"}
+                    </TD>
+                  </TR>
+                );
+              })}
             </TBody>
           </Table>
+          {(goalCpl != null || goalCpr != null) ? (
+            <p className="mt-3 text-xs text-muted-foreground">
+              Em <span className="text-[var(--danger-text)]">vermelho</span>: acima da meta
+              {goalCpl != null ? ` de CPL (${formatCurrency0(goalCpl)})` : ""}
+              {goalCpl != null && goalCpr != null ? " ou" : ""}
+              {goalCpr != null ? ` de CPR (${formatCurrency0(goalCpr)})` : ""}.
+            </p>
+          ) : null}
         </CardContent>
       </Card>
     </div>

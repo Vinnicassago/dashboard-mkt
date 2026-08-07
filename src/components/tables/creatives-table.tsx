@@ -2,7 +2,7 @@
 
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { Badge } from "@/components/ui/badge";
-import type { CreativePerf } from "@/lib/metrics";
+import type { CreativePerf, FatigueLevel } from "@/lib/metrics";
 import {
   formatCurrency,
   formatInt,
@@ -14,6 +14,20 @@ const formatBadge: Record<CreativePerf["format"], string> = {
   carrossel: "Carrossel",
   imagem: "Imagem",
 };
+
+const FAT_TONE: Record<FatigueLevel, string> = {
+  fadigado: "var(--critical)",
+  atencao: "var(--primary)",
+  saudavel: "var(--good)",
+  novo: "var(--muted)",
+};
+const FAT_LABEL: Record<FatigueLevel, string> = {
+  fadigado: "Fadigando",
+  atencao: "Atenção",
+  saudavel: "Saudável",
+  novo: "Novo",
+};
+const FAT_ORDER: Record<FatigueLevel, number> = { fadigado: 3, atencao: 2, saudavel: 1, novo: 0 };
 
 /** Semáforo: verde = saudável, âmbar = atenção, vermelho = fraco. */
 function tone(v: number | undefined, good: number, ok: number): string {
@@ -79,6 +93,21 @@ const columns: Column<CreativePerf>[] = [
     sortable: true,
     sortValue: (r) => r.holdRate ?? -1,
     render: (r) => <RateCell value={r.holdRate} color={tone(r.holdRate, 0.3, 0.15)} />,
+  },
+  {
+    key: "fatigue",
+    header: "Saúde",
+    sortable: true,
+    sortValue: (r) => FAT_ORDER[r.fatigue.level],
+    render: (r) => (
+      <span
+        className="inline-flex items-center gap-1.5 whitespace-nowrap text-sm"
+        title={r.fatigue.reason}
+      >
+        <span className="size-2 shrink-0 rounded-full" style={{ background: FAT_TONE[r.fatigue.level] }} />
+        {FAT_LABEL[r.fatigue.level]}
+      </span>
+    ),
   },
 ];
 

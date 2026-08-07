@@ -22,6 +22,8 @@ import {
 } from "@/lib/metrics";
 import { getLastSync } from "@/lib/meta/sync";
 import { buildInsights } from "@/lib/insights";
+import { buildRecommendations } from "@/lib/recommendations";
+import { RecommendationsCard } from "@/components/kpi/recommendations";
 import {
   formatCurrency,
   formatCurrency0,
@@ -75,6 +77,7 @@ export default async function OverviewPage({
   const funnel = buildFunnel(data, range);
   const series = dailySeries(data, range);
   const insights = buildInsights(data, range);
+  const recs = buildRecommendations(data, range, new Date().toISOString());
   const hint = prev ? "vs. período anterior" : "no período";
 
   const lastSync = await getLastSync();
@@ -206,23 +209,16 @@ export default async function OverviewPage({
         </Card>
       </div>
 
-      {/* Insights */}
+      {/* Próximas ações */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Sparkles className="size-4 text-primary" />
-            Leitura rápida
+            Próximas ações
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <ul className="space-y-2">
-            {insights.map((text, i) => (
-              <li key={i} className="flex gap-2 text-sm text-muted-foreground">
-                <span className="mt-2 size-1.5 shrink-0 rounded-full bg-primary" />
-                <span>{text}</span>
-              </li>
-            ))}
-          </ul>
+          <RecommendationsCard recs={recs} fallback={insights} />
         </CardContent>
       </Card>
     </div>

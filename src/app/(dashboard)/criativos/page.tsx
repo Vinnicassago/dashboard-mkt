@@ -1,4 +1,4 @@
-import { Award, TrendingDown } from "lucide-react";
+import { Award, TrendingDown, AlertTriangle } from "lucide-react";
 import { CreativesTable } from "@/components/tables/creatives-table";
 import { HorizontalBars } from "@/components/charts/horizontal-bars";
 import { ChartCard } from "@/components/ui/chart-card";
@@ -32,6 +32,7 @@ export default async function CriativosPage({
   const bestCpl = [...(enough.length ? enough : withLeads)].sort((a, b) => a.cpl - b.cpl)[0];
   const bestCplLowSample = bestCpl != null && bestCpl.leads < MIN_LEADS;
   const bestCtr = [...perf].sort((a, b) => b.ctr - a.ctr)[0];
+  const fatigued = perf.filter((c) => c.fatigue.level === "fadigado");
 
   const cplBars = [...withLeads]
     .sort((a, b) => a.cpl - b.cpl)
@@ -55,6 +56,19 @@ export default async function CriativosPage({
         Compare os criativos para escalar o que traz reunião barata e pausar o que
         só gasta. Ordene a tabela por qualquer coluna.
       </p>
+
+      {fatigued.length > 0 ? (
+        <div className="flex items-start gap-2.5 rounded-xl border border-[var(--danger-text)]/30 bg-[var(--danger-text)]/[0.04] px-4 py-3 text-sm">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-[var(--danger-text)]" />
+          <p className="text-muted-foreground">
+            <span className="font-medium text-foreground">
+              {fatigued.length} criativo(s) fadigando:
+            </span>{" "}
+            {fatigued.map((c) => c.name).join(", ")}. Renove a arte antes que o custo
+            dispare — a fadiga infla o CPL e, na cascata, o custo por reunião.
+          </p>
+        </div>
+      ) : null}
 
       {/* Highlights */}
       <div className="grid gap-4 sm:grid-cols-2">
