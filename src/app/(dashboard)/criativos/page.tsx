@@ -25,7 +25,12 @@ export default async function CriativosPage({
   const perf = creativePerformance(data, range);
   const withLeads = perf.filter((c) => c.leads > 0);
 
-  const bestCpl = [...withLeads].sort((a, b) => a.cpl - b.cpl)[0];
+  // Amostra mínima: só elege "melhor CPL" entre criativos com leads suficientes,
+  // para não recomendar escalar um vencedor de ruído (1 lead a R$10 "vence" 40 a R$35).
+  const MIN_LEADS = 5;
+  const enough = withLeads.filter((c) => c.leads >= MIN_LEADS);
+  const bestCpl = [...(enough.length ? enough : withLeads)].sort((a, b) => a.cpl - b.cpl)[0];
+  const bestCplLowSample = bestCpl != null && bestCpl.leads < MIN_LEADS;
   const bestCtr = [...perf].sort((a, b) => b.ctr - a.ctr)[0];
 
   const cplBars = [...withLeads]
@@ -63,8 +68,13 @@ export default async function CriativosPage({
                 <p className="text-xs text-muted-foreground">Melhor CPL</p>
                 <p className="font-semibold">{bestCpl.name}</p>
                 <p className="text-sm text-muted-foreground">
-                  {formatCurrency(bestCpl.cpl)} por lead · {bestCpl.meetings} reuniões
+                  {formatCurrency(bestCpl.cpl)} por lead · {bestCpl.leads} leads · {bestCpl.meetings} reuniões
                 </p>
+                {bestCplLowSample ? (
+                  <p className="mt-0.5 text-xs text-[var(--danger-text)]">
+                    Amostra pequena ({bestCpl.leads} leads) — confirme antes de escalar.
+                  </p>
+                ) : null}
               </div>
             </CardContent>
           </Card>

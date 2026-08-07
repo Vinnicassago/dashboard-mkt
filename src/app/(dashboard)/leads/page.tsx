@@ -1,8 +1,10 @@
+import { Clock } from "lucide-react";
 import { LeadsDirectory, type LeadDirectoryRow } from "@/components/leads/leads-directory";
 import { LeadActivity } from "@/components/leads/lead-activity";
+import { LeadQueueCard } from "@/components/leads/lead-queue";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getData, listLeadEvents } from "@/lib/data/store";
-import { adIdFromUtmContent } from "@/lib/metrics";
+import { adIdFromUtmContent, leadQueue } from "@/lib/metrics";
 import { can } from "@/lib/auth/guard";
 
 export const dynamic = "force-dynamic";
@@ -20,6 +22,7 @@ export default async function LeadsPage() {
   const canEdit = await can("leads:write");
   const events = await listLeadEvents({ limit: 200 });
   const nameById = new Map(data.creatives.map((c) => [c.adId, c.name]));
+  const queue = leadQueue(data.leads, new Date().toISOString());
 
   const rows: LeadDirectoryRow[] = data.leads.map((l) => ({
     id: l.id,
@@ -34,6 +37,24 @@ export default async function LeadsPage() {
 
   return (
     <div className="space-y-6">
+      {canEdit && queue.open.length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Clock className="size-4 text-primary" />
+              Fila do comercial ({queue.open.length})
+            </CardTitle>
+            <CardDescription>
+              Leads ainda sem contato, do mais antigo ao mais novo. Responder rápido é o
+              que mais aumenta o agendamento — e derruba o custo por reunião sem gastar mais.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <LeadQueueCard queue={queue} />
+          </CardContent>
+        </Card>
+      ) : null}
+
       <Card>
         <CardHeader>
           <CardTitle>Leads da campanha ({rows.length})</CardTitle>

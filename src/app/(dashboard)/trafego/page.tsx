@@ -9,6 +9,7 @@ import {
   Users,
 } from "lucide-react";
 import { KpiCard } from "@/components/kpi/kpi-card";
+import { pctDelta } from "@/components/kpi/delta";
 import { ObjectiveSplitBar } from "@/components/kpi/objective-split";
 import { TimeSeriesChart } from "@/components/charts/time-series-chart";
 import { ChartCard } from "@/components/ui/chart-card";
@@ -23,6 +24,7 @@ import {
   filterAds,
   groupBy,
   objectiveBreakdown,
+  previousRange,
   OBJECTIVE_LABEL,
 } from "@/lib/metrics";
 import {
@@ -73,6 +75,11 @@ export default async function TrafegoPage({
   const byAdset = groupBy(ads, (r) => r.adset);
   const obj = objectiveBreakdown(data, range);
 
+  // Período anterior (mesma duração) para os deltas dos KPIs.
+  const prevRange = range ? previousRange(range) : undefined;
+  const prevK = prevRange ? adKpis(filterAds(data.adDaily, prevRange)) : undefined;
+  const prevObj = prevRange ? objectiveBreakdown(data, prevRange) : undefined;
+
   const spentAllTime = data.adDaily.reduce((s, r) => s + r.spend, 0);
   const budget = data.campaign.budgetTotal;
   const pacing = budget > 0 ? Math.min(1, spentAllTime / budget) : 0;
@@ -80,16 +87,42 @@ export default async function TrafegoPage({
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
-        <KpiCard label="Investimento" value={formatCurrency0(k.spend)} Icon={DollarSign} />
-        <KpiCard label="Impressões" value={formatInt(k.impressions)} Icon={Eye} />
-        <KpiCard label="Alcance" value={formatInt(k.reach)} Icon={Users} />
-        <KpiCard label="Cliques" value={formatInt(k.clicks)} Icon={MousePointerClick} />
-        <KpiCard label="CTR" value={formatPercent(k.ctr)} Icon={Percent} />
+        <KpiCard
+          label="Investimento"
+          value={formatCurrency0(k.spend)}
+          Icon={DollarSign}
+          delta={prevK ? pctDelta(k.spend, prevK.spend) : undefined}
+        />
+        <KpiCard
+          label="Impressões"
+          value={formatInt(k.impressions)}
+          Icon={Eye}
+          delta={prevK ? pctDelta(k.impressions, prevK.impressions) : undefined}
+        />
+        <KpiCard
+          label="Alcance"
+          value={formatInt(k.reach)}
+          Icon={Users}
+          delta={prevK ? pctDelta(k.reach, prevK.reach) : undefined}
+        />
+        <KpiCard
+          label="Cliques"
+          value={formatInt(k.clicks)}
+          Icon={MousePointerClick}
+          delta={prevK ? pctDelta(k.clicks, prevK.clicks) : undefined}
+        />
+        <KpiCard
+          label="CTR"
+          value={formatPercent(k.ctr)}
+          Icon={Percent}
+          delta={prevK ? pctDelta(k.ctr, prevK.ctr) : undefined}
+        />
         <KpiCard
           label="CPL"
           value={formatCurrency(obj.conversao.cpl)}
           Icon={Target}
           hint={obj.hasDiscovery ? "só conversão" : undefined}
+          delta={prevObj ? pctDelta(obj.conversao.cpl, prevObj.conversao.cpl, { lowerIsBetter: true }) : undefined}
         />
       </div>
 

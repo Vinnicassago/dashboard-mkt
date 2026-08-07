@@ -2,6 +2,7 @@ import { DollarSign, CalendarCheck, Target, UserPlus, Sparkles } from "lucide-re
 import { ExampleBanner } from "@/components/example-banner";
 import { KpiCard, type KpiDelta } from "@/components/kpi/kpi-card";
 import { ObjectiveSplitBar } from "@/components/kpi/objective-split";
+import { DataQualityCard } from "@/components/kpi/data-quality";
 import { GoalBar } from "@/components/kpi/goal-bar";
 import { FunnelChart } from "@/components/charts/funnel-chart";
 import { TimeSeriesChart } from "@/components/charts/time-series-chart";
@@ -13,11 +14,13 @@ import {
   actualForGoal,
   buildFunnel,
   dailySeries,
+  dataQualityChecks,
   delta,
   goalProgress,
   overviewKpis,
   previousRange,
 } from "@/lib/metrics";
+import { getLastSync } from "@/lib/meta/sync";
 import { buildInsights } from "@/lib/insights";
 import {
   formatCurrency,
@@ -74,9 +77,16 @@ export default async function OverviewPage({
   const insights = buildInsights(data, range);
   const hint = prev ? "vs. período anterior" : "no período";
 
+  const lastSync = await getLastSync();
+  const warnings = dataQualityChecks(data, {
+    nowIso: new Date().toISOString(),
+    lastSyncAds: lastSync.ads,
+  });
+
   return (
     <div className="space-y-6">
       {data.isSeed ? <ExampleBanner /> : null}
+      <DataQualityCard warnings={warnings} />
 
       {/* Hero KPIs */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4 xl:grid-cols-5">

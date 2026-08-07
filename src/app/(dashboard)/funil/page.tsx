@@ -11,6 +11,7 @@ import { getData } from "@/lib/data/store";
 import { can } from "@/lib/auth/guard";
 import { pageRange } from "@/lib/page-range";
 import {
+  adIdFromUtmContent,
   buildFunnel,
   filterLeads,
   isBooked,
@@ -21,6 +22,17 @@ import { formatInt, formatPercent } from "@/lib/format";
 
 function short(name: string, max = 24): string {
   return name.length > max ? name.slice(0, max - 1) + "…" : name;
+}
+
+/** Chave de origem do lead: id do anúncio no utm_content, senão o próprio texto. */
+function originKey(utmContent?: string): string {
+  if (!utmContent) return "—";
+  return adIdFromUtmContent(utmContent) ?? utmContent;
+}
+function originName(utmContent: string | undefined, nameById: Map<string, string>): string {
+  if (!utmContent) return "—";
+  const key = originKey(utmContent);
+  return nameById.get(key) ?? utmContent.split("|")[0];
 }
 
 export default async function FunilPage({
@@ -39,14 +51,14 @@ export default async function FunilPage({
 
   const nameById = new Map(data.creatives.map((c) => [c.adId, c.name]));
 
-  // leads by origin (creative)
+  // leads by origin (creative) — junta pelo id do anúncio embutido no utm_content
   const byCreative = new Map<string, number>();
   for (const l of leads) {
-    const key = l.utmContent ?? "—";
+    const key = originKey(l.utmContent);
     byCreative.set(key, (byCreative.get(key) ?? 0) + 1);
   }
   const originBars = [...byCreative.entries()]
-    .map(([adId, value]) => ({ label: short(nameById.get(adId) ?? adId), value }))
+    .map(([key, value]) => ({ label: short(nameById.get(key) ?? key), value }))
     .sort((a, b) => b.value - a.value);
 
   const leadRows: LeadRow[] = [...leads]
@@ -56,7 +68,7 @@ export default async function FunilPage({
       id: l.id,
       createdAt: l.createdAt,
       name: l.name,
-      creativeName: l.utmContent ? (nameById.get(l.utmContent) ?? l.utmContent) : "—",
+      creativeName: originName(l.utmContent, nameById),
       status: l.status,
       meetingAt: l.meetingAt,
     }));
@@ -65,7 +77,7 @@ export default async function FunilPage({
     <div className="space-y-6">
       <ChartCard
         title="Funil da campanha"
-        description="Do anúncio à reunião agendada."
+        description="Do anúncio à reunião — a última etapa mostra quem de fato compareceu."
       >
         <FunnelChart stages={funnel} />
       </ChartCard>

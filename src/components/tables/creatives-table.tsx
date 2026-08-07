@@ -15,6 +15,24 @@ const formatBadge: Record<CreativePerf["format"], string> = {
   imagem: "Imagem",
 };
 
+/** Semáforo: verde = saudável, âmbar = atenção, vermelho = fraco. */
+function tone(v: number | undefined, good: number, ok: number): string {
+  if (v == null) return "var(--muted)";
+  if (v >= good) return "var(--good)";
+  if (v >= ok) return "var(--primary)";
+  return "var(--critical)";
+}
+
+function RateCell({ value, color }: { value?: number; color: string }) {
+  if (value == null) return <span className="text-muted-foreground">—</span>;
+  return (
+    <span className="inline-flex items-center justify-end gap-1.5 tabular">
+      <span className="size-2 shrink-0 rounded-full" style={{ background: color }} />
+      {formatPercent(value)}
+    </span>
+  );
+}
+
 const columns: Column<CreativePerf>[] = [
   {
     key: "name",
@@ -48,11 +66,19 @@ const columns: Column<CreativePerf>[] = [
   },
   {
     key: "hook",
-    header: "Hook rate",
+    header: "Gancho (3s)",
     align: "right",
     sortable: true,
     sortValue: (r) => r.hookRate ?? -1,
-    render: (r) => (r.hookRate != null ? formatPercent(r.hookRate) : "—"),
+    render: (r) => <RateCell value={r.hookRate} color={tone(r.hookRate, 0.18, 0.1)} />,
+  },
+  {
+    key: "hold",
+    header: "Retenção",
+    align: "right",
+    sortable: true,
+    sortValue: (r) => r.holdRate ?? -1,
+    render: (r) => <RateCell value={r.holdRate} color={tone(r.holdRate, 0.3, 0.15)} />,
   },
 ];
 

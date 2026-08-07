@@ -1,15 +1,24 @@
 import { Users, TrendingUp, Eye, Radio, Heart, ExternalLink, Percent, UserRound, Info } from "lucide-react";
 import { KpiCard } from "@/components/kpi/kpi-card";
+import { GoalBar } from "@/components/kpi/goal-bar";
 import { TimeSeriesChart } from "@/components/charts/time-series-chart";
+import { FunnelChart } from "@/components/charts/funnel-chart";
 import { ChartCard } from "@/components/ui/chart-card";
 import { HorizontalBars } from "@/components/charts/horizontal-bars";
 import { EmptyState } from "@/components/ui/empty-state";
 import { CHART } from "@/components/charts/colors";
 import { getData } from "@/lib/data/store";
 import { pageRange } from "@/lib/page-range";
-import { followerSeries, igAccountTotals, inRange, previousRange } from "@/lib/metrics";
+import {
+  buildOrganicFunnel,
+  followerSeries,
+  goalProgress,
+  igAccountTotals,
+  inRange,
+  previousRange,
+} from "@/lib/metrics";
 import { absDelta, pctDelta } from "@/components/kpi/delta";
-import { formatCompact, formatInt, formatPercent } from "@/lib/format";
+import { formatCompact, formatDecimal, formatInt, formatPercent } from "@/lib/format";
 
 export default async function InstagramPage({
   searchParams,
@@ -33,6 +42,23 @@ export default async function InstagramPage({
 
   const cur = igAccountTotals(data.igAccountDaily, range);
   const prev = range ? igAccountTotals(data.igAccountDaily, previousRange(range)) : undefined;
+
+  const orgFunnel = buildOrganicFunnel(data.igAccountDaily, range);
+
+  // Meta de seguidores: progresso + projeção linear pelo ritmo do período.
+  const followersGoal = data.goals.find((g) => g.metric === "followers");
+  const gp = followersGoal ? goalProgress(followersGoal, cur.followersEnd) : undefined;
+  const windowDays = rows.length;
+  const avgGain = windowDays > 1 ? cur.netNew / (windowDays - 1) : cur.netNew;
+  const remaining = followersGoal ? Math.max(0, followersGoal.target - cur.followersEnd) : 0;
+  const daysAtRate = avgGain > 0 ? Math.ceil(remaining / avgGain) : null;
+  const goalOutlook = !followersGoal
+    ? ""
+    : gp?.onTrack
+      ? "Meta batida 🎉"
+      : avgGain > 0 && daysAtRate != null
+        ? `Faltam ${formatInt(remaining)} · no ritmo de +${formatDecimal(avgGain, 1)}/dia, ~${daysAtRate} dias.`
+        : `Faltam ${formatInt(remaining)} · sem crescimento no período para projetar.`;
 
   return (
     <div className="space-y-6">
@@ -86,6 +112,26 @@ export default async function InstagramPage({
           hint="interações ÷ alcance"
           delta={prev ? pctDelta(cur.engagementRate, prev.engagementRate) : undefined}
         />
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <ChartCard
+          title="Funil orgânico do perfil"
+          description="Alcance → visita ao perfil → novo seguidor. Onde perde: muito alcance e pouca visita = gancho fraco; muita visita e poucos seguidores = feed/prova social."
+        >
+          <FunnelChart stages={orgFunnel} />
+        </ChartCard>
+        {followersGoal && gp ? (
+          <ChartCard title="Meta de seguidores" description={goalOutlook}>
+            <GoalBar
+              label="Seguidores"
+              valueText={formatInt(cur.followersEnd)}
+              targetText={formatInt(followersGoal.target)}
+              pct={gp.pct}
+              onTrack={gp.onTrack}
+            />
+          </ChartCard>
+        ) : null}
       </div>
 
       {cur.hasReachSplit ? (

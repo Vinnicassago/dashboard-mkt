@@ -355,7 +355,7 @@ export function cpr(spend: number, meetings: number): number {
 // ---- funnel ---------------------------------------------------------
 
 export interface FunnelStage {
-  key: "impressoes" | "cliques" | "leads" | "reunioes";
+  key: string;
   label: string;
   value: number;
   /** conversion from the previous stage (ratio), undefined for the first. */
@@ -369,12 +369,14 @@ export function buildFunnel(data: DashboardData, range?: DateRange): FunnelStage
   const clicks = ads.reduce((s, r) => s + r.clicks, 0);
   const leadCount = leads.length;
   const meetings = countMeetings(leads);
+  const attended = countAttended(leads);
 
   const stages: FunnelStage[] = [
     { key: "impressoes", label: "Impressões", value: impressions },
     { key: "cliques", label: "Cliques", value: clicks, fromPrev: div(clicks, impressions) },
     { key: "leads", label: "Leads", value: leadCount, fromPrev: div(leadCount, clicks) },
     { key: "reunioes", label: "Reuniões", value: meetings, fromPrev: div(meetings, leadCount) },
+    { key: "compareceu", label: "Compareceu", value: attended, fromPrev: div(attended, meetings) },
   ];
   return stages;
 }
@@ -495,8 +497,9 @@ export interface CreativePerf {
   cpc: number;
   cpl: number;
   cpr: number;
-  hookRate?: number; // 3s plays / impressions
+  hookRate?: number; // 3s plays / impressions (gancho: prende no 1º instante?)
   thruPlayRate?: number; // thruplays / impressions
+  holdRate?: number; // thruPlays / 3s plays (retenção: segura quem começou a ver?)
 }
 
 export function creativePerformance(
@@ -547,6 +550,7 @@ export function creativePerformance(
       cpr: div(k.spend, meetings),
       hookRate: creative.videoPlays ? div(creative.videoPlays, k.impressions) : undefined,
       thruPlayRate: creative.thruPlays ? div(creative.thruPlays, k.impressions) : undefined,
+      holdRate: creative.videoPlays ? div(creative.thruPlays ?? 0, creative.videoPlays) : undefined,
     });
   }
   return result
@@ -868,6 +872,117 @@ export function actualForGoal(goal: Goal, data: DashboardData, range?: DateRange
     default:
       return 0;
   }
+}
+
+// ---- funil orgânico do Instagram -----------------------------------
+
+/**
+ * Funil de crescimento do perfil: Alcance → Visitas ao perfil → Novos
+ * seguidores. Mostra ONDE o perfil vaza — muito alcance e pouca visita = gancho
+ * fraco; muita visita e poucos seguidores = feed/prova social fraca. (A perda
+ * visita→clique no link já aparece como "Taxa de clique no link".)
+ */
+export function buildOrganicFunnel(rows: IgAccountDaily[], range?: DateRange): FunnelStage[] {
+  const t = igAccountTotals(rows, range);
+  const netNew = Math.max(0, t.netNew);
+  return [
+    { key: "alcance", label: "Alcance", value: t.reach },
+    { key: "visitas", label: "Visitas ao perfil", value: t.profileViews, fromPrev: div(t.profileViews, t.reach) },
+    { key: "seguidores", label: "Novos seguidores", value: netNew, fromPrev: div(netNew, t.profileViews) },
+  ];
+}
+
+// ---- fila do comercial (SLA de contato) ----------------------------
+
+export type LeadAgeBucket = "novo" | "atencao" | "atrasado"; // <24h, 24–48h, >48h
+
+export interface AgingLead {
+  id: string;
+  name: string;
+  phone?: string;
+  createdAt: string;
+  ageHours: number;
+  bucket: LeadAgeBucket;
+}
+
+export interface LeadQueue {
+  open: AgingLead[]; // status "lead" (ainda sem contato registrado), mais antigos primeiro
+  counts: Record<LeadAgeBucket, number>;
+}
+
+/**
+ * Leads ainda em "lead" (sem avanço), envelhecidos por tempo desde a entrada.
+ * Speed-to-lead é a alavanca nº1 de agendamento — responder rápido converte
+ * muito mais os MESMOS leads já pagos, derrubando o CPR sem gastar mais.
+ */
+export function leadQueue(leads: Lead[], nowIso: string): LeadQueue {
+  const now = new Date(nowIso).getTime();
+  const open = leads
+    .filter((l) => l.status === "lead")
+    .map((l) => {
+      const ageHours = Math.max(0, (now - new Date(l.createdAt).getTime()) / 3_600_000);
+      const bucket: LeadAgeBucket = ageHours > 48 ? "atrasado" : ageHours > 24 ? "atencao" : "novo";
+      return { id: l.id, name: l.name, phone: l.phone, createdAt: l.createdAt, ageHours, bucket };
+    })
+    .sort((a, b) => b.ageHours - a.ageHours);
+  const counts: Record<LeadAgeBucket, number> = { novo: 0, atencao: 0, atrasado: 0 };
+  for (const l of open) counts[l.bucket] += 1;
+  return { open, counts };
+}
+
+// ---- qualidade de dados (guardrail de decisão) ---------------------
+
+export interface DataWarning {
+  level: "warn" | "info";
+  message: string;
+}
+
+/**
+ * Checagens de confiança do painel: dado atrasado/quebrado leva a decisão
+ * errada. Roda sobre o dataset inteiro (saúde global), não sobre o período.
+ */
+export function dataQualityChecks(
+  data: DashboardData,
+  opts: { nowIso: string; lastSyncAds?: string | null },
+): DataWarning[] {
+  const out: DataWarning[] = [];
+
+  if (opts.lastSyncAds) {
+    const hrs = (new Date(opts.nowIso).getTime() - new Date(opts.lastSyncAds).getTime()) / 3_600_000;
+    if (hrs > 36) {
+      out.push({ level: "warn", message: `Anúncios sincronizados há ${Math.round(hrs)}h — os números podem estar defasados. Rode "Sincronizar agora".` });
+    }
+  }
+
+  const noObjective = data.adDaily.filter((r) => !r.objective && r.spend > 0).length;
+  if (noObjective > 0) {
+    out.push({ level: "warn", message: `${noObjective} linha(s) de anúncio sem objetivo — caem em conversão e distorcem o CPL fiel. Ressincronize os anúncios.` });
+  }
+
+  const totalSpend = data.adDaily.reduce((s, r) => s + r.spend, 0);
+  if (totalSpend > 0 && data.leads.length === 0) {
+    out.push({ level: "warn", message: "Há gasto em anúncios mas nenhum lead registrado — o rastreio da landing page pode estar quebrado ou faltando importar." });
+  }
+
+  const totalVisits = data.lpDaily.reduce((s, r) => s + r.visits, 0);
+  const totalSubmits = data.lpDaily.reduce((s, r) => s + r.formSubmits, 0);
+  if (totalVisits > 0 && totalSubmits === 0) {
+    out.push({ level: "warn", message: "A landing page tem visitas mas nenhum envio de formulário registrado — verifique o rastreio de leads (/api/track)." });
+  }
+
+  // Buracos na série diária de anúncios (dias sem dado dentro do intervalo).
+  const dates = [...new Set(data.adDaily.map((r) => r.date))].sort();
+  if (dates.length >= 2) {
+    const first = new Date(dates[0] + "T00:00:00Z").getTime();
+    const last = new Date(dates.at(-1)! + "T00:00:00Z").getTime();
+    const expected = Math.round((last - first) / 86_400_000) + 1;
+    const missing = expected - dates.length;
+    if (missing > 0) {
+      out.push({ level: "info", message: `${missing} dia(s) sem dados de anúncios no intervalo — a série pode ter lacunas (insights da Meta atrasam até 48h).` });
+    }
+  }
+
+  return out;
 }
 
 // ---- convenience: full date span of the dataset --------------------
