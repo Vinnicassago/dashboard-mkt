@@ -335,8 +335,18 @@ export function objectiveBreakdown(data: DashboardData, range?: DateRange): Obje
 
 // ---- meetings (from the leads list) --------------------------------
 
+/** Teve reunião marcada (agendou, compareceu ou já virou cliente). */
 export function isBooked(l: Lead): boolean {
-  return l.status === "agendou" || l.status === "compareceu";
+  return l.status === "agendou" || l.status === "compareceu" || l.status === "cliente";
+}
+
+/** Compareceu à reunião (inclui quem virou cliente). */
+export function isAttended(l: Lead): boolean {
+  return l.status === "compareceu" || l.status === "cliente";
+}
+
+export function isClient(l: Lead): boolean {
+  return l.status === "cliente";
 }
 
 export function countMeetings(leads: Lead[]): number {
@@ -344,7 +354,16 @@ export function countMeetings(leads: Lead[]): number {
 }
 
 export function countAttended(leads: Lead[]): number {
-  return leads.filter((l) => l.status === "compareceu").length;
+  return leads.filter(isAttended).length;
+}
+
+export function countClients(leads: Lead[]): number {
+  return leads.filter(isClient).length;
+}
+
+/** Receita atribuída = soma do valor das cartas dos clientes. */
+export function sumRevenue(leads: Lead[]): number {
+  return leads.filter(isClient).reduce((s, l) => s + (l.value ?? 0), 0);
 }
 
 /** custo por reunião agendada (North Star) */
@@ -370,6 +389,7 @@ export function buildFunnel(data: DashboardData, range?: DateRange): FunnelStage
   const leadCount = leads.length;
   const meetings = countMeetings(leads);
   const attended = countAttended(leads);
+  const clients = countClients(leads);
 
   const stages: FunnelStage[] = [
     { key: "impressoes", label: "Impressões", value: impressions },
@@ -377,6 +397,7 @@ export function buildFunnel(data: DashboardData, range?: DateRange): FunnelStage
     { key: "leads", label: "Leads", value: leadCount, fromPrev: div(leadCount, clicks) },
     { key: "reunioes", label: "Reuniões", value: meetings, fromPrev: div(meetings, leadCount) },
     { key: "compareceu", label: "Compareceu", value: attended, fromPrev: div(attended, meetings) },
+    { key: "clientes", label: "Clientes", value: clients, fromPrev: div(clients, attended) },
   ];
   return stages;
 }
@@ -401,6 +422,14 @@ export interface OverviewKpis {
   showRate: number; // compareceu / booked
   hasDiscovery: boolean; // há orçamento de descoberta no período?
   organicLeads: number; // leads orgânicos/diretos (fora do CPL/CPR pago)
+  // ---- do lead à receita (Fase 3) ----
+  clients: number; // leads que viraram cliente
+  revenue: number; // receita atribuída (soma do valor das cartas)
+  cac: number; // custo de aquisição = gasto de conversão ÷ clientes
+  roas: number; // receita ÷ gasto total
+  ticket: number; // ticket médio = receita ÷ clientes
+  valuePerMeeting: number; // receita ÷ reuniões
+  meetingToClient: number; // clientes ÷ reuniões
 }
 
 export function overviewKpis(data: DashboardData, range?: DateRange): OverviewKpis {
@@ -410,6 +439,8 @@ export function overviewKpis(data: DashboardData, range?: DateRange): OverviewKp
   const meetings = countMeetings(leads);
   const attended = countAttended(leads);
   const obj = objectiveBreakdown(data, range);
+  const clients = countClients(leads);
+  const revenue = sumRevenue(leads);
   return {
     spend: k.spend,
     spendConversao: obj.conversao.spend,
@@ -428,6 +459,13 @@ export function overviewKpis(data: DashboardData, range?: DateRange): OverviewKp
     showRate: div(attended, meetings),
     hasDiscovery: obj.hasDiscovery,
     organicLeads: obj.organicLeads,
+    clients,
+    revenue,
+    cac: div(obj.conversao.spend, clients),
+    roas: div(revenue, k.spend),
+    ticket: div(revenue, clients),
+    valuePerMeeting: div(revenue, meetings),
+    meetingToClient: div(clients, meetings),
   };
 }
 
@@ -544,6 +582,9 @@ export interface CreativePerf {
   clicks: number;
   leads: number;
   meetings: number;
+  clients: number; // reuniões que viraram cliente
+  revenue: number; // receita atribuída ao criativo
+  cac: number; // gasto ÷ clientes
   ctr: number;
   cpc: number;
   cpl: number;
@@ -575,13 +616,18 @@ export function creativePerformance(
     allByAd.set(r.adId, list);
   }
 
-  // Atribui reuniões ao criativo pelo id do anúncio embutido no utm_content
-  // (ou pelo utm_content cru, quando ele já é o adId, ex. seed).
+  // Atribui reuniões/clientes/receita ao criativo pelo id do anúncio embutido no
+  // utm_content (ou pelo utm_content cru, quando ele já é o adId, ex. seed).
   const meetingsByAd = new Map<string, number>();
+  const clientsByAd = new Map<string, number>();
+  const revenueByAd = new Map<string, number>();
   for (const l of leads) {
     const key = leadAdKey(l);
-    if (isBooked(l) && key) {
-      meetingsByAd.set(key, (meetingsByAd.get(key) ?? 0) + 1);
+    if (!key) continue;
+    if (isBooked(l)) meetingsByAd.set(key, (meetingsByAd.get(key) ?? 0) + 1);
+    if (isClient(l)) {
+      clientsByAd.set(key, (clientsByAd.get(key) ?? 0) + 1);
+      revenueByAd.set(key, (revenueByAd.get(key) ?? 0) + (l.value ?? 0));
     }
   }
 
@@ -593,6 +639,8 @@ export function creativePerformance(
     }
     const k = adKpis(rows);
     const meetings = meetingsByAd.get(creative.adId) ?? 0;
+    const clients = clientsByAd.get(creative.adId) ?? 0;
+    const revenue = revenueByAd.get(creative.adId) ?? 0;
     const adset = rows[0]?.adset ?? "—";
     result.push({
       adId: creative.adId,
@@ -604,6 +652,9 @@ export function creativePerformance(
       clicks: k.clicks,
       leads: k.leads,
       meetings,
+      clients,
+      revenue,
+      cac: div(k.spend, clients),
       ctr: k.ctr,
       cpc: k.cpc,
       cpl: k.cpl,
@@ -681,6 +732,8 @@ export interface AdsetPerf {
   clicks: number;
   leads: number; // pixel (AdDaily.leads) — número completo por conjunto
   meetings: number; // atribuídas pelo id do anúncio → conjunto
+  clients: number;
+  revenue: number;
   ctr: number;
   cpl: number; // spend / leads
   cpr: number; // spend / meetings (custo por reunião do conjunto)
@@ -706,11 +759,17 @@ export function adsetPerformance(data: DashboardData, range?: DateRange): AdsetP
   }
 
   const meetingsByAdset = new Map<string, number>();
+  const clientsByAdset = new Map<string, number>();
+  const revenueByAdset = new Map<string, number>();
   for (const l of leads) {
-    if (!isBooked(l)) continue;
     const adId = leadAdKey(l);
     const adset = adId ? adToAdset.get(adId) : undefined;
-    if (adset) meetingsByAdset.set(adset, (meetingsByAdset.get(adset) ?? 0) + 1);
+    if (!adset) continue;
+    if (isBooked(l)) meetingsByAdset.set(adset, (meetingsByAdset.get(adset) ?? 0) + 1);
+    if (isClient(l)) {
+      clientsByAdset.set(adset, (clientsByAdset.get(adset) ?? 0) + 1);
+      revenueByAdset.set(adset, (revenueByAdset.get(adset) ?? 0) + (l.value ?? 0));
+    }
   }
 
   return [...byAdset.entries()]
@@ -725,6 +784,8 @@ export function adsetPerformance(data: DashboardData, range?: DateRange): AdsetP
         clicks: k.clicks,
         leads: k.leads,
         meetings,
+        clients: clientsByAdset.get(adset) ?? 0,
+        revenue: revenueByAdset.get(adset) ?? 0,
         ctr: k.ctr,
         cpl: k.cpl,
         cpr: div(k.spend, meetings),
@@ -785,6 +846,65 @@ export function campaignPacing(data: DashboardData, nowIso: string): CampaignPac
 export function projectLinear(current: number, elapsedDays: number, totalDays: number): number {
   if (elapsedDays <= 0) return current;
   return (current / elapsedDays) * totalDays;
+}
+
+// ---- coorte semanal do funil ---------------------------------------
+
+export interface Cohort {
+  week: string; // yyyy-mm-dd da segunda-feira
+  label: string; // "dd/mm"
+  leads: number;
+  meetings: number;
+  attended: number;
+  clients: number;
+  revenue: number;
+  leadToMeeting: number;
+  immature: boolean; // coorte recente ainda maturando (não comparar direto)
+}
+
+/** Segunda-feira (UTC) da semana de uma data ISO. */
+function weekStart(iso: string): string {
+  const d = new Date(iso.slice(0, 10) + "T00:00:00Z");
+  const dow = (d.getUTCDay() + 6) % 7; // Mon=0 … Sun=6
+  d.setUTCDate(d.getUTCDate() - dow);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Funil por semana de ENTRADA do lead. Ler conversão sem misturar coortes novas
+ * (ainda maturando) com maduras — e comparar se a qualidade melhora semana a semana.
+ */
+export function cohortWeekly(
+  data: DashboardData,
+  range: DateRange | undefined,
+  nowIso: string,
+): Cohort[] {
+  const leads = filterLeads(data.leads, range);
+  const byWeek = new Map<string, Lead[]>();
+  for (const l of leads) {
+    const w = weekStart(l.createdAt);
+    const list = byWeek.get(w) ?? [];
+    list.push(l);
+    byWeek.set(w, list);
+  }
+  const nowMs = new Date(nowIso).getTime();
+  return [...byWeek.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([week, ls]) => {
+      const meetings = countMeetings(ls);
+      const startMs = new Date(week + "T00:00:00Z").getTime();
+      return {
+        week,
+        label: `${week.slice(8, 10)}/${week.slice(5, 7)}`,
+        leads: ls.length,
+        meetings,
+        attended: countAttended(ls),
+        clients: countClients(ls),
+        revenue: sumRevenue(ls),
+        leadToMeeting: div(meetings, ls.length),
+        immature: nowMs - startMs < 7 * 86_400_000,
+      };
+    });
 }
 
 // ---- posts ----------------------------------------------------------

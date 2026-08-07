@@ -14,10 +14,12 @@ export const statusMeta: Record<
   lead: { label: "Lead", variant: "muted" },
   agendou: { label: "Agendou", variant: "default" },
   compareceu: { label: "Compareceu", variant: "good" },
+  cliente: { label: "Cliente", variant: "good" },
   perdido: { label: "Perdido", variant: "critical" },
 };
 
 export const statusOrder: Record<LeadStatus, number> = {
+  cliente: 4,
   compareceu: 3,
   agendou: 2,
   lead: 1,
@@ -58,8 +60,17 @@ export function StatusSelect({
           disabled={pending}
           onChange={(e) => {
             const next = e.target.value as LeadStatus;
+            let value: number | undefined;
+            if (next === "cliente") {
+              const raw = window.prompt("Valor da carta/contrato (R$):", "");
+              if (raw === null) return; // cancelou — não muda o status
+              const parsed = Number(
+                raw.replace(/[^\d,.-]/g, "").replace(/\./g, "").replace(",", "."),
+              );
+              value = Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+            }
             start(async () => {
-              const result = await changeLeadStatus(id, next);
+              const result = await changeLeadStatus(id, next, value);
               setNote(result.message);
               router.refresh();
             });
@@ -72,6 +83,7 @@ export function StatusSelect({
           <option value="lead">Lead</option>
           <option value="agendou">Agendou</option>
           <option value="compareceu">Compareceu</option>
+          <option value="cliente">Cliente</option>
           <option value="perdido">Perdido</option>
         </select>
       </div>

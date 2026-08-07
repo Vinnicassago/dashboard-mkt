@@ -167,6 +167,7 @@ const toLead = (r: Row): Lead => ({
   utmContent: r.utm_content ? s(r.utm_content) : undefined,
   status: s(r.status) as LeadStatus,
   meetingAt: r.meeting_at ? s(r.meeting_at) : undefined,
+  value: r.value == null ? undefined : n(r.value),
   fbc: r.fbc ? s(r.fbc) : undefined,
   fbp: r.fbp ? s(r.fbp) : undefined,
   gaClientId: r.ga_client_id ? s(r.ga_client_id) : undefined,
@@ -184,6 +185,7 @@ const fromLead = (l: Lead): Row => ({
   utm_content: l.utmContent ?? null,
   status: l.status,
   meeting_at: l.meetingAt ?? null,
+  value: l.value ?? null,
   fbc: l.fbc ?? null,
   fbp: l.fbp ?? null,
   ga_client_id: l.gaClientId ?? null,
@@ -379,9 +381,10 @@ export const supabaseBackend: DataBackend = {
     await touch(false);
   },
 
-  async setLeadStatus(id: string, status: LeadStatus, meetingAt?: string) {
+  async setLeadStatus(id: string, status: LeadStatus, meetingAt?: string, value?: number) {
     const patch: Row = { status };
     if (meetingAt !== undefined) patch.meeting_at = meetingAt;
+    if (value !== undefined) patch.value = value;
     const { error } = await supabase().from("leads").update(patch).eq("id", id);
     check(error, "update lead");
     await touch();

@@ -26,7 +26,7 @@ export function FunnelChart({ stages }: { stages: FunnelStage[] }) {
           <div className="flex-1 rounded-xl border bg-card p-4">
             <div
               className="mb-2 h-1 w-8 rounded-full"
-              style={{ background: CHART.funnel[i] }}
+              style={{ background: CHART.funnel[i % CHART.funnel.length] }}
             />
             <p className="text-xs font-medium text-muted-foreground">{s.label}</p>
             <p className="mt-1 text-2xl font-semibold tabular">{formatInt(s.value)}</p>

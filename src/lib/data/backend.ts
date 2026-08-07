@@ -29,7 +29,7 @@ export interface DataBackend {
   upsertIgPosts(rows: IgPost[]): Promise<number>;
 
   addLead(lead: Lead): Promise<void>;
-  setLeadStatus(id: string, status: LeadStatus, meetingAt?: string): Promise<void>;
+  setLeadStatus(id: string, status: LeadStatus, meetingAt?: string, value?: number): Promise<void>;
   /** Hard-delete a lead (ex.: entradas de teste) e seus eventos de auditoria. */
   deleteLead(id: string): Promise<void>;
   upsertGoal(goal: Goal): Promise<void>;

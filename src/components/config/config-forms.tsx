@@ -215,11 +215,15 @@ export function LeadForm({ creatives }: { creatives: { adId: string; name: strin
             <option value="lead">Lead</option>
             <option value="agendou">Agendou reunião</option>
             <option value="compareceu">Compareceu</option>
+            <option value="cliente">Cliente</option>
             <option value="perdido">Perdido</option>
           </select>
         </Field>
         <Field label="Data da reunião (opcional)">
           <input type="date" name="meetingAt" className={inputCls} />
+        </Field>
+        <Field label="Valor da carta (R$, se cliente)">
+          <input type="number" name="value" min="0" step="0.01" placeholder="0,00" className={inputCls} />
         </Field>
       </div>
       <SubmitButton>Adicionar lead</SubmitButton>

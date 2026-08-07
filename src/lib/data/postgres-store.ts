@@ -54,7 +54,7 @@ const POST_COLS = ["id", "published_at", "type", "caption", "permalink", "reach"
 const CREATIVE_COLS = ["ad_id", "name", "format", "thumbnail_url", "video_plays", "thru_plays"];
 const AD_COLS = ["date", "ad_id", "campaign", "adset", "objective", "spend", "impressions", "reach", "frequency", "clicks", "leads"];
 const LP_COLS = ["date", "visits", "clicks", "form_submits"];
-const LEAD_COLS = ["id", "created_at", "name", "email", "phone", "utm_source", "utm_campaign", "utm_content", "status", "meeting_at", "fbc", "fbp", "ga_client_id", "ga_session_id"];
+const LEAD_COLS = ["id", "created_at", "name", "email", "phone", "utm_source", "utm_campaign", "utm_content", "status", "meeting_at", "value", "fbc", "fbp", "ga_client_id", "ga_session_id"];
 const GOAL_COLS = ["metric", "period", "target", "lower_is_better"];
 const EVENT_COLS = ["id", "lead_id", "lead_name", "actor", "action", "from_status", "to_status", "created_at"];
 
@@ -229,12 +229,19 @@ export const postgresBackend: DataBackend = {
     await touch(false);
   },
 
-  async setLeadStatus(id: string, status: LeadStatus, meetingAt?: string) {
+  async setLeadStatus(id: string, status: LeadStatus, meetingAt?: string, value?: number) {
+    const sets = ["status = $1"];
+    const params: unknown[] = [status];
     if (meetingAt !== undefined) {
-      await run("update leads set status = $1, meeting_at = $2 where id = $3", [status, meetingAt, id]);
-    } else {
-      await run("update leads set status = $1 where id = $2", [status, id]);
+      params.push(meetingAt);
+      sets.push(`meeting_at = $${params.length}`);
     }
+    if (value !== undefined) {
+      params.push(value);
+      sets.push(`value = $${params.length}`);
+    }
+    params.push(id);
+    await run(`update leads set ${sets.join(", ")} where id = $${params.length}`, params);
     await touch();
   },
 

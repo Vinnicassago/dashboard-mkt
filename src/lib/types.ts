@@ -104,7 +104,7 @@ export interface LpDaily {
 
 // ------------------------- Leads & meetings -------------------------
 
-export type LeadStatus = "lead" | "agendou" | "compareceu" | "perdido";
+export type LeadStatus = "lead" | "agendou" | "compareceu" | "cliente" | "perdido";
 
 export interface Lead {
   id: string;
@@ -118,6 +118,8 @@ export interface Lead {
   utmContent?: string; // maps to the creative/ad
   status: LeadStatus;
   meetingAt?: string; // full ISO datetime when scheduled
+  /** Valor da carta/contrato (BRL), preenchido quando o lead vira cliente. */
+  value?: number;
   /**
    * Pseudonymous identifiers captured on the landing page. Kept so a later
    * server-side event (Schedule) can still be matched to the same person.

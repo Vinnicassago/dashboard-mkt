@@ -209,12 +209,17 @@ function buildSeedData(): DashboardData {
       const minute = Math.floor(rand(0, 60));
       const createdAt = `${bucket.date}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00`;
 
-      // status distribution — better creatives book more meetings
+      // status distribution — better creatives book more meetings; alguns
+      // comparecimentos viram cliente (com valor de carta) para demonstrar receita.
       const r = rng();
       let status: LeadStatus;
       let meetingAt: string | undefined;
+      let value: number | undefined;
       const bookBias = def.conv > 0.13 ? 0.08 : 0; // stronger creatives convert to meetings a bit more
-      if (r < 0.22 + bookBias) {
+      if (r < 0.09 + bookBias) {
+        status = "cliente";
+        value = Math.round(rand(80, 260)) * 1000; // carta de R$80k–260k
+      } else if (r < 0.22 + bookBias) {
         status = "compareceu";
       } else if (r < 0.42 + bookBias) {
         status = "agendou";
@@ -223,7 +228,7 @@ function buildSeedData(): DashboardData {
       } else {
         status = "lead";
       }
-      if (status === "agendou" || status === "compareceu") {
+      if (status === "agendou" || status === "compareceu" || status === "cliente") {
         meetingAt = `${addDays(bucket.date, Math.floor(rand(1, 5)))}T${String(Math.floor(rand(9, 18))).padStart(2, "0")}:00:00`;
       }
 
@@ -238,6 +243,7 @@ function buildSeedData(): DashboardData {
         utmContent: bucket.adId,
         status,
         meetingAt,
+        value,
       });
     }
   }

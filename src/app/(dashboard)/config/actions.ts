@@ -127,6 +127,8 @@ export async function addLeadAction(
   const meetingDate = String(formData.get("meetingAt") ?? "").trim();
   const phone = String(formData.get("phone") ?? "").trim() || undefined;
   const email = String(formData.get("email") ?? "").trim() || undefined;
+  const valueRaw = Number(formData.get("value"));
+  const value = Number.isFinite(valueRaw) && valueRaw > 0 ? valueRaw : undefined;
   if (!name) return { ok: false, message: "Informe o nome do lead." };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { ok: false, message: "Informe a data do lead." };
 
@@ -141,6 +143,7 @@ export async function addLeadAction(
     utmContent,
     status,
     meetingAt: /^\d{4}-\d{2}-\d{2}$/.test(meetingDate) ? `${meetingDate}T10:00:00` : undefined,
+    value,
   });
   await addLeadEvent({
     id: newEventId(),

@@ -61,8 +61,8 @@ export const upsertIgPosts = (rows: IgPost[]) => backend().upsertIgPosts(rows);
 
 export const addLead = (lead: Lead) => backend().addLead(lead);
 
-export const setLeadStatus = (id: string, status: LeadStatus, meetingAt?: string) =>
-  backend().setLeadStatus(id, status, meetingAt);
+export const setLeadStatus = (id: string, status: LeadStatus, meetingAt?: string, value?: number) =>
+  backend().setLeadStatus(id, status, meetingAt, value);
 
 export const deleteLead = (id: string) => backend().deleteLead(id);
 

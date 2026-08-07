@@ -160,12 +160,13 @@ export const localBackend: DataBackend = {
     });
   },
 
-  async setLeadStatus(id: string, status: LeadStatus, meetingAt?: string) {
+  async setLeadStatus(id: string, status: LeadStatus, meetingAt?: string, value?: number) {
     commit((data) => {
       const lead = data.leads.find((l) => l.id === id);
       if (lead) {
         lead.status = status;
         if (meetingAt !== undefined) lead.meetingAt = meetingAt;
+        if (value !== undefined) lead.value = value;
       }
     });
   },

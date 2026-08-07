@@ -1,10 +1,11 @@
-import { MousePointerClick, UserPlus, CalendarCheck, CheckCircle2 } from "lucide-react";
+import { MousePointerClick, UserPlus, CalendarCheck, CheckCircle2, Handshake } from "lucide-react";
 import { KpiCard } from "@/components/kpi/kpi-card";
 import { FunnelChart } from "@/components/charts/funnel-chart";
 import { HorizontalBars } from "@/components/charts/horizontal-bars";
 import { LeadsTable, type LeadRow } from "@/components/tables/leads-table";
 import { ChartCard } from "@/components/ui/chart-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { EmptyState } from "@/components/ui/empty-state";
 import { CHART } from "@/components/charts/colors";
 import { getData } from "@/lib/data/store";
@@ -13,12 +14,13 @@ import { pageRange } from "@/lib/page-range";
 import {
   adIdFromUtmContent,
   buildFunnel,
+  cohortWeekly,
   filterLeads,
   isBooked,
   lpKpis,
   overviewKpis,
 } from "@/lib/metrics";
-import { formatInt, formatPercent } from "@/lib/format";
+import { formatCurrency, formatCurrency0, formatDecimal, formatInt, formatPercent } from "@/lib/format";
 
 function short(name: string, max = 24): string {
   return name.length > max ? name.slice(0, max - 1) + "…" : name;
@@ -48,6 +50,7 @@ export default async function FunilPage({
   const lp = lpKpis(data, range);
   const k = overviewKpis(data, range);
   const leads = filterLeads(data.leads, range);
+  const cohorts = cohortWeekly(data, range, new Date().toISOString());
 
   const nameById = new Map(data.creatives.map((c) => [c.adId, c.name]));
 
@@ -83,12 +86,42 @@ export default async function FunilPage({
       </ChartCard>
 
       {/* Conversion rates */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <KpiCard label="CTR (anúncio)" value={formatPercent(k.ctr)} Icon={MousePointerClick} hint="cliques ÷ impressões" />
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
         <KpiCard label="LP → Lead" value={formatPercent(lp.visitToLead)} Icon={UserPlus} hint="leads ÷ visitas" />
         <KpiCard label="Lead → Reunião" value={formatPercent(k.leadToMeeting)} Icon={CalendarCheck} hint="reuniões ÷ leads" />
         <KpiCard label="Comparecimento" value={formatPercent(k.showRate)} Icon={CheckCircle2} hint="compareceu ÷ agendadas" />
+        <KpiCard label="Reunião → Cliente" value={formatPercent(k.meetingToClient)} Icon={Handshake} hint="clientes ÷ reuniões" />
+        <KpiCard label="CTR (anúncio)" value={formatPercent(k.ctr)} Icon={MousePointerClick} hint="cliques ÷ impressões" />
       </div>
+
+      {/* Receita e retorno — só quando há cliente/receita */}
+      {k.clients > 0 || k.revenue > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Receita e retorno</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+              {[
+                { label: "Clientes", value: formatInt(k.clients) },
+                { label: "Receita", value: formatCurrency0(k.revenue) },
+                { label: "CAC", value: formatCurrency0(k.cac) },
+                { label: "ROAS", value: `${formatDecimal(k.roas, 2)}×` },
+                { label: "Ticket médio", value: formatCurrency0(k.ticket) },
+                { label: "Valor / reunião", value: formatCurrency0(k.valuePerMeeting) },
+              ].map((s) => (
+                <div key={s.label}>
+                  <p className="text-xs text-muted-foreground">{s.label}</p>
+                  <p className="text-2xl font-semibold tabular">{s.value}</p>
+                </div>
+              ))}
+            </div>
+            <p className="mt-3 text-xs text-muted-foreground">
+              CAC = gasto de conversão ÷ clientes · ROAS = receita ÷ investimento total.
+            </p>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {/* Landing page stats */}
       <Card>
@@ -116,6 +149,52 @@ export default async function FunilPage({
           </div>
         </CardContent>
       </Card>
+
+      {/* Coorte semanal — maturação por semana de entrada */}
+      {cohorts.length >= 2 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Coorte por semana de entrada</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <THead>
+                <TR className="hover:bg-transparent">
+                  <TH>Semana</TH>
+                  <TH className="text-right">Leads</TH>
+                  <TH className="text-right">Reuniões</TH>
+                  <TH className="text-right">Lead→Reunião</TH>
+                  <TH className="text-right">Clientes</TH>
+                  <TH className="text-right">Receita</TH>
+                </TR>
+              </THead>
+              <TBody>
+                {cohorts.map((c) => (
+                  <TR key={c.week}>
+                    <TD className="font-medium">
+                      {c.label}
+                      {c.immature ? (
+                        <span className="ml-1.5 text-xs font-normal text-muted-foreground">
+                          (maturando)
+                        </span>
+                      ) : null}
+                    </TD>
+                    <TD className="text-right tabular">{formatInt(c.leads)}</TD>
+                    <TD className="text-right tabular">{formatInt(c.meetings)}</TD>
+                    <TD className="text-right tabular">{formatPercent(c.leadToMeeting)}</TD>
+                    <TD className="text-right tabular">{formatInt(c.clients)}</TD>
+                    <TD className="text-right tabular">{formatCurrency0(c.revenue)}</TD>
+                  </TR>
+                ))}
+              </TBody>
+            </Table>
+            <p className="mt-3 text-xs text-muted-foreground">
+              Coortes recentes ainda estão maturando — não compare a conversão delas com
+              as semanas mais antigas.
+            </p>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {/* Origin + leads */}
       <ChartCard title="Leads por criativo (origem)" description="De onde vieram os cadastros.">

@@ -14,7 +14,7 @@ import { GRAPH_FB, capiToken, capiTestEventCode, datasetId } from "./config";
  * the IP and the user agent are sent RAW — hashing those breaks matching.
  */
 
-export type CapiEventName = "Lead" | "Schedule";
+export type CapiEventName = "Lead" | "Schedule" | "Purchase";
 
 export interface CapiUser {
   email?: string;

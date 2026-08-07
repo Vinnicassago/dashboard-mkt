@@ -88,6 +88,7 @@ create table if not exists leads (
   utm_content text,
   status text not null default 'lead',
   meeting_at timestamptz,
+  value numeric,
   fbc text,
   fbp text,
   ga_client_id text,
@@ -140,4 +141,5 @@ alter table ig_posts add column if not exists total_watch_time numeric;
 alter table ig_account_daily add column if not exists reach_followers integer;
 alter table ig_account_daily add column if not exists reach_non_followers integer;
 alter table ad_daily add column if not exists objective text;
+alter table leads add column if not exists value numeric;
 `;

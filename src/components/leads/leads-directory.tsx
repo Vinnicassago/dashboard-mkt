@@ -178,6 +178,7 @@ const FILTERS: { key: LeadStatus | "todos"; label: string }[] = [
   { key: "lead", label: "Leads" },
   { key: "agendou", label: "Agendou" },
   { key: "compareceu", label: "Compareceu" },
+  { key: "cliente", label: "Cliente" },
   { key: "perdido", label: "Perdido" },
 ];
 
