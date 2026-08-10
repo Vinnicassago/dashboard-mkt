@@ -1,10 +1,8 @@
 import "server-only";
-import { GRAPH_IG, igUserId } from "./config";
+import { GRAPH_IG } from "./config";
 import { graphUrl, metaGet } from "./http";
-import { getIgToken } from "./token";
 import { getData, upsertIgAccountDaily, upsertIgPosts } from "../data/store";
 import type { IgAccountDaily, IgMediaType, IgPost } from "../types";
-import { DEFAULT_BRAND } from "../types";
 
 /**
  * Instagram organic — "Instagram API with Instagram Login" (graph.instagram.com).
@@ -140,19 +138,20 @@ export interface InstagramSyncResult {
   note: string;
 }
 
-/** Pull account insights + recent posts and store them. */
+/** Pull account insights + recent posts for ONE brand's IG account and store them. */
 export async function syncInstagram({
+  userId,
+  token,
+  brand,
   days = 7,
   postLimit = 25,
-}: { days?: number; postLimit?: number } = {}): Promise<InstagramSyncResult> {
-  const userId = igUserId();
-  const token = await getIgToken();
-  if (!userId || !token) {
-    throw new Error(
-      "Instagram não configurado: defina IG_USER_ID e IG_ACCESS_TOKEN.",
-    );
-  }
-
+}: {
+  userId: string;
+  token: string;
+  brand: string;
+  days?: number;
+  postLimit?: number;
+}): Promise<InstagramSyncResult> {
   // ---- profile snapshot (followers_count is "now", not a time series) ----
   const profile = await metaGet<ProfileResponse>(
     graphUrl(GRAPH_IG, `/${userId}`, {
@@ -163,7 +162,7 @@ export async function syncInstagram({
   const followersNow = Number(profile.followers_count ?? 0);
 
   const existing = new Map(
-    (await getData()).igAccountDaily.map((r) => [r.date, r]),
+    (await getData(brand)).igAccountDaily.map((r) => [r.date, r]),
   );
   const today = new Date().toISOString().slice(0, 10);
   const dates = lastNDays(days);
@@ -258,7 +257,7 @@ export async function syncInstagram({
     ]);
 
     rows.push({
-      brand: DEFAULT_BRAND,
+      brand,
       date,
       followers: followerByDate.get(date) ?? followersNow,
       reach: readMetric(res.data, "reach"),
@@ -307,7 +306,7 @@ export async function syncInstagram({
     const totalWatchMs = readMetric(ins.data, "ig_reels_video_view_total_time");
     posts.push({
       id: m.id,
-      brand: DEFAULT_BRAND,
+      brand,
       publishedAt: m.timestamp ?? new Date().toISOString(),
       type,
       caption: (m.caption ?? "").slice(0, 300) || "(sem legenda)",

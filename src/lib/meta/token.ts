@@ -1,8 +1,8 @@
 import "server-only";
 import { getState, setState } from "../data/store";
 import { STATE_KEYS, type StoredToken } from "../data/backend";
-import { igTokenFromEnv } from "./config";
 import { metaGet } from "./http";
+import { DEFAULT_BRAND } from "../types";
 
 /**
  * Instagram long-lived tokens last 60 days and do NOT refresh themselves —
@@ -21,11 +21,16 @@ interface RefreshResponse {
   expires_in: number; // seconds
 }
 
-/** The token currently in force: the rotated one if present, else the env var. */
-export async function getIgToken(): Promise<string | undefined> {
-  const stored = await getState<StoredToken>(STATE_KEYS.igToken);
+/** Chave do token no state bag, por marca (a padrão mantém "ig_token" para compat). */
+function tokenKey(brand: string): string {
+  return brand === DEFAULT_BRAND ? STATE_KEYS.igToken : `${STATE_KEYS.igToken}_${brand}`;
+}
+
+/** The token currently in force for a brand: the rotated one if present, else the env var. */
+export async function getIgToken(brand: string, envToken?: string): Promise<string | undefined> {
+  const stored = await getState<StoredToken>(tokenKey(brand));
   if (stored?.token) return stored.token;
-  return igTokenFromEnv();
+  return envToken;
 }
 
 function daysUntil(iso: string): number {
@@ -36,9 +41,10 @@ function daysUntil(iso: string): number {
  * Refresh the long-lived token when it is close to expiring.
  * Returns a short human-readable note about what happened.
  */
-export async function refreshIgTokenIfNeeded(): Promise<string> {
-  const stored = await getState<StoredToken>(STATE_KEYS.igToken);
-  const token = stored?.token ?? igTokenFromEnv();
+export async function refreshIgTokenIfNeeded(brand: string, envToken?: string): Promise<string> {
+  const key = tokenKey(brand);
+  const stored = await getState<StoredToken>(key);
+  const token = stored?.token ?? envToken;
   if (!token) return "sem token do Instagram configurado";
 
   // With no known expiry yet we still refresh once to learn it.
@@ -55,6 +61,6 @@ export async function refreshIgTokenIfNeeded(): Promise<string> {
   if (!res?.access_token) return "não foi possível renovar o token";
 
   const expiresAt = new Date(Date.now() + res.expires_in * 1000).toISOString();
-  await setState(STATE_KEYS.igToken, { token: res.access_token, expiresAt });
+  await setState(key, { token: res.access_token, expiresAt });
   return `token renovado (válido até ${expiresAt.slice(0, 10)})`;
 }

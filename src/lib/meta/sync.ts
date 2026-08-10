@@ -1,14 +1,19 @@
 import "server-only";
-import { syncAds } from "./ads";
+import { syncAdsAccount } from "./ads";
 import { syncInstagram } from "./instagram";
-import { refreshIgTokenIfNeeded } from "./token";
-import { integrationStatus } from "./config";
+import { refreshIgTokenIfNeeded, getIgToken } from "./token";
+import { metaBrands, type BrandMeta } from "./config";
 import { getState, setState } from "../data/store";
 import { STATE_KEYS } from "../data/backend";
 
 /**
- * Orchestrates the daily collection. One broken integration must never stop
- * the other, so every source is captured independently.
+ * Orchestrates the daily collection, MULTIMARCA. Regras:
+ *  - Uma integração/marca que quebra nunca derruba as outras (try/catch isolado).
+ *  - Ads: agrupado por AD ACCOUNT. Como brunno e krone dividem a mesma conta, um
+ *    único pull é particionado por campanha entre as marcas (por isso a conta usa
+ *    SEMPRE todas as marcas que a dividem, mesmo com `brand` alvo único — senão as
+ *    linhas da outra marca cairiam no catch-all errado).
+ *  - Instagram: uma conta por marca (@krone.capital tem IG_USER_ID próprio).
  */
 
 export interface SourceOutcome {
@@ -29,51 +34,72 @@ export type SyncSource = "all" | "ads" | "instagram";
 export async function runSync({
   source = "all",
   days,
-}: { source?: SyncSource; days?: number } = {}): Promise<SyncReport> {
-  const status = integrationStatus();
+  brand,
+}: { source?: SyncSource; days?: number; brand?: string } = {}): Promise<SyncReport> {
   const ranAt = new Date().toISOString();
   const report: SyncReport = { ranAt, skipped: [] };
+  const all = metaBrands();
+  const targets = brand ? all.filter((b) => b.slug === brand) : all;
 
-  // ---- ads ----
+  // ---- ads (por ad account; conta compartilhada = 1 pull particionado) ----
   if (source === "all" || source === "ads") {
-    if (!status.ads) {
+    const accounts = new Map<string, BrandMeta[]>();
+    for (const b of targets) {
+      if (!b.adAccountId || !b.adsToken) continue;
+      accounts.set(b.adAccountId, all.filter((x) => x.adAccountId === b.adAccountId && x.adsToken));
+    }
+    if (accounts.size === 0) {
       report.skipped.push("tráfego pago (credenciais ausentes)");
     } else {
-      try {
-        const r = await syncAds({ days: days ?? 30 });
-        report.ads = {
-          ok: true,
-          detail:
-            `${r.rows} linha(s) e ${r.creatives} criativo(s) de ${r.since} a ${r.until}` +
-            (r.objectives.length ? ` · objetivos: ${r.objectives.join(", ")}` : " · objetivos: (nenhum retornado)"),
-        };
-        await setState(STATE_KEYS.lastSyncAds, ranAt);
-      } catch (e) {
-        report.ads = { ok: false, detail: e instanceof Error ? e.message : String(e) };
+      const notes: string[] = [];
+      let ok = true;
+      for (const [account, brandsOnAccount] of accounts) {
+        try {
+          const r = await syncAdsAccount({
+            account,
+            token: brandsOnAccount[0].adsToken!,
+            brands: brandsOnAccount,
+            days: days ?? 30,
+          });
+          const dist = Object.entries(r.byBrand).map(([s, n]) => `${s}: ${n}`).join(", ") || "0 linhas";
+          notes.push(`${account} (${r.since}→${r.until}) → ${dist}`);
+        } catch (e) {
+          ok = false;
+          notes.push(`${account}: erro — ${e instanceof Error ? e.message : String(e)}`);
+        }
       }
+      report.ads = { ok, detail: notes.join(" · ") };
+      if (ok) await setState(STATE_KEYS.lastSyncAds, ranAt);
     }
   }
 
-  // ---- instagram ----
+  // ---- instagram (uma conta por marca) ----
   if (source === "all" || source === "instagram") {
-    if (!status.instagram) {
+    const igBrands = targets.filter((b) => b.igUserId && b.igToken);
+    if (igBrands.length === 0) {
       report.skipped.push("Instagram (credenciais ausentes)");
     } else {
-      try {
-        report.token = await refreshIgTokenIfNeeded();
-      } catch (e) {
-        report.token = `falha ao renovar token: ${e instanceof Error ? e.message : String(e)}`;
+      const notes: string[] = [];
+      const tokenNotes: string[] = [];
+      let ok = true;
+      for (const b of igBrands) {
+        try {
+          tokenNotes.push(`${b.slug}: ${await refreshIgTokenIfNeeded(b.slug, b.igToken)}`);
+        } catch (e) {
+          tokenNotes.push(`${b.slug}: falha token — ${e instanceof Error ? e.message : String(e)}`);
+        }
+        try {
+          const token = (await getIgToken(b.slug, b.igToken))!;
+          const r = await syncInstagram({ userId: b.igUserId!, token, brand: b.slug, days: days ?? 7 });
+          notes.push(`${b.slug}: ${r.note}`);
+        } catch (e) {
+          ok = false;
+          notes.push(`${b.slug}: erro — ${e instanceof Error ? e.message : String(e)}`);
+        }
       }
-      try {
-        const r = await syncInstagram({ days: days ?? 7 });
-        report.instagram = { ok: true, detail: r.note };
-        await setState(STATE_KEYS.lastSyncInstagram, ranAt);
-      } catch (e) {
-        report.instagram = {
-          ok: false,
-          detail: e instanceof Error ? e.message : String(e),
-        };
-      }
+      report.instagram = { ok, detail: notes.join(" · ") };
+      report.token = tokenNotes.join(" · ");
+      if (ok) await setState(STATE_KEYS.lastSyncInstagram, ranAt);
     }
   }
 

@@ -1,9 +1,8 @@
 import "server-only";
-import { GRAPH_FB, adAccountId, adsToken } from "./config";
+import { GRAPH_FB, brandForCampaign, type BrandMeta } from "./config";
 import { graphUrl, isoDaysAgo, isoToday, metaGet } from "./http";
 import { upsertAdDaily, upsertCreatives } from "../data/store";
 import type { AdDaily, Creative, CreativeFormat } from "../types";
-import { DEFAULT_BRAND } from "../types";
 
 /**
  * Meta Marketing API — daily performance per ad.
@@ -23,6 +22,7 @@ interface InsightRow {
   ad_name?: string;
   adset_id?: string;
   adset_name?: string;
+  campaign_id?: string;
   campaign_name?: string;
   objective?: string; // objetivo (efetivo) da campanha, ex. OUTCOME_LEADS
   spend?: string;
@@ -182,18 +182,27 @@ export interface AdsSyncResult {
   until: string;
   /** valores de objetivo/optimization_goal crus vistos (diagnóstico). */
   objectives: string[];
+  /** linhas atribuídas por marca (particionamento do ad account compartilhado). */
+  byBrand: Record<string, number>;
 }
 
-/** Pull the last `days` days of ad performance and store it. */
-export async function syncAds({ days = 30 }: { days?: number } = {}): Promise<AdsSyncResult> {
-  const account = adAccountId();
-  const token = adsToken();
-  if (!account || !token) {
-    throw new Error(
-      "Tráfego pago não configurado: defina META_AD_ACCOUNT_ID e META_ADS_ACCESS_TOKEN.",
-    );
-  }
-
+/**
+ * Pull the last `days` days of ad performance for ONE ad account and store it,
+ * atribuindo cada linha à marca dona da campanha (`brands` = marcas que dividem
+ * esta conta). Numa conta compartilhada, um único pull vira linhas de várias
+ * marcas — o store separa pela coluna `brand` (PK composta).
+ */
+export async function syncAdsAccount({
+  account,
+  token,
+  brands,
+  days = 30,
+}: {
+  account: string;
+  token: string;
+  brands: BrandMeta[];
+  days?: number;
+}): Promise<AdsSyncResult> {
   const since = isoDaysAgo(days);
   const until = isoToday();
 
@@ -207,6 +216,7 @@ export async function syncAds({ days = 30 }: { days?: number } = {}): Promise<Ad
       "ad_name",
       "adset_id",
       "adset_name",
+      "campaign_id",
       "campaign_name",
       "objective",
       "spend",
@@ -230,11 +240,15 @@ export async function syncAds({ days = 30 }: { days?: number } = {}): Promise<Ad
   const adRows: AdDaily[] = [];
   const creativeAcc = new Map<string, Creative>();
   const objectivesSeen = new Set<string>();
+  const byBrand: Record<string, number> = {};
 
   for (const r of raw) {
     const adId = r.ad_id ?? r.ad_name ?? "sem-id";
     const impressions = num(r.impressions);
     const reach = num(r.reach);
+    // Marca dona da linha: pela campanha (conta compartilhada entre marcas).
+    const brand = brandForCampaign(r.campaign_name, r.campaign_id, brands);
+    byBrand[brand] = (byBrand[brand] ?? 0) + 1;
 
     // Precedência: optimization_goal (mais confiável) → objetivo da campanha →
     // objective do insights (pode vir vazio p/ post impulsionado).
@@ -244,7 +258,7 @@ export async function syncAds({ days = 30 }: { days?: number } = {}): Promise<Ad
     if (objective) objectivesSeen.add(objective);
 
     adRows.push({
-      brand: DEFAULT_BRAND,
+      brand,
       date: r.date_start.slice(0, 10),
       campaign: r.campaign_name ?? "",
       adset: r.adset_name ?? "",
@@ -265,7 +279,7 @@ export async function syncAds({ days = 30 }: { days?: number } = {}): Promise<Ad
     const prev = creativeAcc.get(adId);
     creativeAcc.set(adId, {
       adId,
-      brand: DEFAULT_BRAND,
+      brand,
       name: info?.name ?? r.ad_name ?? adId,
       format: info?.format ?? (plays > 0 ? "video" : (prev?.format ?? "imagem")),
       thumbnailUrl: info?.thumbnailUrl ?? prev?.thumbnailUrl,
@@ -284,5 +298,6 @@ export async function syncAds({ days = 30 }: { days?: number } = {}): Promise<Ad
     since,
     until,
     objectives: [...objectivesSeen].sort(),
+    byBrand,
   };
 }

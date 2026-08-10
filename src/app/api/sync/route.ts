@@ -35,9 +35,11 @@ async function handle(request: Request) {
     sourceParam === "ads" || sourceParam === "instagram" ? sourceParam : "all";
   const daysParam = Number(url.searchParams.get("days"));
   const days = Number.isFinite(daysParam) && daysParam > 0 ? daysParam : undefined;
+  // Opcional: sincroniza só uma marca (útil p/ cron por marca / rate-limit).
+  const brand = url.searchParams.get("brand")?.trim() || undefined;
 
   try {
-    const report = await runSync({ source, days });
+    const report = await runSync({ source, days, brand });
     revalidatePath("/", "layout");
     return NextResponse.json(report);
   } catch (e) {
