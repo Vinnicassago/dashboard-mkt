@@ -82,6 +82,9 @@ export const STATE_KEYS = {
   lastSyncAds: "last_sync_ads",
   lastSyncInstagram: "last_sync_instagram",
   igToken: "ig_token",
+  /** Regras de campanha→marca configuradas pela UI: Record<slug, string[]>.
+   *  Sobrepõem o env (<SLUG>_CAMPAIGN_MATCH) quando presentes. */
+  brandCampaignMatch: "brand_campaign_match",
 } as const;
 
 export interface StoredToken {

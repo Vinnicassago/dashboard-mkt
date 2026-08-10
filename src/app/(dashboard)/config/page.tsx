@@ -1,18 +1,22 @@
-import { Camera, Database, FileSpreadsheet, Plug, Target, UserPlus, Users, UsersRound } from "lucide-react";
+import { Camera, Database, FileSpreadsheet, Layers, Plug, Target, UserPlus, Users, UsersRound } from "lucide-react";
 import {
+  BrandMatchForm,
   GoalsForm,
   ImportForm,
   LeadForm,
   LeadsImportForm,
   ManualIgForm,
+  ReclassifyAdsButton,
   ResetButton,
   SyncPanel,
 } from "@/components/config/config-forms";
 import { UsersManager } from "@/components/config/users-manager";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { activeBackend, getData, listUsers } from "@/lib/data/store";
+import { activeBackend, getData, getState, listUsers } from "@/lib/data/store";
+import { STATE_KEYS } from "@/lib/data/backend";
 import { activeBrandSlug } from "@/lib/active-brand";
+import { BRANDS } from "@/lib/brands";
 import { ADS_CSV_TEMPLATE } from "@/lib/csv";
 import { LEADS_CSV_TEMPLATE } from "@/lib/leads-csv";
 import { integrationStatus } from "@/lib/meta/config";
@@ -20,7 +24,7 @@ import { getLastSync } from "@/lib/meta/sync";
 import { isAuthEnabled } from "@/lib/auth/config";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { can } from "@/lib/auth/guard";
-import { formatDateTime } from "@/lib/format";
+import { formatCurrency0, formatDateTime } from "@/lib/format";
 
 // Integration status and last-sync times must reflect runtime, never build time.
 export const dynamic = "force-dynamic";
@@ -63,6 +67,20 @@ export default async function ConfigPage() {
   const creatives = data.creatives.map((c) => ({ adId: c.adId, name: c.name }));
   const currentGoals: Record<string, number> = {};
   for (const g of data.goals) currentGoals[g.metric] = g.target;
+
+  // Separação por marca: gasto atribuído a cada marca hoje + regra configurada.
+  const multiBrand = BRANDS.length > 1;
+  const brandSpend = multiBrand
+    ? await Promise.all(
+        BRANDS.map(async (b) => {
+          const d = await getData(b.slug);
+          return { slug: b.slug, label: b.label, spend: d.adDaily.reduce((s, r) => s + r.spend, 0) };
+        }),
+      )
+    : [];
+  const matchState = (await getState<Record<string, string[]>>(STATE_KEYS.brandCampaignMatch)) ?? {};
+  const currentMatch: Record<string, string> = {};
+  for (const [slug, list] of Object.entries(matchState)) currentMatch[slug] = (list ?? []).join(", ");
 
   const syncHint = (iso: string | null) =>
     iso ? `Última sincronização: ${formatDateTime(iso)}` : "Ainda não sincronizado";
@@ -234,6 +252,35 @@ export default async function ConfigPage() {
       {/* Dados de marketing — admin/marketing */}
       {canData ? (
         <>
+          {multiBrand ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Layers className="size-4 text-primary" />
+                  Separação de marcas (tráfego pago)
+                </CardTitle>
+                <CardDescription>
+                  Como as marcas dividem o mesmo ad account, o gasto é separado pela
+                  campanha. Defina como reconhecer as campanhas de cada marca e
+                  reclassifique os anúncios já coletados.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  {brandSpend.map((b) => (
+                    <div key={b.slug} className="rounded-lg border p-3">
+                      <p className="text-xs text-muted-foreground">{b.label}</p>
+                      <p className="tabular text-xl font-semibold">{formatCurrency0(b.spend)}</p>
+                      <p className="text-xs text-muted-foreground">gasto atribuído</p>
+                    </div>
+                  ))}
+                </div>
+                <BrandMatchForm current={currentMatch} />
+                <ReclassifyAdsButton />
+              </CardContent>
+            </Card>
+          ) : null}
+
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">

@@ -5,18 +5,25 @@ import {
   addLead,
   addLeadEvent,
   clearAdData,
+  getData,
+  getState,
   resetToSeed,
+  setState,
   upsertAdDaily,
+  upsertCreatives,
   upsertGoal,
   upsertIgAccountDaily,
 } from "@/lib/data/store";
+import { STATE_KEYS } from "@/lib/data/backend";
 import { parseAdsCsv } from "@/lib/csv";
 import { parseLeadsCsv } from "@/lib/leads-csv";
 import { runSync, type SyncSource } from "@/lib/meta/sync";
+import { resolveMetaBrands, brandForCampaign } from "@/lib/meta/config";
+import { BRANDS } from "@/lib/brands";
 import { can } from "@/lib/auth/guard";
 import { currentActor, newEventId } from "@/lib/auth/actor";
 import { activeBrandSlug } from "@/lib/active-brand";
-import { type GoalMetric, type LeadStatus } from "@/lib/types";
+import { DEFAULT_BRAND, type AdDaily, type Creative, type GoalMetric, type LeadStatus } from "@/lib/types";
 
 const DENIED: ActionState = { ok: false, message: "Você não tem permissão para esta ação." };
 
@@ -46,8 +53,10 @@ export async function importAdsCsv(
   try {
     const text = await file.text();
     const { rows, skipped } = parseAdsCsv(text);
-    const brand = await activeBrandSlug();
-    await upsertAdDaily(rows.map((r) => ({ ...r, brand })));
+    // Separa por campanha (mesma regra do sync da API): o CSV do ad account
+    // compartilhado traz campanhas das duas marcas.
+    const brands = await resolveMetaBrands();
+    await upsertAdDaily(rows.map((r) => ({ ...r, brand: brandForCampaign(r.campaign, undefined, brands) })));
     revalidateAll();
     const extra = skipped > 0 ? ` (${skipped} linha(s) ignorada(s))` : "";
     return { ok: true, message: `${rows.length} linha(s) importada(s) com sucesso${extra}.` };
@@ -228,6 +237,73 @@ export async function resyncAdsCleanAction(): Promise<ActionState> {
       ok: false,
       message: e instanceof Error ? e.message : "Falha ao zerar e ressincronizar.",
     };
+  }
+}
+
+/**
+ * Salva as regras de "quais campanhas são de cada marca" (por marca não-padrão),
+ * guardadas no banco e usadas pelo sync/CSV/reclassificação. A marca padrão
+ * (consorcio) é sempre a catch-all: recebe tudo que não casa com outra marca.
+ */
+export async function setBrandMatchAction(
+  _prev: ActionState | null,
+  formData: FormData,
+): Promise<ActionState> {
+  if (!(await can("data:write"))) return DENIED;
+  const cur = (await getState<Record<string, string[]>>(STATE_KEYS.brandCampaignMatch)) ?? {};
+  const next: Record<string, string[]> = { ...cur };
+  for (const b of BRANDS) {
+    if (b.slug === DEFAULT_BRAND) continue;
+    const raw = formData.get(`match_${b.slug}`);
+    if (raw == null) continue;
+    next[b.slug] = String(raw).split(",").map((s) => s.trim()).filter(Boolean);
+  }
+  await setState(STATE_KEYS.brandCampaignMatch, next);
+  revalidateAll();
+  return {
+    ok: true,
+    message:
+      'Regra de separação salva. Clique em "Reclassificar anúncios por marca" (ou "Zerar e ressincronizar") para aplicar aos dados já coletados.',
+  };
+}
+
+/**
+ * Re-etiqueta os anúncios JÁ armazenados pela campanha (mesma regra do sync), sem
+ * precisar da API. Resolve dados antigos (coletados/importados antes de configurar
+ * a separação) e limpa as linhas duplicadas que um "Sincronizar agora" deixa
+ * quando um anúncio muda de marca (a marca faz parte da chave da linha).
+ */
+export async function reclassifyAdsAction(): Promise<ActionState> {
+  if (!(await can("data:write"))) return DENIED;
+  try {
+    const brands = await resolveMetaBrands();
+    const ads: AdDaily[] = [];
+    const creatives: Creative[] = [];
+    for (const b of BRANDS) {
+      const d = await getData(b.slug);
+      ads.push(...d.adDaily);
+      creatives.push(...d.creatives);
+    }
+    const retaggedAds = ads.map((r) => ({
+      ...r,
+      brand: brandForCampaign(r.campaign, undefined, brands),
+    }));
+    // O criativo não guarda a campanha — herda a marca do seu anúncio.
+    const adBrand = new Map<string, string>();
+    for (const r of retaggedAds) if (!adBrand.has(r.adId)) adBrand.set(r.adId, r.brand);
+    const retaggedCreatives = creatives.map((c) => ({ ...c, brand: adBrand.get(c.adId) ?? c.brand }));
+
+    await clearAdData();
+    await upsertAdDaily(retaggedAds);
+    await upsertCreatives(retaggedCreatives);
+    revalidateAll();
+
+    const dist: Record<string, number> = {};
+    for (const r of retaggedAds) dist[r.brand] = (dist[r.brand] ?? 0) + 1;
+    const summary = Object.entries(dist).map(([s, n]) => `${s}: ${n} linha(s)`).join(" · ");
+    return { ok: true, message: `Anúncios reclassificados por campanha — ${summary || "nenhuma linha"}.` };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "Falha ao reclassificar." };
   }
 }
 

@@ -9,12 +9,16 @@ import {
   addManualIgDay,
   importAdsCsv,
   importLeadsCsv,
+  reclassifyAdsAction,
   resetSeedAction,
   resyncAdsCleanAction,
+  setBrandMatchAction,
   setGoalsAction,
   syncNowAction,
   type ActionState,
 } from "@/app/(dashboard)/config/actions";
+import { BRANDS } from "@/lib/brands";
+import { DEFAULT_BRAND } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const inputCls =
@@ -325,6 +329,67 @@ function CleanResyncAdsButton() {
       </button>
       <p className="text-xs text-muted-foreground">
         Use se os números de tráfego pago estiverem dobrados (dados de CSV somados com os da Meta).
+      </p>
+      <Message state={state} />
+    </div>
+  );
+}
+
+// ---- separação de marcas (campanha → marca) ------------------------
+
+export function BrandMatchForm({ current }: { current: Record<string, string> }) {
+  const [state, action] = useActionState(setBrandMatchAction, null);
+  const extra = BRANDS.filter((b) => b.slug !== DEFAULT_BRAND);
+  return (
+    <form action={action} className="space-y-3">
+      {extra.map((b) => (
+        <Field
+          key={b.slug}
+          label={`Campanhas de ${b.label} — fragmentos do nome ou IDs (separados por vírgula)`}
+        >
+          <input
+            type="text"
+            name={`match_${b.slug}`}
+            defaultValue={current[b.slug] ?? ""}
+            placeholder="KRONE —"
+            className={inputCls}
+          />
+        </Field>
+      ))}
+      <p className="text-xs text-muted-foreground">
+        Tudo que não casar com nenhuma marca fica com a {DEFAULT_BRAND} (padrão).
+        Dica: prefixe as campanhas da krone no Ads Manager (ex.: <code className="font-mono">KRONE — …</code>) e use o prefixo aqui.
+      </p>
+      <SubmitButton>Salvar regra</SubmitButton>
+      <Message state={state} />
+    </form>
+  );
+}
+
+export function ReclassifyAdsButton() {
+  const [pending, startTransition] = useTransition();
+  const [state, setState] = useState<ActionState | null>(null);
+  const router = useRouter();
+  return (
+    <div className="space-y-1.5 border-t pt-3">
+      <button
+        type="button"
+        disabled={pending}
+        onClick={() => {
+          startTransition(async () => {
+            const result = await reclassifyAdsAction();
+            setState(result);
+            router.refresh();
+          });
+        }}
+        className="inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-medium text-muted-foreground hover:text-foreground disabled:opacity-50"
+      >
+        <RefreshCw className={cn("size-4", pending && "animate-spin")} />
+        {pending ? "Reclassificando…" : "Reclassificar anúncios por marca"}
+      </button>
+      <p className="text-xs text-muted-foreground">
+        Re-etiqueta os anúncios já coletados pela campanha (aplica a regra acima aos
+        dados atuais) e remove linhas duplicadas. Não precisa da API.
       </p>
       <Message state={state} />
     </div>

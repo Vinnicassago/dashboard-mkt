@@ -2,6 +2,8 @@ import "server-only";
 import { isSupabaseConfigured } from "../supabase/client";
 import { BRANDS } from "../brands";
 import { DEFAULT_BRAND } from "../types";
+import { getState } from "../data/store";
+import { STATE_KEYS } from "../data/backend";
 
 /**
  * Meta API configuration.
@@ -84,6 +86,21 @@ export function metaBrandConfig(slug: string): BrandMeta {
 /** Config de Meta de todas as marcas do registro (brands.ts). */
 export function metaBrands(): BrandMeta[] {
   return BRANDS.map((b) => metaBrandConfig(b.slug));
+}
+
+/**
+ * Como `metaBrands()`, mas sobrepõe o `campaignMatch` de cada marca com a regra
+ * configurada pela UI (guardada no state bag), se houver. Assim o usuário ajusta
+ * quais campanhas são de cada marca SEM redeploy — o env vira só o padrão.
+ */
+export async function resolveMetaBrands(): Promise<BrandMeta[]> {
+  const base = metaBrands();
+  const overrides =
+    (await getState<Record<string, string[]>>(STATE_KEYS.brandCampaignMatch)) ?? {};
+  return base.map((b) => {
+    const ov = overrides[b.slug];
+    return Array.isArray(ov) && ov.length ? { ...b, campaignMatch: ov } : b;
+  });
 }
 
 /**

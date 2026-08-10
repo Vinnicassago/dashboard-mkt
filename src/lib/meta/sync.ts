@@ -2,7 +2,7 @@ import "server-only";
 import { syncAdsAccount } from "./ads";
 import { syncInstagram } from "./instagram";
 import { refreshIgTokenIfNeeded, getIgToken } from "./token";
-import { metaBrands, type BrandMeta } from "./config";
+import { resolveMetaBrands, type BrandMeta } from "./config";
 import { getState, setState } from "../data/store";
 import { STATE_KEYS } from "../data/backend";
 
@@ -38,7 +38,7 @@ export async function runSync({
 }: { source?: SyncSource; days?: number; brand?: string } = {}): Promise<SyncReport> {
   const ranAt = new Date().toISOString();
   const report: SyncReport = { ranAt, skipped: [] };
-  const all = metaBrands();
+  const all = await resolveMetaBrands();
   const targets = brand ? all.filter((b) => b.slug === brand) : all;
 
   // ---- ads (por ad account; conta compartilhada = 1 pull particionado) ----
