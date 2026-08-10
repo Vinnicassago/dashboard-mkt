@@ -9,6 +9,7 @@ import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { EmptyState } from "@/components/ui/empty-state";
 import { CHART } from "@/components/charts/colors";
 import { getData } from "@/lib/data/store";
+import { activeBrandSlug } from "@/lib/active-brand";
 import { can } from "@/lib/auth/guard";
 import { pageRange } from "@/lib/page-range";
 import {
@@ -42,7 +43,7 @@ export default async function FunilPage({
 }: {
   searchParams: Promise<{ range?: string }>;
 }) {
-  const data = await getData();
+  const data = await getData(await activeBrandSlug());
   const canEditLeads = await can("leads:write");
   const { range } = pageRange(data, (await searchParams).range);
 

@@ -8,12 +8,26 @@
  * All dates are ISO strings: `yyyy-mm-dd` for daily rows, full ISO for events.
  */
 
+// ------------------------- Marca / conta ----------------------------
+
+/**
+ * Marca/conta a que uma linha pertence — um slug estável e minúsculo
+ * (`"consorcio"`, `"krone"`, …). TODA linha persistida carrega a marca para que
+ * o painel separe contas que dividem o mesmo backend (ex.: consorcio.brunno,
+ * lead-gen, vs. krone.capital, só seguidores). KPI nenhum deve misturar marcas.
+ */
+export type Brand = string;
+
+/** Marca padrão: os dados já existentes (consorcio.brunno) recebem este slug. */
+export const DEFAULT_BRAND: Brand = "consorcio";
+
 // ------------------------- Campaign ---------------------------------
 
 export type CampaignStatus = "ativa" | "pausada" | "encerrada";
 
 export interface Campaign {
   id: string;
+  brand: Brand;
   name: string;
   objective: string; // e.g. "Geração de cadastros (leads)"
   status: CampaignStatus;
@@ -26,6 +40,7 @@ export interface Campaign {
 // ------------------------- Instagram (organic) ----------------------
 
 export interface IgAccountDaily {
+  brand: Brand;
   date: string; // yyyy-mm-dd
   followers: number; // snapshot at end of day
   reach: number;
@@ -42,6 +57,7 @@ export type IgMediaType = "feed" | "carrossel" | "reel" | "story";
 
 export interface IgPost {
   id: string;
+  brand: Brand;
   publishedAt: string; // full ISO datetime
   type: IgMediaType;
   caption: string;
@@ -61,6 +77,7 @@ export interface IgPost {
 // ------------------------- Paid traffic (Meta Ads) ------------------
 
 export interface AdDaily {
+  brand: Brand;
   date: string; // yyyy-mm-dd
   campaign: string;
   adset: string;
@@ -85,6 +102,7 @@ export type CreativeFormat = "imagem" | "video" | "carrossel";
 
 export interface Creative {
   adId: string;
+  brand: Brand;
   name: string;
   format: CreativeFormat;
   thumbnailUrl?: string;
@@ -96,6 +114,7 @@ export interface Creative {
 // ------------------------- Landing page -----------------------------
 
 export interface LpDaily {
+  brand: Brand;
   date: string; // yyyy-mm-dd
   visits: number; // landing page views / sessions
   clicks: number; // clicks on the page CTA
@@ -108,6 +127,7 @@ export type LeadStatus = "lead" | "agendou" | "compareceu" | "cliente" | "perdid
 
 export interface Lead {
   id: string;
+  brand: Brand;
   createdAt: string; // full ISO datetime
   name: string;
   // Contact details — persisted for the sales team (LGPD: restrict access).
@@ -158,6 +178,7 @@ export type GoalMetric =
   | "followers";
 
 export interface Goal {
+  brand: Brand;
   metric: GoalMetric;
   period: "mes" | "campanha";
   target: number;

@@ -3,6 +3,7 @@ import { GRAPH_FB, adAccountId, adsToken } from "./config";
 import { graphUrl, isoDaysAgo, isoToday, metaGet } from "./http";
 import { upsertAdDaily, upsertCreatives } from "../data/store";
 import type { AdDaily, Creative, CreativeFormat } from "../types";
+import { DEFAULT_BRAND } from "../types";
 
 /**
  * Meta Marketing API — daily performance per ad.
@@ -243,6 +244,7 @@ export async function syncAds({ days = 30 }: { days?: number } = {}): Promise<Ad
     if (objective) objectivesSeen.add(objective);
 
     adRows.push({
+      brand: DEFAULT_BRAND,
       date: r.date_start.slice(0, 10),
       campaign: r.campaign_name ?? "",
       adset: r.adset_name ?? "",
@@ -263,6 +265,7 @@ export async function syncAds({ days = 30 }: { days?: number } = {}): Promise<Ad
     const prev = creativeAcc.get(adId);
     creativeAcc.set(adId, {
       adId,
+      brand: DEFAULT_BRAND,
       name: info?.name ?? r.ad_name ?? adId,
       format: info?.format ?? (plays > 0 ? "video" : (prev?.format ?? "imagem")),
       thumbnailUrl: info?.thumbnailUrl ?? prev?.thumbnailUrl,

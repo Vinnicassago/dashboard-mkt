@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { CHART } from "@/components/charts/colors";
 import { getData } from "@/lib/data/store";
+import { activeBrandSlug } from "@/lib/active-brand";
 import { pageRange } from "@/lib/page-range";
 import {
   postPerformance,
@@ -40,7 +41,7 @@ export default async function PostsPage({
 }: {
   searchParams: Promise<{ range?: string }>;
 }) {
-  const data = await getData();
+  const data = await getData(await activeBrandSlug());
   const { range } = pageRange(data, (await searchParams).range);
 
   const posts = postPerformance(data.igPosts, range);

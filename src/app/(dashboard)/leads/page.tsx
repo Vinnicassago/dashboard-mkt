@@ -4,6 +4,7 @@ import { LeadActivity } from "@/components/leads/lead-activity";
 import { LeadQueueCard } from "@/components/leads/lead-queue";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getData, listLeadEvents } from "@/lib/data/store";
+import { activeBrandSlug } from "@/lib/active-brand";
 import { adIdFromUtmContent, leadQueue } from "@/lib/metrics";
 import { can } from "@/lib/auth/guard";
 
@@ -18,7 +19,7 @@ function originLabel(utmContent: string | undefined, nameById: Map<string, strin
 }
 
 export default async function LeadsPage() {
-  const data = await getData();
+  const data = await getData(await activeBrandSlug());
   const canEdit = await can("leads:write");
   const events = await listLeadEvents({ limit: 200 });
   const nameById = new Map(data.creatives.map((c) => [c.adId, c.name]));

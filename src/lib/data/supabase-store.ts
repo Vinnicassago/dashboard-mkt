@@ -20,6 +20,7 @@ import type {
   LeadEventAction,
   LeadStatus,
 } from "../types";
+import { DEFAULT_BRAND } from "../types";
 
 /* ------------------------------------------------------------------ */
 /* row mappers: DB snake_case  <->  domain camelCase                   */
@@ -29,9 +30,12 @@ type Row = Record<string, unknown>;
 const n = (v: unknown) => Number(v ?? 0);
 const s = (v: unknown) => String(v ?? "");
 const day = (v: unknown) => s(v).slice(0, 10);
+/** Marca da linha; linhas antigas (sem a coluna) caem na marca padrão. */
+const brandOf = (v: unknown) => (v ? s(v) : DEFAULT_BRAND);
 
 const toCampaign = (r: Row): Campaign => ({
   id: s(r.id),
+  brand: brandOf(r.brand),
   name: s(r.name),
   objective: s(r.objective),
   status: s(r.status) as CampaignStatus,
@@ -43,6 +47,7 @@ const toCampaign = (r: Row): Campaign => ({
 
 const fromCampaign = (c: Campaign): Row => ({
   id: c.id,
+  brand: c.brand,
   name: c.name,
   objective: c.objective,
   status: c.status,
@@ -53,6 +58,7 @@ const fromCampaign = (c: Campaign): Row => ({
 });
 
 const toIgDaily = (r: Row): IgAccountDaily => ({
+  brand: brandOf(r.brand),
   date: day(r.date),
   followers: n(r.followers),
   reach: n(r.reach),
@@ -66,6 +72,7 @@ const toIgDaily = (r: Row): IgAccountDaily => ({
 });
 
 const fromIgDaily = (r: IgAccountDaily): Row => ({
+  brand: r.brand,
   date: r.date,
   followers: r.followers,
   reach: r.reach,
@@ -80,6 +87,7 @@ const fromIgDaily = (r: IgAccountDaily): Row => ({
 
 const toPost = (r: Row): IgPost => ({
   id: s(r.id),
+  brand: brandOf(r.brand),
   publishedAt: s(r.published_at),
   type: s(r.type) as IgMediaType,
   caption: s(r.caption),
@@ -96,6 +104,7 @@ const toPost = (r: Row): IgPost => ({
 
 const fromPost = (p: IgPost): Row => ({
   id: p.id,
+  brand: p.brand,
   published_at: p.publishedAt,
   type: p.type,
   caption: p.caption,
@@ -112,6 +121,7 @@ const fromPost = (p: IgPost): Row => ({
 
 const toCreative = (r: Row): Creative => ({
   adId: s(r.ad_id),
+  brand: brandOf(r.brand),
   name: s(r.name),
   format: s(r.format) as CreativeFormat,
   thumbnailUrl: r.thumbnail_url ? s(r.thumbnail_url) : undefined,
@@ -121,6 +131,7 @@ const toCreative = (r: Row): Creative => ({
 
 const fromCreative = (c: Creative): Row => ({
   ad_id: c.adId,
+  brand: c.brand,
   name: c.name,
   format: c.format,
   thumbnail_url: c.thumbnailUrl ?? null,
@@ -129,6 +140,7 @@ const fromCreative = (c: Creative): Row => ({
 });
 
 const toAd = (r: Row): AdDaily => ({
+  brand: brandOf(r.brand),
   date: day(r.date),
   campaign: s(r.campaign),
   adset: s(r.adset),
@@ -143,6 +155,7 @@ const toAd = (r: Row): AdDaily => ({
 });
 
 const fromAd = (a: AdDaily): Row => ({
+  brand: a.brand,
   date: a.date,
   ad_id: a.adId,
   campaign: a.campaign,
@@ -158,6 +171,7 @@ const fromAd = (a: AdDaily): Row => ({
 
 const toLead = (r: Row): Lead => ({
   id: s(r.id),
+  brand: brandOf(r.brand),
   createdAt: s(r.created_at),
   name: s(r.name),
   email: r.email ? s(r.email) : undefined,
@@ -176,6 +190,7 @@ const toLead = (r: Row): Lead => ({
 
 const fromLead = (l: Lead): Row => ({
   id: l.id,
+  brand: l.brand,
   created_at: l.createdAt,
   name: l.name,
   email: l.email ?? null,
@@ -193,6 +208,7 @@ const fromLead = (l: Lead): Row => ({
 });
 
 const toGoal = (r: Row): Goal => ({
+  brand: brandOf(r.brand),
   metric: s(r.metric) as GoalMetric,
   period: s(r.period) as Goal["period"],
   target: n(r.target),
@@ -200,6 +216,7 @@ const toGoal = (r: Row): Goal => ({
 });
 
 const fromGoal = (g: Goal): Row => ({
+  brand: g.brand,
   metric: g.metric,
   period: g.period,
   target: g.target,
@@ -210,6 +227,7 @@ const fromGoal = (g: Goal): Row => ({
 
 const FALLBACK_CAMPAIGN: Campaign = {
   id: "campanha",
+  brand: DEFAULT_BRAND,
   name: "Campanha",
   objective: "Cadastros (leads)",
   status: "ativa",
@@ -232,18 +250,18 @@ function check(error: { message: string } | null, what: string) {
 export const supabaseBackend: DataBackend = {
   name: "supabase",
 
-  async getData(): Promise<DashboardData> {
+  async getData(brand: string): Promise<DashboardData> {
     const db = supabase();
     const [campaign, igDaily, posts, ads, creatives, lp, leads, goals, state] =
       await Promise.all([
-        db.from("campaign").select("*").limit(1).maybeSingle(),
-        db.from("ig_account_daily").select("*").order("date"),
-        db.from("ig_posts").select("*").order("published_at", { ascending: false }),
-        db.from("ad_daily").select("*").order("date"),
-        db.from("creatives").select("*"),
-        db.from("lp_daily").select("*").order("date"),
-        db.from("leads").select("*").order("created_at", { ascending: false }),
-        db.from("goals").select("*"),
+        db.from("campaign").select("*").eq("brand", brand).limit(1).maybeSingle(),
+        db.from("ig_account_daily").select("*").eq("brand", brand).order("date"),
+        db.from("ig_posts").select("*").eq("brand", brand).order("published_at", { ascending: false }),
+        db.from("ad_daily").select("*").eq("brand", brand).order("date"),
+        db.from("creatives").select("*").eq("brand", brand),
+        db.from("lp_daily").select("*").eq("brand", brand).order("date"),
+        db.from("leads").select("*").eq("brand", brand).order("created_at", { ascending: false }),
+        db.from("goals").select("*").eq("brand", brand),
         db.from("app_state").select("*"),
       ]);
 
@@ -255,12 +273,13 @@ export const supabaseBackend: DataBackend = {
     );
 
     return {
-      campaign: campaign.data ? toCampaign(campaign.data as Row) : FALLBACK_CAMPAIGN,
+      campaign: campaign.data ? toCampaign(campaign.data as Row) : { ...FALLBACK_CAMPAIGN, brand },
       igAccountDaily: (igDaily.data ?? []).map(toIgDaily),
       igPosts: (posts.data ?? []).map(toPost),
       adDaily: (ads.data ?? []).map(toAd),
       creatives: (creatives.data ?? []).map(toCreative),
       lpDaily: (lp.data ?? []).map((r: Row) => ({
+        brand: brandOf(r.brand),
         date: day(r.date),
         visits: n(r.visits),
         clicks: n(r.clicks),
@@ -298,6 +317,7 @@ export const supabaseBackend: DataBackend = {
       db.from("ad_daily").insert(seed.adDaily.map(fromAd)),
       db.from("lp_daily").insert(
         seed.lpDaily.map((r) => ({
+          brand: r.brand,
           date: r.date,
           visits: r.visits,
           clicks: r.clicks,
@@ -328,7 +348,7 @@ export const supabaseBackend: DataBackend = {
     if (rows.length === 0) return 0;
     const { error } = await supabase()
       .from("ad_daily")
-      .upsert(rows.map(fromAd), { onConflict: "date,ad_id" });
+      .upsert(rows.map(fromAd), { onConflict: "brand,date,ad_id" });
     check(error, "upsert ad_daily");
     await touch(false);
     return rows.length;
@@ -357,7 +377,7 @@ export const supabaseBackend: DataBackend = {
     if (rows.length === 0) return 0;
     const { error } = await supabase()
       .from("ig_account_daily")
-      .upsert(rows.map(fromIgDaily), { onConflict: "date" });
+      .upsert(rows.map(fromIgDaily), { onConflict: "brand,date" });
     check(error, "upsert ig_account_daily");
     await touch(false);
     return rows.length;
@@ -401,28 +421,30 @@ export const supabaseBackend: DataBackend = {
   async upsertGoal(goal: Goal) {
     const { error } = await supabase()
       .from("goals")
-      .upsert(fromGoal(goal), { onConflict: "metric,period" });
+      .upsert(fromGoal(goal), { onConflict: "brand,metric,period" });
     check(error, "upsert goal");
     await touch();
   },
 
-  async bumpLpDaily(date: string, delta: LpDelta) {
+  async bumpLpDaily(brand: string, date: string, delta: LpDelta) {
     const db = supabase();
     // Read-modify-write. Fine at this volume; if the landing page ever gets
     // heavy traffic, move this to a Postgres function for atomicity.
     const { data: current } = await db
       .from("lp_daily")
       .select("*")
+      .eq("brand", brand)
       .eq("date", date)
       .maybeSingle();
 
     const row = {
+      brand,
       date,
       visits: n(current?.visits) + (delta.visits ?? 0),
       clicks: n(current?.clicks) + (delta.clicks ?? 0),
       form_submits: n(current?.form_submits) + (delta.formSubmits ?? 0),
     };
-    const { error } = await db.from("lp_daily").upsert(row, { onConflict: "date" });
+    const { error } = await db.from("lp_daily").upsert(row, { onConflict: "brand,date" });
     check(error, "bump lp_daily");
     await touch(false);
   },

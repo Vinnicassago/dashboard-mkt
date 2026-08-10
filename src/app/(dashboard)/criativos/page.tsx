@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { CHART } from "@/components/charts/colors";
 import { getData } from "@/lib/data/store";
+import { activeBrandSlug } from "@/lib/active-brand";
 import { pageRange } from "@/lib/page-range";
 import { creativePerformance } from "@/lib/metrics";
 import { formatCurrency, formatPercent } from "@/lib/format";
@@ -19,7 +20,7 @@ export default async function CriativosPage({
 }: {
   searchParams: Promise<{ range?: string }>;
 }) {
-  const data = await getData();
+  const data = await getData(await activeBrandSlug());
   const { range } = pageRange(data, (await searchParams).range);
 
   const perf = creativePerformance(data, range);

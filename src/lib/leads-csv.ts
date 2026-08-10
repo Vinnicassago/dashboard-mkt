@@ -1,5 +1,6 @@
 import Papa from "papaparse";
 import type { Lead, LeadStatus } from "./types";
+import { DEFAULT_BRAND } from "./types";
 
 /**
  * Importador de leads (backfill). Aceita o CSV exportado do rastreamento da
@@ -126,6 +127,7 @@ export function parseLeadsCsv(text: string): LeadsParseResult {
     const pick = (f: Field) => (map[f] ? r[map[f]!]?.trim() || undefined : undefined);
     byId.set(id, {
       id,
+      brand: DEFAULT_BRAND,
       createdAt,
       name,
       email: pick("email"),

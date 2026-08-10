@@ -1,32 +1,41 @@
-import { DollarSign, CalendarCheck, Target, UserPlus, Sparkles } from "lucide-react";
+import { DollarSign, CalendarCheck, Target, UserPlus, Sparkles, Users, Radio } from "lucide-react";
 import { ExampleBanner } from "@/components/example-banner";
 import { KpiCard, type KpiDelta } from "@/components/kpi/kpi-card";
 import { ObjectiveSplitBar } from "@/components/kpi/objective-split";
 import { DataQualityCard } from "@/components/kpi/data-quality";
 import { GoalBar } from "@/components/kpi/goal-bar";
+import { absDelta, pctDelta } from "@/components/kpi/delta";
 import { FunnelChart } from "@/components/charts/funnel-chart";
 import { TimeSeriesChart } from "@/components/charts/time-series-chart";
 import { ChartCard } from "@/components/ui/chart-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getData } from "@/lib/data/store";
+import { activeBrandSlug } from "@/lib/active-brand";
+import { brandDef } from "@/lib/brands";
 import { pageRange } from "@/lib/page-range";
 import {
   actualForGoal,
+  awarenessKpis,
   buildFunnel,
   dailySeries,
   dataQualityChecks,
   delta,
+  followerSeries,
   goalProgress,
   overviewKpis,
   previousRange,
+  type DataWarning,
+  type DateRange,
 } from "@/lib/metrics";
 import { getLastSync } from "@/lib/meta/sync";
 import { buildInsights } from "@/lib/insights";
-import { buildRecommendations } from "@/lib/recommendations";
+import { buildRecommendations, type Recommendation } from "@/lib/recommendations";
+import type { DashboardData } from "@/lib/types";
 import { RecommendationsCard } from "@/components/kpi/recommendations";
 import {
   formatCurrency,
   formatCurrency0,
+  formatCurrencyOrDash,
   formatInt,
   formatPercent,
 } from "@/lib/format";
@@ -69,22 +78,31 @@ export default async function OverviewPage({
 }: {
   searchParams: Promise<{ range?: string }>;
 }) {
-  const data = await getData();
+  const brand = brandDef(await activeBrandSlug());
+  const data = await getData(brand.slug);
   const { range } = pageRange(data, (await searchParams).range);
 
-  const k = overviewKpis(data, range);
-  const prev = range ? overviewKpis(data, previousRange(range)) : undefined;
-  const funnel = buildFunnel(data, range);
-  const series = dailySeries(data, range);
   const insights = buildInsights(data, range);
   const recs = buildRecommendations(data, range, new Date().toISOString());
-  const hint = prev ? "vs. período anterior" : "no período";
+  const hint = range ? "vs. período anterior" : "no período";
 
   const lastSync = await getLastSync();
   const warnings = dataQualityChecks(data, {
     nowIso: new Date().toISOString(),
     lastSyncAds: lastSync.ads,
   });
+
+  // Marca de awareness (krone.capital): visão de crescimento de perfil, não de funil.
+  if (brand.type === "awareness") {
+    return (
+      <AwarenessOverview data={data} range={range} recs={recs} insights={insights} warnings={warnings} hint={hint} />
+    );
+  }
+
+  const k = overviewKpis(data, range);
+  const prev = range ? overviewKpis(data, previousRange(range)) : undefined;
+  const funnel = buildFunnel(data, range);
+  const series = dailySeries(data, range);
 
   return (
     <div className="space-y-6">
@@ -208,6 +226,140 @@ export default async function OverviewPage({
           </CardContent>
         </Card>
       </div>
+
+      {/* Próximas ações */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Sparkles className="size-4 text-primary" />
+            Próximas ações
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <RecommendationsCard recs={recs} fallback={insights} />
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+/**
+ * Visão Geral de uma marca de awareness (krone.capital): crescimento de perfil,
+ * custo por seguidor e alcance — sem funil de lead/CPR. Usa o bundle
+ * `awarenessKpis` (Fase 2). Custos aparecem como "—" quando não há crescimento.
+ */
+function AwarenessOverview({
+  data,
+  range,
+  recs,
+  insights,
+  warnings,
+  hint,
+}: {
+  data: DashboardData;
+  range: DateRange | undefined;
+  recs: Recommendation[];
+  insights: string[];
+  warnings: DataWarning[];
+  hint: string;
+}) {
+  const a = awarenessKpis(data, range);
+  const prevA = range ? awarenessKpis(data, previousRange(range)) : undefined;
+  const series = followerSeries(data.igAccountDaily, range);
+  const followersGoal = data.goals.find((g) => g.metric === "followers");
+  const gp = followersGoal ? goalProgress(followersGoal, a.followersEnd) : undefined;
+
+  return (
+    <div className="space-y-6">
+      {data.isSeed ? <ExampleBanner /> : null}
+      <DataQualityCard warnings={warnings} />
+
+      {/* Hero KPIs de crescimento */}
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4 xl:grid-cols-5">
+        <KpiCard
+          label="Seguidores"
+          value={formatInt(a.followersEnd)}
+          Icon={Users}
+          delta={absDelta(a.netNewFollowers)}
+          hint={hint}
+          highlight
+        />
+        <KpiCard
+          label="Novos seguidores"
+          value={`${a.netNewFollowers >= 0 ? "+" : ""}${formatInt(a.netNewFollowers)}`}
+          Icon={UserPlus}
+          delta={prevA ? pctDelta(a.netNewFollowers, prevA.netNewFollowers) : undefined}
+          hint={hint}
+        />
+        <KpiCard
+          label="Investimento"
+          value={formatCurrency0(a.spend)}
+          Icon={DollarSign}
+          delta={prevA ? pctDelta(a.spend, prevA.spend) : undefined}
+          hint={hint}
+        />
+        <KpiCard
+          label="Custo por seguidor"
+          value={formatCurrencyOrDash(a.costPerFollower)}
+          Icon={Sparkles}
+          hint="North Star"
+          highlight
+        />
+        <KpiCard
+          label="Custo / 1k alcance"
+          value={formatCurrencyOrDash(a.costPerReach)}
+          Icon={Radio}
+          hint="alcance da conta"
+        />
+      </div>
+
+      {/* Meta de seguidores */}
+      {followersGoal && gp ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Meta de seguidores</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <GoalBar
+              label="Seguidores"
+              valueText={formatInt(a.followersEnd)}
+              targetText={formatInt(followersGoal.target)}
+              pct={gp.pct}
+              onTrack={gp.onTrack}
+            />
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {/* Crescimento */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <ChartCard title="Seguidores" description="Total de seguidores ao longo do tempo.">
+          <TimeSeriesChart
+            data={series}
+            series={[{ key: "followers", label: "Seguidores", color: CHART.series[0] }]}
+            yFormat="int"
+          />
+        </ChartCard>
+        <ChartCard title="Novos seguidores por dia" description="Crescimento líquido diário.">
+          <TimeSeriesChart
+            data={series}
+            series={[{ key: "gain", label: "Novos seguidores", color: CHART.series[2] }]}
+            yFormat="int"
+          />
+        </ChartCard>
+      </div>
+
+      <ChartCard title="Alcance e Views por dia" description="Quantas contas viram o conteúdo.">
+        <TimeSeriesChart
+          data={series}
+          series={[
+            { key: "reach", label: "Alcance", color: CHART.series[0] },
+            { key: "views", label: "Views", color: CHART.series[1] },
+          ]}
+          yFormat="compact"
+          valueFormat="int"
+        />
+      </ChartCard>
 
       {/* Próximas ações */}
       <Card>

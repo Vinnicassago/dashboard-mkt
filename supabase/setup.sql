@@ -6,6 +6,7 @@
 -- Campanha
 create table if not exists campaign (
   id            text primary key,
+  brand         text        not null default 'consorcio',
   name          text        not null,
   objective     text        not null default '',
   status        text        not null default 'ativa',
@@ -17,7 +18,8 @@ create table if not exists campaign (
 
 -- Instagram — snapshot diário da conta
 create table if not exists ig_account_daily (
-  date                date primary key,
+  brand               text not null default 'consorcio',
+  date                date not null,
   followers           integer not null default 0,
   reach               integer not null default 0,
   views               integer not null default 0,
@@ -26,12 +28,14 @@ create table if not exists ig_account_daily (
   total_interactions  integer not null default 0,
   profile_views       integer not null default 0,
   reach_followers     integer,
-  reach_non_followers integer
+  reach_non_followers integer,
+  primary key (brand, date)
 );
 
 -- Instagram — posts
 create table if not exists ig_posts (
   id              text primary key,
+  brand           text        not null default 'consorcio',
   published_at    timestamptz not null,
   type            text        not null,
   caption         text        not null default '',
@@ -49,6 +53,7 @@ create table if not exists ig_posts (
 -- Criativos (anúncios)
 create table if not exists creatives (
   ad_id         text primary key,
+  brand         text not null default 'consorcio',
   name          text not null,
   format        text not null default 'imagem',
   thumbnail_url text,
@@ -58,6 +63,7 @@ create table if not exists creatives (
 
 -- Tráfego pago — desempenho diário por anúncio
 create table if not exists ad_daily (
+  brand       text    not null default 'consorcio',
   date        date    not null,
   ad_id       text    not null,
   campaign    text    not null default '',
@@ -69,20 +75,23 @@ create table if not exists ad_daily (
   frequency   numeric not null default 0,
   clicks      integer not null default 0,
   leads       integer not null default 0,
-  primary key (date, ad_id)
+  primary key (brand, date, ad_id)
 );
 
 -- Landing page — contadores diários
 create table if not exists lp_daily (
-  date          date primary key,
+  brand         text not null default 'consorcio',
+  date          date not null,
   visits        integer not null default 0,
   clicks        integer not null default 0,
-  form_submits  integer not null default 0
+  form_submits  integer not null default 0,
+  primary key (brand, date)
 );
 
 -- Leads (contém dados pessoais — protegido por RLS)
 create table if not exists leads (
   id            text primary key,
+  brand         text        not null default 'consorcio',
   created_at    timestamptz not null,
   name          text        not null,
   email         text,
@@ -101,11 +110,12 @@ create table if not exists leads (
 
 -- Metas
 create table if not exists goals (
+  brand            text    not null default 'consorcio',
   metric           text    not null,
   period           text    not null,
   target           numeric not null,
   lower_is_better  boolean not null default false,
-  primary key (metric, period)
+  primary key (brand, metric, period)
 );
 
 -- Chave/valor: updated_at, is_seed, últimas sincronizações, token do Instagram
@@ -149,6 +159,59 @@ alter table ig_account_daily add column if not exists reach_followers integer;
 alter table ig_account_daily add column if not exists reach_non_followers integer;
 alter table ad_daily         add column if not exists objective text;
 alter table leads            add column if not exists value numeric;
+
+-- Multimarca (krone.capital + consorcio.brunno): carimba cada linha com a marca.
+-- Bancos já existentes recebem 'brand' com default 'consorcio' (backfill) e têm as
+-- PKs recompostas para incluir a marca — evita que a linha diária/meta de uma marca
+-- sobrescreva a de outra na mesma data.
+alter table campaign         add column if not exists brand text not null default 'consorcio';
+alter table ig_account_daily add column if not exists brand text not null default 'consorcio';
+alter table ig_posts         add column if not exists brand text not null default 'consorcio';
+alter table creatives        add column if not exists brand text not null default 'consorcio';
+alter table ad_daily         add column if not exists brand text not null default 'consorcio';
+alter table lp_daily         add column if not exists brand text not null default 'consorcio';
+alter table leads            add column if not exists brand text not null default 'consorcio';
+alter table goals            add column if not exists brand text not null default 'consorcio';
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint c
+    join lateral unnest(c.conkey) as k(attnum) on true
+    join pg_attribute a on a.attrelid = c.conrelid and a.attnum = k.attnum
+    where c.conrelid = 'ig_account_daily'::regclass and c.contype = 'p' and a.attname = 'brand'
+  ) then
+    alter table ig_account_daily drop constraint if exists ig_account_daily_pkey;
+    alter table ig_account_daily add constraint ig_account_daily_pkey primary key (brand, date);
+  end if;
+  if not exists (
+    select 1 from pg_constraint c
+    join lateral unnest(c.conkey) as k(attnum) on true
+    join pg_attribute a on a.attrelid = c.conrelid and a.attnum = k.attnum
+    where c.conrelid = 'lp_daily'::regclass and c.contype = 'p' and a.attname = 'brand'
+  ) then
+    alter table lp_daily drop constraint if exists lp_daily_pkey;
+    alter table lp_daily add constraint lp_daily_pkey primary key (brand, date);
+  end if;
+  if not exists (
+    select 1 from pg_constraint c
+    join lateral unnest(c.conkey) as k(attnum) on true
+    join pg_attribute a on a.attrelid = c.conrelid and a.attnum = k.attnum
+    where c.conrelid = 'ad_daily'::regclass and c.contype = 'p' and a.attname = 'brand'
+  ) then
+    alter table ad_daily drop constraint if exists ad_daily_pkey;
+    alter table ad_daily add constraint ad_daily_pkey primary key (brand, date, ad_id);
+  end if;
+  if not exists (
+    select 1 from pg_constraint c
+    join lateral unnest(c.conkey) as k(attnum) on true
+    join pg_attribute a on a.attrelid = c.conrelid and a.attnum = k.attnum
+    where c.conrelid = 'goals'::regclass and c.contype = 'p' and a.attname = 'brand'
+  ) then
+    alter table goals drop constraint if exists goals_pkey;
+    alter table goals add constraint goals_pkey primary key (brand, metric, period);
+  end if;
+end $$;
 
 -- Row Level Security ligada em tudo (só o service role, usado pelo servidor, acessa)
 alter table campaign          enable row level security;

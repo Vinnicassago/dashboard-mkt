@@ -1,12 +1,15 @@
 import type { DashboardData } from "./types";
 import {
   adsetPerformance,
+  awarenessKpis,
   campaignPacing,
   creativePerformance,
+  formatPerformance,
   overviewKpis,
   type DateRange,
 } from "./metrics";
-import { formatCurrency, formatCurrency0, formatInt } from "./format";
+import { isAwareness } from "./brands";
+import { formatCompact, formatCurrency, formatCurrency0, formatInt, formatPercent } from "./format";
 
 /**
  * Motor de "Próximas ações": transforma os números em decisões priorizadas
@@ -30,6 +33,9 @@ export function buildRecommendations(
   range: DateRange | undefined,
   nowIso: string,
 ): Recommendation[] {
+  // Marca de awareness (só seguidores): ações de crescimento, não de CPR/CPL.
+  if (isAwareness(data.campaign.brand)) return buildAwarenessRecommendations(data, range);
+
   const recs: Recommendation[] = [];
   const k = overviewKpis(data, range);
   const creatives = creativePerformance(data, range);
@@ -110,6 +116,63 @@ export function buildRecommendations(
       severity: "baixa",
       title: "Sobrando orçamento no ritmo atual",
       detail: `Gasto projetado ${formatCurrency0(pacing.projectedSpend)} de ${formatCurrency0(pacing.budget)}. Há espaço para escalar os vencedores sem estourar.`,
+    });
+  }
+
+  return recs.sort((a, b) => ORDER[a.severity] - ORDER[b.severity]).slice(0, 6);
+}
+
+/**
+ * Próximas ações para uma marca de awareness (krone.capital): a alavanca é
+ * crescimento de seguidores / descoberta, não CPR. Puro — recebe os dados já
+ * recortados pela marca.
+ */
+function buildAwarenessRecommendations(
+  data: DashboardData,
+  range: DateRange | undefined,
+): Recommendation[] {
+  const recs: Recommendation[] = [];
+  const a = awarenessKpis(data, range);
+
+  // 1. Gastou e não cresceu (alta) — o maior alarme de uma campanha de seguidores.
+  if (a.spend > 0 && a.netNewFollowers <= 0) {
+    recs.push({
+      id: "no-growth",
+      severity: "alta",
+      title: "Investiu e não ganhou seguidores no período",
+      detail: `${formatCurrency0(a.spend)} gastos sem crescimento líquido de seguidores. Revise segmentação e o gancho do criativo — o conteúdo não está convertendo alcance em follow.`,
+    });
+  }
+
+  // 2. Pouca descoberta (média) — alcance preso em quem já segue.
+  if (a.hasReachSplit && a.reach > 0 && a.discoveryRate < 0.35) {
+    recs.push({
+      id: "discovery-low",
+      severity: "media",
+      title: "Pouca descoberta de novos perfis",
+      detail: `Só ${formatPercent(a.discoveryRate)} do alcance foi de não-seguidores. Priorize Reels e conteúdo compartilhável (saves/compartilhamentos) para alcançar gente nova.`,
+    });
+  }
+
+  // 3. Dobre a aposta no formato de maior engajamento (média).
+  const formats = formatPerformance(data.igPosts, range);
+  if (formats.length >= 2 && formats[0].count >= 2) {
+    const best = formats[0];
+    recs.push({
+      id: "format-double-down",
+      severity: "media",
+      title: `Invista em ${best.label}`,
+      detail: `É o formato de maior engajamento (${formatPercent(best.avgEngagement)}, alcance médio ${formatCompact(best.avgReach)}). Aumente a frequência desse formato.`,
+    });
+  }
+
+  // 4. Custo por seguidor como referência (baixa), quando há investimento.
+  if (a.costPerFollower != null && a.spend > 0) {
+    recs.push({
+      id: "cost-per-follower",
+      severity: "baixa",
+      title: "Acompanhe o custo por seguidor",
+      detail: `Custo por seguidor no período: ${formatCurrency(a.costPerFollower)} (${formatInt(a.netNewFollowers)} seguidores por ${formatCurrency0(a.spend)}). Use como referência para comparar criativos e segmentações.`,
     });
   }
 

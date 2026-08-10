@@ -23,6 +23,7 @@ import type {
   LeadStatus,
   LpDaily,
 } from "../types";
+import { DEFAULT_BRAND } from "../types";
 
 // ---- deterministic PRNG (mulberry32) ------------------------------
 function mulberry32(seed: number) {
@@ -117,6 +118,7 @@ function buildSeedData(): DashboardData {
 
   const campaign: Campaign = {
     id: "CAMP-CONSORCIO-2026-07",
+    brand: DEFAULT_BRAND,
     name: "Consórcio — Geração de Leads",
     objective: "Cadastros (leads) para agendamento de reunião",
     status: "ativa",
@@ -127,6 +129,7 @@ function buildSeedData(): DashboardData {
 
   const creatives: Creative[] = CREATIVE_DEFS.map((c) => ({
     adId: c.adId,
+    brand: DEFAULT_BRAND,
     name: c.name,
     format: c.format,
     videoPlays: 0,
@@ -161,6 +164,7 @@ function buildSeedData(): DashboardData {
       const leads = Math.round(clicks * conv);
 
       adDaily.push({
+        brand: DEFAULT_BRAND,
         date,
         campaign: campaign.name,
         adset: c.adset,
@@ -189,7 +193,7 @@ function buildSeedData(): DashboardData {
     // landing page: visits ≈ link clicks minus small bounce; CTA clicks between; leads = form submits
     const visits = Math.round(dayClicks * rand(0.9, 0.98));
     const pageClicks = Math.round(visits * rand(0.5, 0.72));
-    lpDaily.push({ date, visits, clicks: pageClicks, formSubmits: dayLeads });
+    lpDaily.push({ brand: DEFAULT_BRAND, date, visits, clicks: pageClicks, formSubmits: dayLeads });
   });
 
   // ---- materialise individual leads (consistent with adDaily) ------
@@ -234,6 +238,7 @@ function buildSeedData(): DashboardData {
 
       leads.push({
         id: `LEAD-${String(++leadSeq).padStart(4, "0")}`,
+        brand: DEFAULT_BRAND,
         createdAt,
         name: `${fn} ${ln}`,
         email,
@@ -258,6 +263,7 @@ function buildSeedData(): DashboardData {
     const views = Math.round(reach * rand(1.4, 2.2));
     const reachFollowers = Math.round(reach * (0.7 - Math.min(i, 14) * 0.012));
     igAccountDaily.push({
+      brand: DEFAULT_BRAND,
       date,
       followers,
       reach,
@@ -293,6 +299,7 @@ function buildSeedData(): DashboardData {
     const shares = Math.round(reach * rand(0.008, 0.03));
     return {
       id: `POST-${String(idx + 1).padStart(2, "0")}`,
+      brand: DEFAULT_BRAND,
       publishedAt: `${dates[p.day]}T${String(Math.floor(rand(9, 20))).padStart(2, "0")}:00:00`,
       type: p.type,
       caption: p.caption,
@@ -310,25 +317,159 @@ function buildSeedData(): DashboardData {
 
   // ---- Goals (targets for "metas vs realizado") ---------------------
   const goals: Goal[] = [
-    { metric: "leads", period: "campanha", target: 260 },
-    { metric: "meetings", period: "campanha", target: 110 },
-    { metric: "cpl", period: "campanha", target: 40, lowerIsBetter: true },
-    { metric: "cpr", period: "campanha", target: 95, lowerIsBetter: true },
-    { metric: "followers", period: "campanha", target: 600 },
+    { brand: DEFAULT_BRAND, metric: "leads", period: "campanha", target: 260 },
+    { brand: DEFAULT_BRAND, metric: "meetings", period: "campanha", target: 110 },
+    { brand: DEFAULT_BRAND, metric: "cpl", period: "campanha", target: 40, lowerIsBetter: true },
+    { brand: DEFAULT_BRAND, metric: "cpr", period: "campanha", target: 95, lowerIsBetter: true },
+    { brand: DEFAULT_BRAND, metric: "followers", period: "campanha", target: 600 },
   ];
+
+  // ---- segunda marca: krone.capital (awareness — só seguidores) ------
+  const krone = buildKroneSeed(dates);
 
   return {
     campaign,
-    igAccountDaily,
-    igPosts,
-    adDaily,
-    creatives,
+    igAccountDaily: [...igAccountDaily, ...krone.igAccountDaily],
+    igPosts: [...igPosts, ...krone.igPosts],
+    adDaily: [...adDaily, ...krone.adDaily],
+    creatives: [...creatives, ...krone.creatives],
     lpDaily,
     leads,
-    goals,
+    goals: [...goals, ...krone.goals],
     updatedAt: `${END}T09:00:00`,
     isSeed: true,
   };
+}
+
+const KRONE = "krone";
+
+/**
+ * Dataset de exemplo da @krone.capital (marca awareness): crescimento de perfil +
+ * campanhas pagas de seguidores/descoberta. Sem leads nem landing page — só o que
+ * uma marca de awareness mostra. Determinístico (PRNG próprio, não perturba o da
+ * consorcio). As linhas vão para os MESMOS arrays; getData("krone") as recorta.
+ */
+function buildKroneSeed(dates: string[]): {
+  igAccountDaily: IgAccountDaily[];
+  igPosts: IgPost[];
+  adDaily: AdDaily[];
+  creatives: Creative[];
+  goals: Goal[];
+} {
+  const rng = mulberry32(20260724);
+  const rand = (min: number, max: number) => min + (max - min) * rng();
+
+  const CREATIVE_DEFS: {
+    adId: string;
+    name: string;
+    format: CreativeFormat;
+    adset: string;
+    objective: string;
+    cpm: number;
+  }[] = [
+    { adId: "KR-01", name: "Reel — 3 erros que corroem seu patrimônio", format: "video", adset: "Descoberta — Interesses (investir)", objective: "OUTCOME_ENGAGEMENT", cpm: 7 },
+    { adId: "KR-02", name: "Carrossel — Diversificação de verdade", format: "carrossel", adset: "Descoberta — Lookalike", objective: "OUTCOME_AWARENESS", cpm: 6 },
+  ];
+  const creatives: Creative[] = CREATIVE_DEFS.map((c) => ({
+    adId: c.adId,
+    brand: KRONE,
+    name: c.name,
+    format: c.format,
+    videoPlays: 0,
+    thruPlays: 0,
+  }));
+  const creativeById = new Map(creatives.map((c) => [c.adId, c]));
+
+  const adDaily: AdDaily[] = [];
+  dates.forEach((date, i) => {
+    const daySpend = rand(50, 85) * Math.min(1, 0.6 + i * 0.05);
+    for (const c of CREATIVE_DEFS) {
+      const spend = (daySpend / CREATIVE_DEFS.length) * rand(0.85, 1.15);
+      const cpm = c.cpm * rand(0.9, 1.15);
+      const impressions = Math.round((spend / cpm) * 1000);
+      const frequency = rand(1.1, 1.5);
+      const reach = Math.round(impressions / frequency);
+      const clicks = Math.max(1, Math.round(impressions * rand(0.002, 0.006)));
+      adDaily.push({
+        brand: KRONE,
+        date,
+        campaign: "KRONE — Ganho de Seguidores",
+        adset: c.adset,
+        adId: c.adId,
+        objective: c.objective,
+        spend: Math.round(spend * 100) / 100,
+        impressions,
+        reach,
+        frequency: Math.round(frequency * 100) / 100,
+        clicks,
+        leads: 0,
+      });
+      const cr = creativeById.get(c.adId)!;
+      cr.videoPlays = (cr.videoPlays ?? 0) + Math.round(impressions * rand(0.3, 0.45));
+      cr.thruPlays = (cr.thruPlays ?? 0) + Math.round(impressions * rand(0.08, 0.15));
+    }
+  });
+
+  // Instagram orgânico — conta em crescimento, muita descoberta (não-seguidores).
+  const igAccountDaily: IgAccountDaily[] = [];
+  let followers = 820;
+  dates.forEach((date, i) => {
+    const gain = Math.round(rand(8, 22) + i * 1.2);
+    followers += gain;
+    const reach = Math.round(rand(900, 2200) + i * 180 + rand(0, 500));
+    const views = Math.round(reach * rand(1.6, 2.6));
+    const reachNon = Math.round(reach * (0.62 + Math.min(i, 14) * 0.006));
+    igAccountDaily.push({
+      brand: KRONE,
+      date,
+      followers,
+      reach,
+      views,
+      profileLinkTaps: Math.round(rand(3, 12) + i * 0.6),
+      accountsEngaged: Math.round(reach * rand(0.05, 0.1)),
+      totalInteractions: Math.round(rand(30, 110) + i * 8),
+      profileViews: Math.round(rand(30, 100) + i * 5),
+      reachFollowers: Math.max(0, reach - reachNon),
+      reachNonFollowers: reachNon,
+    });
+  });
+
+  const POST_DEFS: { day: number; type: IgMediaType; caption: string }[] = [
+    { day: 1, type: "reel", caption: "3 erros que corroem seu patrimônio sem você perceber" },
+    { day: 3, type: "carrossel", caption: "Diversificar não é ter muitos ativos — é ter os certos" },
+    { day: 6, type: "reel", caption: "O custo invisível de deixar dinheiro parado" },
+    { day: 9, type: "feed", caption: "Inteligência patrimonial: por onde começar" },
+    { day: 12, type: "reel", caption: "Como blindar seu patrimônio da inflação" },
+  ];
+  const igPosts: IgPost[] = POST_DEFS.map((p, idx) => {
+    const base = 500 + p.day * 110;
+    const reach = Math.round(base * rand(0.9, 2.2));
+    const views = Math.round(reach * (p.type === "reel" ? rand(1.9, 3.3) : rand(1.1, 1.6)));
+    const likes = Math.round(reach * rand(0.03, 0.08));
+    const comments = Math.round(likes * rand(0.05, 0.18));
+    const saved = Math.round(reach * rand(0.015, 0.06));
+    const shares = Math.round(reach * rand(0.01, 0.04));
+    return {
+      id: `KPOST-${String(idx + 1).padStart(2, "0")}`,
+      brand: KRONE,
+      publishedAt: `${dates[p.day]}T${String(Math.floor(rand(9, 20))).padStart(2, "0")}:00:00`,
+      type: p.type,
+      caption: p.caption,
+      permalink: `https://instagram.com/p/krone-seed-${idx + 1}`,
+      reach,
+      views,
+      likes,
+      comments,
+      saved,
+      shares,
+      avgWatchTime: p.type === "reel" ? Math.round(rand(7, 20) * 10) / 10 : undefined,
+      totalWatchTime: p.type === "reel" ? Math.round(views * rand(4, 10)) : undefined,
+    };
+  });
+
+  const goals: Goal[] = [{ brand: KRONE, metric: "followers", period: "campanha", target: 1500 }];
+
+  return { igAccountDaily, igPosts, adDaily, creatives, goals };
 }
 
 /**

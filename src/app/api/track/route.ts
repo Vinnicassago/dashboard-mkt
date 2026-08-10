@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { addLead, addLeadEvent, bumpLpDaily } from "@/lib/data/store";
+import { DEFAULT_BRAND } from "@/lib/types";
 import { newEventId } from "@/lib/auth/actor";
 import { sendCapiEvent } from "@/lib/meta/capi";
 import { sendGa4Event } from "@/lib/ga4/measurement-protocol";
@@ -129,6 +130,7 @@ export async function POST(request: Request) {
   await bumpLpDaily(date, { formSubmits: 1 });
   await addLead({
     id: leadId,
+    brand: DEFAULT_BRAND,
     createdAt: new Date().toISOString(),
     name: (body.name ?? "").trim() || "Lead sem nome",
     email: (body.email ?? "").trim() || undefined,

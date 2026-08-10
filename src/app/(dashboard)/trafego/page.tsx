@@ -17,6 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { CHART } from "@/components/charts/colors";
 import { getData } from "@/lib/data/store";
+import { activeBrandSlug } from "@/lib/active-brand";
 import { pageRange } from "@/lib/page-range";
 import {
   adKpis,
@@ -67,7 +68,7 @@ export default async function TrafegoPage({
 }: {
   searchParams: Promise<{ range?: string }>;
 }) {
-  const data = await getData();
+  const data = await getData(await activeBrandSlug());
   const { range } = pageRange(data, (await searchParams).range);
 
   const ads = filterAds(data.adDaily, range);

@@ -48,14 +48,14 @@ import {
  */
 
 // Column lists (order matches the from* mapper output keys).
-const CAMPAIGN_COLS = ["id", "name", "objective", "status", "start_date", "end_date", "budget_total", "daily_budget"];
-const IG_DAILY_COLS = ["date", "followers", "reach", "views", "profile_link_taps", "accounts_engaged", "total_interactions", "profile_views", "reach_followers", "reach_non_followers"];
-const POST_COLS = ["id", "published_at", "type", "caption", "permalink", "reach", "views", "likes", "comments", "saved", "shares", "avg_watch_time", "total_watch_time"];
-const CREATIVE_COLS = ["ad_id", "name", "format", "thumbnail_url", "video_plays", "thru_plays"];
-const AD_COLS = ["date", "ad_id", "campaign", "adset", "objective", "spend", "impressions", "reach", "frequency", "clicks", "leads"];
-const LP_COLS = ["date", "visits", "clicks", "form_submits"];
-const LEAD_COLS = ["id", "created_at", "name", "email", "phone", "utm_source", "utm_campaign", "utm_content", "status", "meeting_at", "value", "fbc", "fbp", "ga_client_id", "ga_session_id"];
-const GOAL_COLS = ["metric", "period", "target", "lower_is_better"];
+const CAMPAIGN_COLS = ["id", "brand", "name", "objective", "status", "start_date", "end_date", "budget_total", "daily_budget"];
+const IG_DAILY_COLS = ["brand", "date", "followers", "reach", "views", "profile_link_taps", "accounts_engaged", "total_interactions", "profile_views", "reach_followers", "reach_non_followers"];
+const POST_COLS = ["id", "brand", "published_at", "type", "caption", "permalink", "reach", "views", "likes", "comments", "saved", "shares", "avg_watch_time", "total_watch_time"];
+const CREATIVE_COLS = ["ad_id", "brand", "name", "format", "thumbnail_url", "video_plays", "thru_plays"];
+const AD_COLS = ["brand", "date", "ad_id", "campaign", "adset", "objective", "spend", "impressions", "reach", "frequency", "clicks", "leads"];
+const LP_COLS = ["brand", "date", "visits", "clicks", "form_submits"];
+const LEAD_COLS = ["id", "brand", "created_at", "name", "email", "phone", "utm_source", "utm_campaign", "utm_content", "status", "meeting_at", "value", "fbc", "fbp", "ga_client_id", "ga_session_id"];
+const GOAL_COLS = ["brand", "metric", "period", "target", "lower_is_better"];
 const EVENT_COLS = ["id", "lead_id", "lead_name", "actor", "action", "from_status", "to_status", "created_at"];
 
 const withoutPk = (cols: string[], pk: string[]) => cols.filter((c) => !pk.includes(c));
@@ -127,22 +127,22 @@ async function touch(isSeed?: boolean) {
 export const postgresBackend: DataBackend = {
   name: "postgres",
 
-  async getData(): Promise<DashboardData> {
+  async getData(brand: string): Promise<DashboardData> {
     const [campaign, ig, posts, ads, creatives, lp, leads, goals, state] = await Promise.all([
-      q("select * from campaign limit 1"),
-      q("select * from ig_account_daily order by date"),
-      q("select * from ig_posts order by published_at desc"),
-      q("select * from ad_daily order by date"),
-      q("select * from creatives"),
-      q("select * from lp_daily order by date"),
-      q("select * from leads order by created_at desc"),
-      q("select * from goals"),
+      q("select * from campaign where brand = $1 limit 1", [brand]),
+      q("select * from ig_account_daily where brand = $1 order by date", [brand]),
+      q("select * from ig_posts where brand = $1 order by published_at desc", [brand]),
+      q("select * from ad_daily where brand = $1 order by date", [brand]),
+      q("select * from creatives where brand = $1", [brand]),
+      q("select * from lp_daily where brand = $1 order by date", [brand]),
+      q("select * from leads where brand = $1 order by created_at desc", [brand]),
+      q("select * from goals where brand = $1", [brand]),
       q("select * from app_state"),
     ]);
 
     const stateMap = new Map(state.map((r) => [s(r.key), r.value as unknown]));
     return {
-      campaign: campaign[0] ? toCampaign(campaign[0]) : FALLBACK_CAMPAIGN,
+      campaign: campaign[0] ? toCampaign(campaign[0]) : { ...FALLBACK_CAMPAIGN, brand },
       igAccountDaily: ig.map(toIgDaily),
       igPosts: posts.map(toPost),
       adDaily: ads.map(toAd),
@@ -196,7 +196,7 @@ export const postgresBackend: DataBackend = {
   },
 
   async upsertAdDaily(rows: AdDaily[]) {
-    await upsertMany("ad_daily", AD_COLS, rows.map(fromAd), ["date", "ad_id"], withoutPk(AD_COLS, ["date", "ad_id"]));
+    await upsertMany("ad_daily", AD_COLS, rows.map(fromAd), ["brand", "date", "ad_id"], withoutPk(AD_COLS, ["brand", "date", "ad_id"]));
     await touch(false);
     return rows.length;
   },
@@ -213,7 +213,7 @@ export const postgresBackend: DataBackend = {
   },
 
   async upsertIgAccountDaily(rows: IgAccountDaily[]) {
-    await upsertMany("ig_account_daily", IG_DAILY_COLS, rows.map(fromIgDaily), ["date"], withoutPk(IG_DAILY_COLS, ["date"]));
+    await upsertMany("ig_account_daily", IG_DAILY_COLS, rows.map(fromIgDaily), ["brand", "date"], withoutPk(IG_DAILY_COLS, ["brand", "date"]));
     await touch(false);
     return rows.length;
   },
@@ -252,17 +252,17 @@ export const postgresBackend: DataBackend = {
   },
 
   async upsertGoal(goal: Goal) {
-    await upsertMany("goals", GOAL_COLS, [fromGoal(goal)], ["metric", "period"], ["target", "lower_is_better"]);
+    await upsertMany("goals", GOAL_COLS, [fromGoal(goal)], ["brand", "metric", "period"], ["target", "lower_is_better"]);
   },
 
-  async bumpLpDaily(date: string, delta: LpDelta) {
+  async bumpLpDaily(brand: string, date: string, delta: LpDelta) {
     await run(
-      `insert into lp_daily (date, visits, clicks, form_submits) values ($1, $2, $3, $4)
-       on conflict (date) do update set
+      `insert into lp_daily (brand, date, visits, clicks, form_submits) values ($1, $2, $3, $4, $5)
+       on conflict (brand, date) do update set
          visits = lp_daily.visits + excluded.visits,
          clicks = lp_daily.clicks + excluded.clicks,
          form_submits = lp_daily.form_submits + excluded.form_submits`,
-      [date, delta.visits ?? 0, delta.clicks ?? 0, delta.formSubmits ?? 0],
+      [brand, date, delta.visits ?? 0, delta.clicks ?? 0, delta.formSubmits ?? 0],
     );
     await touch(false);
   },

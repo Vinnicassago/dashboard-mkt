@@ -1,11 +1,12 @@
 import { UtmBuilder } from "@/components/utm/utm-builder";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getData } from "@/lib/data/store";
+import { activeBrandSlug } from "@/lib/active-brand";
 
 export const dynamic = "force-dynamic";
 
 export default async function UtmPage() {
-  const data = await getData();
+  const data = await getData(await activeBrandSlug());
   const creatives = data.creatives.map((c) => ({ adId: c.adId, name: c.name }));
 
   return (

@@ -4,6 +4,7 @@ import { graphUrl, metaGet } from "./http";
 import { getIgToken } from "./token";
 import { getData, upsertIgAccountDaily, upsertIgPosts } from "../data/store";
 import type { IgAccountDaily, IgMediaType, IgPost } from "../types";
+import { DEFAULT_BRAND } from "../types";
 
 /**
  * Instagram organic — "Instagram API with Instagram Login" (graph.instagram.com).
@@ -257,6 +258,7 @@ export async function syncInstagram({
     ]);
 
     rows.push({
+      brand: DEFAULT_BRAND,
       date,
       followers: followerByDate.get(date) ?? followersNow,
       reach: readMetric(res.data, "reach"),
@@ -305,6 +307,7 @@ export async function syncInstagram({
     const totalWatchMs = readMetric(ins.data, "ig_reels_video_view_total_time");
     posts.push({
       id: m.id,
+      brand: DEFAULT_BRAND,
       publishedAt: m.timestamp ?? new Date().toISOString(),
       type,
       caption: (m.caption ?? "").slice(0, 300) || "(sem legenda)",

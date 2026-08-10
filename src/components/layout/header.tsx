@@ -4,15 +4,18 @@ import { usePathname } from "next/navigation";
 import { Suspense } from "react";
 import { sectionFromPath } from "./nav-items";
 import { PeriodSelector } from "./period-selector";
+import { BrandSelector } from "./brand-selector";
 import { ThemeToggle } from "./theme-toggle";
 import { UserMenu } from "./user-menu";
 
 export function Header({
   updatedAt,
   username,
+  brand,
 }: {
   updatedAt: string;
   username: string | null;
+  brand: string;
 }) {
   const pathname = usePathname();
   const section = sectionFromPath(pathname);
@@ -32,6 +35,7 @@ export function Header({
         </p>
       </div>
       <div className="flex items-center gap-2">
+        <BrandSelector active={brand} />
         <Suspense fallback={null}>
           <PeriodSelector />
         </Suspense>

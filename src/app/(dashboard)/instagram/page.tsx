@@ -1,4 +1,4 @@
-import { Users, TrendingUp, Eye, Radio, Heart, ExternalLink, Percent, UserRound, Info } from "lucide-react";
+import { Users, TrendingUp, Eye, Radio, Heart, ExternalLink, Percent, UserRound, Info, Sparkles, DollarSign } from "lucide-react";
 import { KpiCard } from "@/components/kpi/kpi-card";
 import { GoalBar } from "@/components/kpi/goal-bar";
 import { TimeSeriesChart } from "@/components/charts/time-series-chart";
@@ -8,8 +8,11 @@ import { HorizontalBars } from "@/components/charts/horizontal-bars";
 import { EmptyState } from "@/components/ui/empty-state";
 import { CHART } from "@/components/charts/colors";
 import { getData } from "@/lib/data/store";
+import { activeBrandSlug } from "@/lib/active-brand";
+import { brandDef } from "@/lib/brands";
 import { pageRange } from "@/lib/page-range";
 import {
+  awarenessKpis,
   buildOrganicFunnel,
   followerSeries,
   goalProgress,
@@ -18,14 +21,15 @@ import {
   previousRange,
 } from "@/lib/metrics";
 import { absDelta, pctDelta } from "@/components/kpi/delta";
-import { formatCompact, formatDecimal, formatInt, formatPercent } from "@/lib/format";
+import { formatCompact, formatCurrency0, formatCurrencyOrDash, formatDecimal, formatInt, formatPercent } from "@/lib/format";
 
 export default async function InstagramPage({
   searchParams,
 }: {
   searchParams: Promise<{ range?: string }>;
 }) {
-  const data = await getData();
+  const brand = brandDef(await activeBrandSlug());
+  const data = await getData(brand.slug);
   const { range } = pageRange(data, (await searchParams).range);
 
   const rows = data.igAccountDaily.filter((r) => inRange(r.date, range));
@@ -42,6 +46,8 @@ export default async function InstagramPage({
 
   const cur = igAccountTotals(data.igAccountDaily, range);
   const prev = range ? igAccountTotals(data.igAccountDaily, previousRange(range)) : undefined;
+  // Marca de awareness (krone): eficiência do investimento pago em seguidores.
+  const aware = brand.type === "awareness" ? awarenessKpis(data, range) : null;
 
   const orgFunnel = buildOrganicFunnel(data.igAccountDaily, range);
 
@@ -69,6 +75,24 @@ export default async function InstagramPage({
           Icon={Users}
           delta={absDelta(cur.netNew)}
         />
+        {aware ? (
+          <>
+            <KpiCard
+              label="Custo por seguidor"
+              value={formatCurrencyOrDash(aware.costPerFollower)}
+              Icon={Sparkles}
+              hint="North Star"
+              highlight
+            />
+            <KpiCard
+              label="Custo / 1k alcance"
+              value={formatCurrencyOrDash(aware.costPerReach)}
+              Icon={Radio}
+              hint="alcance da conta"
+            />
+            <KpiCard label="Investimento" value={formatCurrency0(aware.spend)} Icon={DollarSign} />
+          </>
+        ) : null}
         <KpiCard
           label="Alcance"
           value={formatCompact(cur.reach)}

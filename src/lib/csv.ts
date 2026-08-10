@@ -1,5 +1,6 @@
 import Papa from "papaparse";
 import type { AdDaily } from "./types";
+import { DEFAULT_BRAND } from "./types";
 
 /** Strip accents + lowercase for tolerant header matching. */
 function norm(s: string): string {
@@ -111,6 +112,7 @@ export function parseAdsCsv(text: string): ParseResult {
     const reach = map.reach ? parseNum(r[map.reach]) : 0;
     const objective = map.objective ? r[map.objective]?.trim() : undefined;
     rows.push({
+      brand: DEFAULT_BRAND,
       date,
       campaign: (map.campaign ? r[map.campaign] : "") || "Campanha importada",
       adset: (map.adset ? r[map.adset] : "") || "—",

@@ -12,6 +12,7 @@ import { UsersManager } from "@/components/config/users-manager";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { activeBackend, getData, listUsers } from "@/lib/data/store";
+import { activeBrandSlug } from "@/lib/active-brand";
 import { ADS_CSV_TEMPLATE } from "@/lib/csv";
 import { LEADS_CSV_TEMPLATE } from "@/lib/leads-csv";
 import { integrationStatus } from "@/lib/meta/config";
@@ -45,7 +46,7 @@ function StatusRow({
 }
 
 export default async function ConfigPage() {
-  const data = await getData();
+  const data = await getData(await activeBrandSlug());
   const status = integrationStatus();
   const lastSync = await getLastSync();
   const backend = activeBackend();

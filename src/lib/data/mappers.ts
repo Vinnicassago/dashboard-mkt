@@ -25,6 +25,7 @@ import type {
   LeadStatus,
   LpDaily,
 } from "../types";
+import { DEFAULT_BRAND } from "../types";
 import type { PublicUser, StoredUser } from "./backend";
 
 export type Row = Record<string, unknown>;
@@ -32,6 +33,8 @@ export type Row = Record<string, unknown>;
 export const n = (v: unknown) => Number(v ?? 0);
 export const s = (v: unknown) => String(v ?? "");
 export const day = (v: unknown) => s(v).slice(0, 10);
+/** Marca da linha; linhas antigas (sem a coluna) caem na marca padrão. */
+export const brandOf = (v: unknown) => (v ? s(v) : DEFAULT_BRAND);
 
 /**
  * Normalise a datetime to an ISO string. Supabase hands us ISO strings; the
@@ -45,6 +48,7 @@ export const iso = (v: unknown): string => {
 
 export const FALLBACK_CAMPAIGN: Campaign = {
   id: "campanha",
+  brand: DEFAULT_BRAND,
   name: "Campanha",
   objective: "Cadastros (leads)",
   status: "ativa",
@@ -54,6 +58,7 @@ export const FALLBACK_CAMPAIGN: Campaign = {
 
 export const toCampaign = (r: Row): Campaign => ({
   id: s(r.id),
+  brand: brandOf(r.brand),
   name: s(r.name),
   objective: s(r.objective),
   status: s(r.status) as CampaignStatus,
@@ -65,6 +70,7 @@ export const toCampaign = (r: Row): Campaign => ({
 
 export const fromCampaign = (c: Campaign): Row => ({
   id: c.id,
+  brand: c.brand,
   name: c.name,
   objective: c.objective,
   status: c.status,
@@ -75,6 +81,7 @@ export const fromCampaign = (c: Campaign): Row => ({
 });
 
 export const toIgDaily = (r: Row): IgAccountDaily => ({
+  brand: brandOf(r.brand),
   date: day(r.date),
   followers: n(r.followers),
   reach: n(r.reach),
@@ -88,6 +95,7 @@ export const toIgDaily = (r: Row): IgAccountDaily => ({
 });
 
 export const fromIgDaily = (r: IgAccountDaily): Row => ({
+  brand: r.brand,
   date: r.date,
   followers: r.followers,
   reach: r.reach,
@@ -102,6 +110,7 @@ export const fromIgDaily = (r: IgAccountDaily): Row => ({
 
 export const toPost = (r: Row): IgPost => ({
   id: s(r.id),
+  brand: brandOf(r.brand),
   publishedAt: iso(r.published_at),
   type: s(r.type) as IgMediaType,
   caption: s(r.caption),
@@ -118,6 +127,7 @@ export const toPost = (r: Row): IgPost => ({
 
 export const fromPost = (p: IgPost): Row => ({
   id: p.id,
+  brand: p.brand,
   published_at: p.publishedAt,
   type: p.type,
   caption: p.caption,
@@ -134,6 +144,7 @@ export const fromPost = (p: IgPost): Row => ({
 
 export const toCreative = (r: Row): Creative => ({
   adId: s(r.ad_id),
+  brand: brandOf(r.brand),
   name: s(r.name),
   format: s(r.format) as CreativeFormat,
   thumbnailUrl: r.thumbnail_url ? s(r.thumbnail_url) : undefined,
@@ -143,6 +154,7 @@ export const toCreative = (r: Row): Creative => ({
 
 export const fromCreative = (c: Creative): Row => ({
   ad_id: c.adId,
+  brand: c.brand,
   name: c.name,
   format: c.format,
   thumbnail_url: c.thumbnailUrl ?? null,
@@ -151,6 +163,7 @@ export const fromCreative = (c: Creative): Row => ({
 });
 
 export const toAd = (r: Row): AdDaily => ({
+  brand: brandOf(r.brand),
   date: day(r.date),
   campaign: s(r.campaign),
   adset: s(r.adset),
@@ -165,6 +178,7 @@ export const toAd = (r: Row): AdDaily => ({
 });
 
 export const fromAd = (a: AdDaily): Row => ({
+  brand: a.brand,
   date: a.date,
   ad_id: a.adId,
   campaign: a.campaign,
@@ -179,6 +193,7 @@ export const fromAd = (a: AdDaily): Row => ({
 });
 
 export const toLp = (r: Row): LpDaily => ({
+  brand: brandOf(r.brand),
   date: day(r.date),
   visits: n(r.visits),
   clicks: n(r.clicks),
@@ -186,6 +201,7 @@ export const toLp = (r: Row): LpDaily => ({
 });
 
 export const fromLp = (l: LpDaily): Row => ({
+  brand: l.brand,
   date: l.date,
   visits: l.visits,
   clicks: l.clicks,
@@ -194,6 +210,7 @@ export const fromLp = (l: LpDaily): Row => ({
 
 export const toLead = (r: Row): Lead => ({
   id: s(r.id),
+  brand: brandOf(r.brand),
   createdAt: iso(r.created_at),
   name: s(r.name),
   email: r.email ? s(r.email) : undefined,
@@ -212,6 +229,7 @@ export const toLead = (r: Row): Lead => ({
 
 export const fromLead = (l: Lead): Row => ({
   id: l.id,
+  brand: l.brand,
   created_at: l.createdAt,
   name: l.name,
   email: l.email ?? null,
@@ -229,6 +247,7 @@ export const fromLead = (l: Lead): Row => ({
 });
 
 export const toGoal = (r: Row): Goal => ({
+  brand: brandOf(r.brand),
   metric: s(r.metric) as GoalMetric,
   period: s(r.period) as Goal["period"],
   target: n(r.target),
@@ -236,6 +255,7 @@ export const toGoal = (r: Row): Goal => ({
 });
 
 export const fromGoal = (g: Goal): Row => ({
+  brand: g.brand,
   metric: g.metric,
   period: g.period,
   target: g.target,

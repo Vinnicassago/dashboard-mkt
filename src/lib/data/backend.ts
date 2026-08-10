@@ -18,7 +18,8 @@ import type { Role } from "../auth/roles";
 export interface DataBackend {
   readonly name: "local" | "supabase" | "postgres";
 
-  getData(): Promise<DashboardData>;
+  /** Read the dataset for a single brand/account (todas as linhas dessa marca). */
+  getData(brand: string): Promise<DashboardData>;
   resetToSeed(): Promise<DashboardData>;
 
   upsertAdDaily(rows: AdDaily[]): Promise<number>;
@@ -38,8 +39,8 @@ export interface DataBackend {
   addLeadEvent(event: LeadEvent): Promise<void>;
   listLeadEvents(opts?: { leadId?: string; limit?: number }): Promise<LeadEvent[]>;
 
-  /** Accumulate landing-page counters for a day (read-modify-write). */
-  bumpLpDaily(date: string, delta: LpDelta): Promise<void>;
+  /** Accumulate landing-page counters for a brand's day (read-modify-write). */
+  bumpLpDaily(brand: string, date: string, delta: LpDelta): Promise<void>;
 
   /** Small key/value bag: last sync timestamps, refreshed tokens, flags. */
   getState<T>(key: string): Promise<T | null>;

@@ -30,6 +30,14 @@ export function formatCurrency0(n: number | null | undefined): string {
   return brl0.format(n ?? 0);
 }
 
+/**
+ * Custo que pode ser indefinido (ex.: custo por seguidor com 0 seguidores
+ * ganhos): mostra "—" em vez de "R$ 0,00", que se leria como "de graça".
+ */
+export function formatCurrencyOrDash(n: number | null | undefined): string {
+  return n == null ? "—" : formatCurrency(n);
+}
+
 /** 1.234 */
 export function formatInt(n: number | null | undefined): string {
   return int.format(Math.round(n ?? 0));

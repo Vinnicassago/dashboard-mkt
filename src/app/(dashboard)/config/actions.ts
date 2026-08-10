@@ -15,7 +15,8 @@ import { parseLeadsCsv } from "@/lib/leads-csv";
 import { runSync, type SyncSource } from "@/lib/meta/sync";
 import { can } from "@/lib/auth/guard";
 import { currentActor, newEventId } from "@/lib/auth/actor";
-import type { GoalMetric, LeadStatus } from "@/lib/types";
+import { activeBrandSlug } from "@/lib/active-brand";
+import { type GoalMetric, type LeadStatus } from "@/lib/types";
 
 const DENIED: ActionState = { ok: false, message: "Você não tem permissão para esta ação." };
 
@@ -45,7 +46,8 @@ export async function importAdsCsv(
   try {
     const text = await file.text();
     const { rows, skipped } = parseAdsCsv(text);
-    await upsertAdDaily(rows);
+    const brand = await activeBrandSlug();
+    await upsertAdDaily(rows.map((r) => ({ ...r, brand })));
     revalidateAll();
     const extra = skipped > 0 ? ` (${skipped} linha(s) ignorada(s))` : "";
     return { ok: true, message: `${rows.length} linha(s) importada(s) com sucesso${extra}.` };
@@ -66,9 +68,10 @@ export async function importLeadsCsv(
   try {
     const text = await file.text();
     const { leads, skipped } = parseLeadsCsv(text);
+    const brand = await activeBrandSlug();
     const actor = await currentActor();
     for (const lead of leads) {
-      await addLead(lead);
+      await addLead({ ...lead, brand });
       await addLeadEvent({
         id: newEventId(),
         leadId: lead.id,
@@ -101,6 +104,7 @@ export async function addManualIgDay(
   }
   await upsertIgAccountDaily([
     {
+      brand: await activeBrandSlug(),
       date,
       followers: num(formData, "followers"),
       reach: num(formData, "reach"),
@@ -135,6 +139,7 @@ export async function addLeadAction(
   const leadId = `LEAD-M-${Date.now()}`;
   await addLead({
     id: leadId,
+    brand: await activeBrandSlug(),
     createdAt: `${date}T12:00:00`,
     name,
     email,
@@ -163,6 +168,7 @@ export async function setGoalsAction(
   formData: FormData,
 ): Promise<ActionState> {
   if (!(await can("data:write"))) return DENIED;
+  const brand = await activeBrandSlug();
   const specs: { metric: GoalMetric; lowerIsBetter?: boolean }[] = [
     { metric: "leads" },
     { metric: "meetings" },
@@ -175,7 +181,7 @@ export async function setGoalsAction(
     if (raw == null || String(raw).trim() === "") continue;
     const target = Number(raw);
     if (!Number.isFinite(target) || target <= 0) continue;
-    await upsertGoal({ metric: s.metric, period: "campanha", target, lowerIsBetter: s.lowerIsBetter });
+    await upsertGoal({ brand, metric: s.metric, period: "campanha", target, lowerIsBetter: s.lowerIsBetter });
   }
   revalidateAll();
   return { ok: true, message: "Metas atualizadas." };

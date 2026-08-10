@@ -16,6 +16,7 @@ import type {
   IgPost,
   Lead,
 } from "./types";
+import { isAwareness } from "./brands";
 
 // ---- date helpers ---------------------------------------------------
 
@@ -985,6 +986,60 @@ export function igAccountTotals(rows: IgAccountDaily[], range?: DateRange): IgAc
   };
 }
 
+// ---- awareness: North Star de marca de seguidores ------------------
+
+/**
+ * Pacote de KPIs para marcas do tipo `awareness` (krone.capital) — campanhas de
+ * ganho de seguidores, sem funil de lead. A North Star aqui é o CUSTO POR
+ * SEGUIDOR e o CUSTO POR 1K ALCANCE, não o CPR. Como todo o gasto pago de uma
+ * marca awareness é para crescimento, casamos o gasto total do período com o
+ * ganho líquido de seguidores da própria conta.
+ *
+ * `costPerFollower`/`costPerReach` são `null` (não 0) quando o denominador é 0 —
+ * para a UI exibir "—" em vez de "R$ 0,00" (que se lê como "de graça").
+ * Pressupõe `data` JÁ recortado por marca (via getData(brand)).
+ */
+export interface AwarenessKpis {
+  spend: number; // gasto pago no período (todo para crescimento)
+  followersEnd: number;
+  netNewFollowers: number; // seguidores líquidos ganhos no período
+  costPerFollower: number | null; // spend ÷ seguidores ganhos
+  reach: number;
+  costPerReach: number | null; // spend ÷ alcance × 1000 (custo por mil)
+  views: number;
+  interactions: number;
+  engagementRate: number; // interações ÷ alcance
+  reachFollowers: number;
+  reachNonFollowers: number;
+  discoveryRate: number; // alcance de não-seguidores ÷ alcance com split
+  hasReachSplit: boolean;
+  profileViews: number;
+  profileLinkTaps: number;
+}
+
+export function awarenessKpis(data: DashboardData, range?: DateRange): AwarenessKpis {
+  const ads = filterAds(data.adDaily, range);
+  const spend = ads.reduce((s, r) => s + r.spend, 0);
+  const t = igAccountTotals(data.igAccountDaily, range);
+  return {
+    spend,
+    followersEnd: t.followersEnd,
+    netNewFollowers: t.netNew,
+    costPerFollower: t.netNew > 0 ? spend / t.netNew : null,
+    reach: t.reach,
+    costPerReach: t.reach > 0 ? (spend / t.reach) * 1000 : null,
+    views: t.views,
+    interactions: t.interactions,
+    engagementRate: t.engagementRate,
+    reachFollowers: t.reachFollowers,
+    reachNonFollowers: t.reachNonFollowers,
+    discoveryRate: t.discoveryRate,
+    hasReachSplit: t.hasReachSplit,
+    profileViews: t.profileViews,
+    profileLinkTaps: t.profileLinkTaps,
+  };
+}
+
 // ---- instagram: performance by post format -------------------------
 
 const IG_TYPE_LABEL: Record<IgPost["type"], string> = {
@@ -1243,6 +1298,10 @@ export function dataQualityChecks(
   opts: { nowIso: string; lastSyncAds?: string | null },
 ): DataWarning[] {
   const out: DataWarning[] = [];
+  // Marcas de awareness (só seguidores) não têm funil de lead/LP — os checks de
+  // "gasto sem lead", "LP sem submit" e "objetivo distorce o CPL" não se aplicam
+  // e virariam falso positivo permanente.
+  const awareness = isAwareness(data.campaign.brand);
 
   if (opts.lastSyncAds) {
     const hrs = (new Date(opts.nowIso).getTime() - new Date(opts.lastSyncAds).getTime()) / 3_600_000;
@@ -1251,20 +1310,22 @@ export function dataQualityChecks(
     }
   }
 
-  const noObjective = data.adDaily.filter((r) => !r.objective && r.spend > 0).length;
-  if (noObjective > 0) {
-    out.push({ level: "warn", message: `${noObjective} linha(s) de anúncio sem objetivo — caem em conversão e distorcem o CPL fiel. Ressincronize os anúncios.` });
-  }
+  if (!awareness) {
+    const noObjective = data.adDaily.filter((r) => !r.objective && r.spend > 0).length;
+    if (noObjective > 0) {
+      out.push({ level: "warn", message: `${noObjective} linha(s) de anúncio sem objetivo — caem em conversão e distorcem o CPL fiel. Ressincronize os anúncios.` });
+    }
 
-  const totalSpend = data.adDaily.reduce((s, r) => s + r.spend, 0);
-  if (totalSpend > 0 && data.leads.length === 0) {
-    out.push({ level: "warn", message: "Há gasto em anúncios mas nenhum lead registrado — o rastreio da landing page pode estar quebrado ou faltando importar." });
-  }
+    const totalSpend = data.adDaily.reduce((s, r) => s + r.spend, 0);
+    if (totalSpend > 0 && data.leads.length === 0) {
+      out.push({ level: "warn", message: "Há gasto em anúncios mas nenhum lead registrado — o rastreio da landing page pode estar quebrado ou faltando importar." });
+    }
 
-  const totalVisits = data.lpDaily.reduce((s, r) => s + r.visits, 0);
-  const totalSubmits = data.lpDaily.reduce((s, r) => s + r.formSubmits, 0);
-  if (totalVisits > 0 && totalSubmits === 0) {
-    out.push({ level: "warn", message: "A landing page tem visitas mas nenhum envio de formulário registrado — verifique o rastreio de leads (/api/track)." });
+    const totalVisits = data.lpDaily.reduce((s, r) => s + r.visits, 0);
+    const totalSubmits = data.lpDaily.reduce((s, r) => s + r.formSubmits, 0);
+    if (totalVisits > 0 && totalSubmits === 0) {
+      out.push({ level: "warn", message: "A landing page tem visitas mas nenhum envio de formulário registrado — verifique o rastreio de leads (/api/track)." });
+    }
   }
 
   // Buracos na série diária de anúncios (dias sem dado dentro do intervalo).

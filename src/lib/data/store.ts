@@ -27,6 +27,7 @@ import type {
   LeadEvent,
   LeadStatus,
 } from "../types";
+import { DEFAULT_BRAND } from "../types";
 
 function backend(): DataBackend {
   if (isPostgresConfigured()) return postgresBackend; // DATABASE_URL (EasyPanel/Postgres)
@@ -41,7 +42,8 @@ export function activeBackend(): DataBackend["name"] {
 
 // ---- reads ----------------------------------------------------------
 
-export const getData = () => backend().getData();
+/** Dataset de UMA marca. Sem argumento, a marca padrão (consorcio.brunno). */
+export const getData = (brand: string = DEFAULT_BRAND) => backend().getData(brand);
 
 // ---- writes ---------------------------------------------------------
 
@@ -68,8 +70,8 @@ export const deleteLead = (id: string) => backend().deleteLead(id);
 
 export const upsertGoal = (goal: Goal) => backend().upsertGoal(goal);
 
-export const bumpLpDaily = (date: string, delta: LpDelta) =>
-  backend().bumpLpDaily(date, delta);
+export const bumpLpDaily = (date: string, delta: LpDelta, brand: string = DEFAULT_BRAND) =>
+  backend().bumpLpDaily(brand, date, delta);
 
 export const addLeadEvent = (event: LeadEvent) => backend().addLeadEvent(event);
 export const listLeadEvents = (opts?: { leadId?: string; limit?: number }) =>

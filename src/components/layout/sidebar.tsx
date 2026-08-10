@@ -2,30 +2,37 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { NAV } from "./nav-items";
+import { navForType } from "./nav-items";
+import type { BrandDef } from "@/lib/brands";
 import { cn } from "@/lib/utils";
 
 function isActive(pathname: string, href: string) {
   return href === "/" ? pathname === "/" : pathname.startsWith(href);
 }
 
-export function Sidebar() {
+/** Subtítulo da identidade da marca conforme o tipo. */
+function brandSubtitle(brand: BrandDef): string {
+  return brand.type === "awareness" ? "Ganho de seguidores" : "Campanha de Leads";
+}
+
+export function Sidebar({ brand }: { brand: BrandDef }) {
   const pathname = usePathname();
+  const nav = navForType(brand.type);
 
   return (
     <aside className="hidden w-60 shrink-0 flex-col border-r bg-card md:flex">
       <div className="flex h-16 items-center gap-2 border-b px-5">
         <div className="flex size-8 items-center justify-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">
-          C
+          {brand.initial}
         </div>
         <div className="leading-tight">
-          <p className="text-sm font-semibold">Consórcio</p>
-          <p className="text-xs text-muted-foreground">Campanha de Leads</p>
+          <p className="text-sm font-semibold">{brand.short}</p>
+          <p className="text-xs text-muted-foreground">{brandSubtitle(brand)}</p>
         </div>
       </div>
 
       <nav className="flex flex-1 flex-col gap-0.5 p-3">
-        {NAV.map((item) => {
+        {nav.map((item) => {
           const active = isActive(pathname, item.href);
           return (
             <Link
@@ -53,11 +60,11 @@ export function Sidebar() {
 }
 
 /** Horizontal scrollable nav shown on mobile (md:hidden). */
-export function MobileNav() {
+export function MobileNav({ brand }: { brand: BrandDef }) {
   const pathname = usePathname();
   return (
     <nav className="flex gap-1 overflow-x-auto border-b bg-card px-3 py-2 md:hidden">
-      {NAV.map((item) => {
+      {navForType(brand.type).map((item) => {
         const active = isActive(pathname, item.href);
         return (
           <Link
