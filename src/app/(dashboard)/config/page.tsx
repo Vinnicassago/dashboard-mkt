@@ -17,9 +17,10 @@ import { activeBackend, getData, getState, listUsers } from "@/lib/data/store";
 import { STATE_KEYS } from "@/lib/data/backend";
 import { activeBrandSlug } from "@/lib/active-brand";
 import { BRANDS } from "@/lib/brands";
+import { DEFAULT_BRAND } from "@/lib/types";
 import { ADS_CSV_TEMPLATE } from "@/lib/csv";
 import { LEADS_CSV_TEMPLATE } from "@/lib/leads-csv";
-import { integrationStatus } from "@/lib/meta/config";
+import { integrationStatus, metaBrandConfig } from "@/lib/meta/config";
 import { getLastSync } from "@/lib/meta/sync";
 import { isAuthEnabled } from "@/lib/auth/config";
 import { getCurrentUser } from "@/lib/auth/current-user";
@@ -95,6 +96,13 @@ export default async function ConfigPage() {
   const currentMatch: Record<string, string> = {};
   for (const [slug, list] of Object.entries(matchState)) currentMatch[slug] = (list ?? []).join(", ");
 
+  // Status do Instagram POR MARCA — mostra se IG_USER_ID_<MARCA>/token foram
+  // reconhecidos pelo código em execução (diagnóstico da conexão da krone).
+  const brandIg = BRANDS.filter((b) => b.slug !== DEFAULT_BRAND).map((b) => {
+    const m = metaBrandConfig(b.slug);
+    return { slug: b.slug, label: b.label, configured: Boolean(m.igUserId && m.igToken) };
+  });
+
   const syncHint = (iso: string | null) =>
     iso ? `Última sincronização: ${formatDateTime(iso)}` : "Ainda não sincronizado";
 
@@ -129,10 +137,22 @@ export default async function ConfigPage() {
               }
             />
             <StatusRow
-              label="Instagram (orgânico)"
+              label={brandIg.length ? `Instagram · ${BRANDS[0].label}` : "Instagram (orgânico)"}
               ok={status.instagram}
               hint={status.instagram ? syncHint(lastSync.instagram) : "Faltam IG_USER_ID e IG_ACCESS_TOKEN"}
             />
+            {brandIg.map((b) => (
+              <StatusRow
+                key={b.slug}
+                label={`Instagram · ${b.label}`}
+                ok={b.configured}
+                hint={
+                  b.configured
+                    ? `IG_USER_ID_${b.slug.toUpperCase()} e token reconhecidos${lastSync.instagram ? ` · última sync: ${formatDateTime(lastSync.instagram)}` : ""}`
+                    : `Faltam IG_USER_ID_${b.slug.toUpperCase()} e IG_ACCESS_TOKEN_${b.slug.toUpperCase()} (confira o nome exato e reinicie o serviço)`
+                }
+              />
+            ))}
             <StatusRow
               label="Tráfego pago (Marketing API)"
               ok={status.ads}
