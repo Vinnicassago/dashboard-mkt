@@ -14,12 +14,15 @@ export function TooltipBox({
   label,
   labelFormat,
   valueFormat,
+  hideName = false,
 }: {
   active?: boolean;
   payload?: TooltipEntry[];
   label?: string | number;
   labelFormat?: (v: string) => string;
   valueFormat?: (v: number, key?: string) => string;
+  /** Oculta o nome da série (ex.: gráfico de categoria, onde o rótulo já é o cabeçalho). */
+  hideName?: boolean;
 }) {
   if (!active || !payload || payload.length === 0) return null;
   const heading = typeof label === "string" && labelFormat ? labelFormat(label) : label;
@@ -37,7 +40,7 @@ export function TooltipBox({
                 className="inline-block size-2 rounded-full"
                 style={{ background: entry.color }}
               />
-              {entry.name}
+              {hideName ? null : entry.name}
             </span>
             <span className="tabular font-medium text-foreground">
               {valueFormat && typeof entry.value === "number"

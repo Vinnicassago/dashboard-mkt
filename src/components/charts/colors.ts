@@ -28,5 +28,6 @@ export const CHART = {
     "var(--funnel-3)",
     "var(--funnel-4)",
     "var(--funnel-5)",
+    "var(--funnel-6)",
   ],
 } as const;

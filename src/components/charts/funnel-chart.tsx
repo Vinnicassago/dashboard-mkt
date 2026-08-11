@@ -24,13 +24,20 @@ export function FunnelChart({ stages }: { stages: FunnelStage[] }) {
             </div>
           ) : null}
           <div className="flex-1 rounded-xl border bg-card p-4">
-            <div
-              className="mb-2 h-1 w-8 rounded-full"
-              style={{ background: CHART.funnel[i % CHART.funnel.length] }}
-            />
             <p className="text-xs font-medium text-muted-foreground">{s.label}</p>
             <p className="mt-1 text-2xl font-semibold tabular">{formatInt(s.value)}</p>
-            <p className="mt-0.5 text-xs text-muted-foreground">
+            {/* Barra proporcional ao topo: devolve a percepção do funil afunilando
+                (o número grande já resolve o "sliver invisível"). */}
+            <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-foreground/[0.08]">
+              <div
+                className="h-full rounded-full"
+                style={{
+                  width: `${Math.max(2, (top ? s.value / top : 0) * 100)}%`,
+                  background: CHART.funnel[Math.min(i, CHART.funnel.length - 1)],
+                }}
+              />
+            </div>
+            <p className="mt-1.5 text-xs text-muted-foreground">
               {i === 0 ? "topo do funil" : `${formatPercent(top ? s.value / top : 0)} do topo`}
             </p>
           </div>

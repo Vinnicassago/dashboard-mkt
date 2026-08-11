@@ -4,7 +4,7 @@ export function Table({ className, ...props }: React.ComponentProps<"table">) {
   return (
     <div className="w-full overflow-x-auto">
       <table
-        className={cn("w-full border-collapse text-sm", className)}
+        className={cn("w-full border-collapse text-sm tabular-nums", className)}
         {...props}
       />
     </div>

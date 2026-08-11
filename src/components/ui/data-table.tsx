@@ -1,8 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, ChevronsUpDown } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronsUpDown, type LucideIcon } from "lucide-react";
 import { Table, TBody, TD, TH, THead, TR } from "./table";
+import { EmptyState } from "./empty-state";
 import { cn } from "@/lib/utils";
 
 export interface Column<T> {
@@ -23,12 +24,19 @@ export function DataTable<T>({
   initialSortKey,
   initialSortDir = "desc",
   rowKey,
+  emptyTitle = "Nada para mostrar",
+  emptyHint,
+  emptyIcon,
 }: {
   columns: Column<T>[];
   rows: T[];
   initialSortKey?: string;
   initialSortDir?: "asc" | "desc";
   rowKey: (row: T, index: number) => string;
+  /** Estado vazio (ex.: busca sem resultado) — evita a tabela "sumir" só com o cabeçalho. */
+  emptyTitle?: string;
+  emptyHint?: string;
+  emptyIcon?: LucideIcon;
 }) {
   const [sortKey, setSortKey] = useState<string | undefined>(initialSortKey);
   const [sortDir, setSortDir] = useState<"asc" | "desc">(initialSortDir);
@@ -61,6 +69,16 @@ export function DataTable<T>({
           {columns.map((c) => (
             <TH
               key={c.key}
+              scope="col"
+              aria-sort={
+                c.sortable
+                  ? sortKey === c.key
+                    ? sortDir === "asc"
+                      ? "ascending"
+                      : "descending"
+                    : "none"
+                  : undefined
+              }
               className={cn(c.align === "right" && "text-right", c.headerClassName)}
             >
               {c.sortable ? (
@@ -92,18 +110,26 @@ export function DataTable<T>({
         </TR>
       </THead>
       <TBody>
-        {sorted.map((row, i) => (
-          <TR key={rowKey(row, i)}>
-            {columns.map((c) => (
-              <TD
-                key={c.key}
-                className={cn(c.align === "right" && "text-right tabular", c.className)}
-              >
-                {c.render(row)}
-              </TD>
-            ))}
+        {sorted.length === 0 ? (
+          <TR className="hover:bg-transparent">
+            <td colSpan={columns.length} className="px-3 py-6">
+              <EmptyState title={emptyTitle} hint={emptyHint} Icon={emptyIcon} />
+            </td>
           </TR>
-        ))}
+        ) : (
+          sorted.map((row, i) => (
+            <TR key={rowKey(row, i)} className="even:bg-foreground/[0.02]">
+              {columns.map((c) => (
+                <TD
+                  key={c.key}
+                  className={cn(c.align === "right" && "text-right tabular", c.className)}
+                >
+                  {c.render(row)}
+                </TD>
+              ))}
+            </TR>
+          ))
+        )}
       </TBody>
     </Table>
   );

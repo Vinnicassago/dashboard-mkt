@@ -54,6 +54,7 @@
   --funnel-3: #5598e7;
   --funnel-4: #86b6ef;
   --funnel-5: #b7d3f6;
+  --funnel-6: #cfe1fa;  /* 6º passo p/ o funil de conversão (6 estágios) */
 }
 
 :root[data-theme="dark"] {
@@ -95,6 +96,7 @@
   --funnel-3: #3987e5;
   --funnel-4: #5598e7;
   --funnel-5: #86b6ef;
+  --funnel-6: #b7d3f6;
 }
 
 /* ------------------------------------------------------------------ */

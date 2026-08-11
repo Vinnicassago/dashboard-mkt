@@ -6,6 +6,7 @@ import {
   ComposedChart,
   Legend,
   Line,
+  ReferenceDot,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -47,11 +48,25 @@ export function TimeSeriesChart({
   const yFn = (v: number) => formatBy(yFormat, v);
   const tipFn = (v: number) => formatBy(valueFormat ?? yFormat, v);
 
+  if (data.length === 0) {
+    return (
+      <div
+        style={{ height }}
+        className="flex items-center justify-center text-sm text-muted-foreground"
+      >
+        Sem dados no período
+      </div>
+    );
+  }
+
+  // Último ponto de cada série, marcado com um dot "onde estamos hoje".
+  const last = data[data.length - 1] as Record<string, unknown>;
+
   return (
     <ResponsiveContainer width="100%" height={height}>
       <ComposedChart
         data={data as unknown as Record<string, unknown>[]}
-        margin={{ top: 8, right: 8, bottom: 0, left: 0 }}
+        margin={{ top: 8, right: 12, bottom: 0, left: 0 }}
       >
         <defs>
           {series.map((s, i) => (
@@ -75,7 +90,7 @@ export function TimeSeriesChart({
           tick={{ fontSize: 11, fill: CHART.axis }}
           tickLine={false}
           axisLine={false}
-          width={48}
+          width={56}
         />
         <Tooltip
           cursor={{ stroke: CHART.axis, strokeWidth: 1, strokeDasharray: "3 3" }}
@@ -123,6 +138,21 @@ export function TimeSeriesChart({
               fill={`url(#grad-${s.key})`}
               dot={false}
               activeDot={{ r: 4 }}
+            />
+          );
+        })}
+        {series.map((s, i) => {
+          const y = Number(last[s.key]);
+          if (!Number.isFinite(y)) return null;
+          return (
+            <ReferenceDot
+              key={`end-${s.key}`}
+              x={String(last[xKey])}
+              y={y}
+              r={4}
+              fill={s.color ?? CHART.series[i]}
+              stroke="var(--card)"
+              strokeWidth={2}
             />
           );
         })}

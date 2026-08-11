@@ -39,6 +39,17 @@ export function HorizontalBars({
   const h = height ?? Math.max(120, data.length * 44 + 16);
   const vf = (v: number) => formatBy(valueFormat, v);
 
+  if (data.length === 0) {
+    return (
+      <div
+        style={{ height: h }}
+        className="flex items-center justify-center text-sm text-muted-foreground"
+      >
+        Sem dados no período
+      </div>
+    );
+  }
+
   return (
     <ResponsiveContainer width="100%" height={h}>
       <BarChart
@@ -58,9 +69,19 @@ export function HorizontalBars({
         />
         <Tooltip
           cursor={{ fill: "var(--foreground)", fillOpacity: 0.04 }}
-          content={({ active, payload }) => (
-            <TooltipBox active={active} payload={payload as never} valueFormat={(v) => vf(v)} />
-          )}
+          content={({ active, payload }) => {
+            const cat = (payload as unknown as { payload?: { label?: string } }[] | undefined)?.[0]
+              ?.payload?.label;
+            return (
+              <TooltipBox
+                active={active}
+                payload={payload as never}
+                label={cat}
+                hideName
+                valueFormat={(v) => vf(v)}
+              />
+            );
+          }}
         />
         <Bar dataKey="value" radius={[4, 4, 4, 4]} isAnimationActive={false}>
           {data.map((d, i) => (

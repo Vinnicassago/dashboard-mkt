@@ -54,11 +54,15 @@ const columns: Column<CreativePerf>[] = [
     sortable: true,
     sortValue: (r) => r.name,
     render: (r) => (
-      <div className="flex flex-col gap-1">
-        <span className="font-medium">{r.name}</span>
-        <span className="flex items-center gap-1.5">
+      <div className="flex min-w-0 flex-col gap-1">
+        <span className="block truncate font-medium" title={r.name}>
+          {r.name}
+        </span>
+        <span className="flex min-w-0 items-center gap-1.5">
           <Badge variant="muted">{formatBadge[r.format]}</Badge>
-          <span className="text-xs text-muted-foreground">{r.adset}</span>
+          <span className="truncate text-xs text-muted-foreground" title={r.adset}>
+            {r.adset}
+          </span>
         </span>
       </div>
     ),
