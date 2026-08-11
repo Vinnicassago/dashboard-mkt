@@ -5,8 +5,8 @@ import { ExternalLink } from "lucide-react";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import type { PostPerf } from "@/lib/metrics";
-import { formatDateShort, formatDecimal, formatInt, formatPercent } from "@/lib/format";
+import { CTA_LABEL, type PostPerf } from "@/lib/metrics";
+import { formatDateShort, formatDecimal, formatDuration, formatInt, formatPercent } from "@/lib/format";
 
 const typeLabel: Record<PostPerf["type"], string> = {
   feed: "Feed",
@@ -45,7 +45,11 @@ const columns: Column<PostPerf>[] = [
         ) : (
           <span className="line-clamp-1 max-w-[320px] font-medium">{r.caption}</span>
         )}
-        <Badge variant="muted" className="w-fit">{typeLabel[r.type]}</Badge>
+        <div className="flex flex-wrap gap-1">
+          <Badge variant="muted">{typeLabel[r.type]}</Badge>
+          {r.pillar ? <Badge variant="muted">{r.pillar}</Badge> : null}
+          {r.cta ? <Badge variant="muted">CTA: {CTA_LABEL[r.cta]}</Badge> : null}
+        </div>
       </div>
     ),
   },
@@ -54,16 +58,32 @@ const columns: Column<PostPerf>[] = [
   { key: "likes", header: "Curtidas", align: "right", sortable: true, sortValue: (r) => r.likes, render: (r) => formatInt(r.likes) },
   { key: "comments", header: "Coment.", align: "right", sortable: true, sortValue: (r) => r.comments, render: (r) => formatInt(r.comments) },
   { key: "saved", header: "Salvos", align: "right", sortable: true, sortValue: (r) => r.saved, render: (r) => formatInt(r.saved) },
+  {
+    key: "savesPer1k",
+    header: "Salvos/1k",
+    align: "right",
+    sortable: true,
+    sortValue: (r) => r.savesPer1k,
+    render: (r) =>
+      r.views > 0 ? formatDecimal(r.savesPer1k, 1) : <span className="text-muted-foreground">—</span>,
+  },
   { key: "shares", header: "Compart.", align: "right", sortable: true, sortValue: (r) => r.shares, render: (r) => formatInt(r.shares) },
   {
     key: "avgWatchTime",
     header: "Retenção",
     align: "right",
     sortable: true,
-    sortValue: (r) => r.avgWatchTime ?? -1,
+    // Retenção % em [0,1] no topo; reels só com segundos mapeiam para (-1,0)
+    // monotônicos (sempre abaixo de qualquer %); sem nada, -2 por último.
+    sortValue: (r) => r.retention ?? (r.avgWatchTime != null ? -1 / (1 + r.avgWatchTime) : -2),
     render: (r) =>
-      r.type === "reel" && r.avgWatchTime != null ? (
-        `${formatDecimal(r.avgWatchTime, 1)}s`
+      r.type === "reel" && r.retention != null ? (
+        <span>
+          {formatPercent(r.retention, 0)}{" "}
+          <span className="text-xs text-muted-foreground">· {formatDuration(r.avgWatchTime)}</span>
+        </span>
+      ) : r.type === "reel" && r.avgWatchTime != null ? (
+        formatDuration(r.avgWatchTime)
       ) : (
         <span className="text-muted-foreground">—</span>
       ),

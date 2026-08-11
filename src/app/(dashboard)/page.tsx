@@ -1,4 +1,5 @@
-import { DollarSign, CalendarCheck, Target, UserPlus, Sparkles, Users, Radio } from "lucide-react";
+import { DollarSign, CalendarCheck, Target, UserPlus, Sparkles, Users, Radio, Heart, ExternalLink, MessageCircle } from "lucide-react";
+import Link from "next/link";
 import { ExampleBanner } from "@/components/example-banner";
 import { KpiCard, type KpiDelta } from "@/components/kpi/kpi-card";
 import { ObjectiveSplitBar } from "@/components/kpi/objective-split";
@@ -22,6 +23,8 @@ import {
   delta,
   followerSeries,
   goalProgress,
+  igAccountTotals,
+  igEngagementSeries,
   overviewKpis,
   previousRange,
   type DataWarning,
@@ -33,11 +36,14 @@ import { buildRecommendations, type Recommendation } from "@/lib/recommendations
 import type { DashboardData } from "@/lib/types";
 import { RecommendationsCard } from "@/components/kpi/recommendations";
 import {
+  formatCompact,
   formatCurrency,
   formatCurrency0,
   formatCurrencyOrDash,
+  formatDecimal,
   formatInt,
   formatPercent,
+  formatPercentValue,
 } from "@/lib/format";
 import type { GoalMetric } from "@/lib/types";
 import { CHART } from "@/components/charts/colors";
@@ -65,12 +71,21 @@ const GOAL_LABEL: Record<GoalMetric, string> = {
   cpr: "Custo por reunião",
   spend: "Investimento",
   followers: "Seguidores",
+  retencao_reels: "Retenção de reels",
+  alcance_base: "Alcance sobre a base",
+  saves_1k: "Salvos / 1k views",
+  comentarios_post: "Coment. / post",
+  posts_semana: "Posts / semana",
+  conversas_dm: "Conversas de DM",
 };
 
 function goalValueText(metric: GoalMetric, v: number): string {
-  return metric === "cpl" || metric === "cpr" || metric === "spend"
-    ? formatCurrency0(v)
-    : formatInt(v);
+  if (metric === "cpl" || metric === "cpr" || metric === "spend") return formatCurrency0(v);
+  // metas percentuais guardam VALOR percentual (40 = 40%)
+  if (metric === "retencao_reels" || metric === "alcance_base") return formatPercentValue(v, 0);
+  if (metric === "saves_1k" || metric === "comentarios_post" || metric === "posts_semana")
+    return formatDecimal(v, 1);
+  return formatInt(v);
 }
 
 export default async function OverviewPage({
@@ -103,6 +118,12 @@ export default async function OverviewPage({
   const prev = range ? overviewKpis(data, previousRange(range)) : undefined;
   const funnel = buildFunnel(data, range);
   const series = dailySeries(data, range);
+
+  // Orgânico do perfil — o pago compra visita, mas é o orgânico que converte quem chega.
+  const ig = igAccountTotals(data.igAccountDaily, range);
+  const igPrev = range ? igAccountTotals(data.igAccountDaily, previousRange(range)) : undefined;
+  const igDaily = igEngagementSeries(data.igAccountDaily, range);
+  const hasOrganic = ig.days > 0;
 
   return (
     <div className="space-y-6">
@@ -177,6 +198,66 @@ export default async function OverviewPage({
         <FunnelChart stages={funnel} />
       </ChartCard>
 
+      {/* Orgânico do perfil — saúde da base que recebe o tráfego pago */}
+      {hasOrganic ? (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-semibold tracking-tight">
+              Orgânico — {brand.handle}
+            </h2>
+            <Link
+              href="/instagram"
+              className="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-primary"
+            >
+              ver Instagram <ExternalLink className="size-3.5" />
+            </Link>
+          </div>
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4 xl:grid-cols-5">
+            <KpiCard
+              label="Alcance orgânico"
+              value={formatCompact(ig.reach)}
+              Icon={Radio}
+              delta={igPrev ? pctDelta(ig.reach, igPrev.reach) : undefined}
+              hint={hint}
+              spark={igDaily.map((d) => d.reach)}
+            />
+            <KpiCard
+              label="Novos seguidores"
+              value={`${ig.netNew >= 0 ? "+" : ""}${formatInt(ig.netNew)}`}
+              Icon={Users}
+              delta={igPrev ? pctDelta(ig.netNew, igPrev.netNew) : undefined}
+              hint={hint}
+            />
+            <KpiCard
+              label="Aquecimento da base"
+              value={formatPercent(ig.engagementOnBase)}
+              Icon={Heart}
+              hint="interações/dia ÷ seguidores"
+              delta={igPrev ? pctDelta(ig.engagementOnBase, igPrev.engagementOnBase) : undefined}
+              spark={igDaily.map((d) => d.warmth)}
+            />
+            <KpiCard
+              label="Conversas de DM"
+              value={ig.hasDmData ? formatInt(ig.dmConversations) : "—"}
+              Icon={MessageCircle}
+              hint={ig.hasDmData ? "registro manual" : "registre no Config"}
+              delta={
+                igPrev && ig.hasDmData && igPrev.hasDmData
+                  ? pctDelta(ig.dmConversations, igPrev.dmConversations)
+                  : undefined
+              }
+            />
+            <KpiCard
+              label="Cliques no link da bio"
+              value={formatInt(ig.profileLinkTaps)}
+              Icon={ExternalLink}
+              delta={igPrev ? pctDelta(ig.profileLinkTaps, igPrev.profileLinkTaps) : undefined}
+              hint={`CTR da bio ${formatPercent(ig.linkTapRate)}`}
+            />
+          </div>
+        </div>
+      ) : null}
+
       {/* Time series */}
       <div className="grid gap-4 lg:grid-cols-2">
         <ChartCard title="Investimento por dia" description="Ritmo de gasto (pacing).">
@@ -213,6 +294,24 @@ export default async function OverviewPage({
           <CardContent className="space-y-4">
             {data.goals.map((goal) => {
               const actual = actualForGoal(goal, data, range);
+              if (actual == null) {
+                // Sem dado para medir (ex.: retenção sem duração preenchida) —
+                // um GoalBar em 0 leria como "0% da meta", que é outra coisa.
+                return (
+                  <div
+                    key={`${goal.metric}-${goal.period}`}
+                    className="flex items-baseline justify-between gap-3 text-sm"
+                  >
+                    <span className="font-medium text-muted-foreground">
+                      {GOAL_LABEL[goal.metric]}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      sem dado — registre no Config · meta{" "}
+                      {goalValueText(goal.metric, goal.target)}
+                    </span>
+                  </div>
+                );
+              }
               const gp = goalProgress(goal, actual);
               return (
                 <GoalBar

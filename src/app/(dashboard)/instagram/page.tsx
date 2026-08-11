@@ -1,4 +1,4 @@
-import { Users, TrendingUp, Eye, Radio, Heart, ExternalLink, Percent, UserRound, Info, Sparkles, DollarSign } from "lucide-react";
+import { Users, TrendingUp, Eye, Radio, Heart, ExternalLink, Percent, UserRound, Info, Sparkles, DollarSign, MessageCircle } from "lucide-react";
 import { KpiCard } from "@/components/kpi/kpi-card";
 import { GoalBar } from "@/components/kpi/goal-bar";
 import { TimeSeriesChart } from "@/components/charts/time-series-chart";
@@ -14,11 +14,14 @@ import { pageRange } from "@/lib/page-range";
 import {
   awarenessKpis,
   buildOrganicFunnel,
+  buildProfileClickFunnel,
   followerSeries,
   goalProgress,
   igAccountTotals,
+  igEngagementSeries,
   inRange,
   previousRange,
+  weeklyDmSeries,
 } from "@/lib/metrics";
 import { absDelta, pctDelta } from "@/components/kpi/delta";
 import { formatCompact, formatCurrency0, formatCurrencyOrDash, formatDecimal, formatInt, formatPercent } from "@/lib/format";
@@ -50,6 +53,9 @@ export default async function InstagramPage({
   const aware = brand.type === "awareness" ? awarenessKpis(data, range) : null;
 
   const orgFunnel = buildOrganicFunnel(data.igAccountDaily, range);
+  const clickFunnel = buildProfileClickFunnel(data.igAccountDaily, range);
+  const engagementDaily = igEngagementSeries(data.igAccountDaily, range);
+  const dmWeeks = weeklyDmSeries(data.igAccountDaily, range);
 
   // Meta de seguidores: progresso + projeção linear pelo ritmo do período.
   const followersGoal = data.goals.find((g) => g.metric === "followers");
@@ -136,6 +142,31 @@ export default async function InstagramPage({
           hint="interações ÷ alcance"
           delta={prev ? pctDelta(cur.engagementRate, prev.engagementRate) : undefined}
         />
+        <KpiCard
+          label="Alcance diário sobre a base"
+          value={formatPercent(cur.reachRateOnBase)}
+          Icon={Users}
+          hint="alcance/dia ÷ seguidores · saudável 30%+"
+          delta={prev ? pctDelta(cur.reachRateOnBase, prev.reachRateOnBase) : undefined}
+        />
+        <KpiCard
+          label="Aquecimento da base"
+          value={formatPercent(cur.engagementOnBase)}
+          Icon={Heart}
+          hint="interações/dia ÷ seguidores"
+          delta={prev ? pctDelta(cur.engagementOnBase, prev.engagementOnBase) : undefined}
+        />
+        <KpiCard
+          label="Conversas de DM"
+          value={cur.hasDmData ? formatInt(cur.dmConversations) : "—"}
+          Icon={MessageCircle}
+          hint={cur.hasDmData ? "registro manual" : "registre no Config"}
+          delta={
+            prev && cur.hasDmData && prev.hasDmData
+              ? pctDelta(cur.dmConversations, prev.dmConversations)
+              : undefined
+          }
+        />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -145,6 +176,15 @@ export default async function InstagramPage({
         >
           <FunnelChart stages={orgFunnel} />
         </ChartCard>
+        <ChartCard
+          title="Funil do link da bio"
+          description={`Views → visita ao perfil → clique no link. CTR da bio (cliques ÷ visitas): ${formatPercent(cur.linkTapRate)}.`}
+        >
+          <FunnelChart stages={clickFunnel} />
+        </ChartCard>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
         {followersGoal && gp ? (
           <ChartCard title="Meta de seguidores" description={goalOutlook}>
             <GoalBar
@@ -156,6 +196,30 @@ export default async function InstagramPage({
             />
           </ChartCard>
         ) : null}
+        <ChartCard
+          title="Engajamento sobre o alcance"
+          description="Interações ÷ alcance do dia — qualidade do conteúdo para quem o viu."
+        >
+          <TimeSeriesChart
+            data={engagementDaily}
+            series={[
+              { key: "engagementRate", label: "Sobre o alcance", color: CHART.series[0], kind: "line" },
+            ]}
+            yFormat="percent"
+          />
+        </ChartCard>
+        <ChartCard
+          title="Aquecimento da base por dia"
+          description="Interações ÷ seguidores — a base fria esquentando (ou não)."
+        >
+          <TimeSeriesChart
+            data={engagementDaily}
+            series={[
+              { key: "warmth", label: "Sobre a base", color: CHART.series[1], kind: "line" },
+            ]}
+            yFormat="percent"
+          />
+        </ChartCard>
       </div>
 
       {cur.hasReachSplit ? (
@@ -201,6 +265,22 @@ export default async function InstagramPage({
           valueFormat="int"
         />
       </ChartCard>
+
+      {dmWeeks.length > 0 ? (
+        <ChartCard
+          title="Conversas de DM por semana"
+          description="A métrica de negócio do perfil (registro manual no Config — a API não expõe DMs)."
+        >
+          <HorizontalBars
+            data={dmWeeks.map((w) => ({
+              label: `Semana de ${w.label}`,
+              value: w.conversations,
+              color: CHART.series[0],
+            }))}
+            valueFormat="int"
+          />
+        </ChartCard>
+      ) : null}
 
       <div className="flex items-start gap-2.5 rounded-xl border bg-card px-4 py-3 text-sm text-muted-foreground">
         <Info className="mt-0.5 size-4 shrink-0 text-muted-foreground" />

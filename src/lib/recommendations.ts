@@ -1,11 +1,17 @@
 import type { DashboardData } from "./types";
 import {
   adsetPerformance,
+  aggregatePostPerformance,
   awarenessKpis,
+  bucketOfAd,
   campaignPacing,
   creativePerformance,
+  filterAds,
   formatPerformance,
   overviewKpis,
+  postPerformance,
+  postingCadence,
+  previousRange,
   type DateRange,
 } from "./metrics";
 import { isAwareness } from "./brands";
@@ -34,7 +40,7 @@ export function buildRecommendations(
   nowIso: string,
 ): Recommendation[] {
   // Marca de awareness (só seguidores): ações de crescimento, não de CPR/CPL.
-  if (isAwareness(data.campaign.brand)) return buildAwarenessRecommendations(data, range);
+  if (isAwareness(data.campaign.brand)) return buildAwarenessRecommendations(data, range, nowIso);
 
   const recs: Recommendation[] = [];
   const k = overviewKpis(data, range);
@@ -119,7 +125,128 @@ export function buildRecommendations(
     });
   }
 
+  recs.push(...buildOrganicContentRecommendations(data, range, nowIso));
   return recs.sort((a, b) => ORDER[a.severity] - ORDER[b.severity]).slice(0, 6);
+}
+
+/**
+ * Alertas de CONTEÚDO orgânico derivados do diagnóstico do perfil: retenção,
+ * cadência, CTA e formato. Compartilhados pelas duas marcas — são regras sobre
+ * a grade, não sobre o funil pago.
+ */
+function buildOrganicContentRecommendations(
+  data: DashboardData,
+  range: DateRange | undefined,
+  nowIso: string,
+): Recommendation[] {
+  const recs: Recommendation[] = [];
+  // SEM early-return com posts vazio: o alerta de cadência usa o histórico
+  // completo e precisa disparar justamente quando a janela está sem posts
+  // (grade parada), e o de objetivo de campanha nem depende de posts.
+  const posts = postPerformance(data.igPosts, range);
+  const agg = aggregatePostPerformance(posts);
+
+  // 1. Sem publicar há dias (alta com 5+): a base só esquenta com cadência.
+  const cadence = postingCadence(data.igPosts, undefined, nowIso);
+  // Canibalização é lida DENTRO do período selecionado (alerta 6).
+  const cadenceInRange = range ? postingCadence(data.igPosts, range, nowIso) : cadence;
+  if (cadence.daysSinceLast >= 3) {
+    recs.push({
+      id: "no-recent-post",
+      severity: cadence.daysSinceLast >= 5 ? "alta" : "media",
+      title: "Publique hoje — a grade parou",
+      detail: `${formatInt(cadence.daysSinceLast)} dias sem post novo. Sem cadência o algoritmo esfria a entrega; retome com um reel curto (≤25s) de gancho forte.`,
+    });
+  }
+
+  // 2. Retenção de reels caindo vs período anterior (média).
+  if (range) {
+    const prevAgg = aggregatePostPerformance(postPerformance(data.igPosts, previousRange(range)));
+    const cur = agg.avgRetention ?? null;
+    const prev = prevAgg.avgRetention ?? null;
+    if (cur != null && prev != null && prev > 0 && cur < prev * 0.85) {
+      recs.push({
+        id: "retention-drop",
+        severity: "media",
+        title: "Retenção dos reels caindo",
+        detail: `Retenção média ${formatPercent(cur)} vs ${formatPercent(prev)} no período anterior. Revise o gancho dos primeiros 2 segundos — entre direto no número ou na afirmação polêmica.`,
+      });
+    } else if (cur == null || prev == null) {
+      const curW = agg.avgWatchTime ?? null;
+      const prevW = prevAgg.avgWatchTime ?? null;
+      if (curW != null && prevW != null && prevW > 0 && curW < prevW * 0.85) {
+        recs.push({
+          id: "retention-drop",
+          severity: "media",
+          title: "Tempo assistido dos reels caindo",
+          detail: `Tempo médio assistido caiu vs o período anterior. Preencha a duração dos reels no Config para acompanhar a retenção % real (meta: 40%).`,
+        });
+      }
+    }
+  }
+
+  // 3. Reels longos demais (média): o diagnóstico pede ≤25s até a retenção subir.
+  const longReels = posts.filter(
+    (p) => p.type === "reel" && p.durationSec != null && p.durationSec > 30,
+  );
+  if (longReels.length > 0) {
+    const maxDur = Math.max(...longReels.map((p) => p.durationSec ?? 0));
+    recs.push({
+      id: "reels-too-long",
+      severity: "media",
+      title: "Encurte os reels para até 25s",
+      detail: `${formatInt(longReels.length)} reel(s) do período acima de 30s (maior: ${formatInt(maxDur)}s). Nos seus dados, reels curtos retêm ~2× mais — corte a introdução e entre direto no conflito.`,
+    });
+  }
+
+  // 4. CTA de DM em excesso (média): pedir DM em tudo mata comentário/salvamento.
+  if (posts.length >= 4 && agg.dmCtaShare > 0.25) {
+    recs.push({
+      id: "cta-dm-excess",
+      severity: "media",
+      title: "Racione o CTA de DM (máx. 1 a cada 4 posts)",
+      detail: `${formatPercent(agg.dmCtaShare)} dos posts pedem DM — o CTA de maior atrito. Troque por "salva pra decidir depois", pergunta nos comentários ou marcação; são esses os sinais que o algoritmo premia.`,
+    });
+  }
+
+  // 5. Card de frase na grade (baixa): pior formato do perfil, com folga.
+  const frasePosts = posts.filter((p) => p.pillar && /frase|motivacional/i.test(p.pillar));
+  if (frasePosts.length > 0) {
+    recs.push({
+      id: "pillar-frase",
+      severity: "baixa",
+      title: "Tire os cards de frase da grade",
+      detail: `${formatInt(frasePosts.length)} post(s) de frase/motivacional no período. É o formato de pior desempenho do diagnóstico — substitua por carrossel de método ou prova social.`,
+    });
+  }
+
+  // 6. Canibalização (baixa): várias peças no mesmo dia competem entre si.
+  if (cadenceInRange.maxSameDay >= 3) {
+    recs.push({
+      id: "same-day-pileup",
+      severity: "baixa",
+      title: "Espace as publicações (1 por dia)",
+      detail: `${formatInt(cadenceInRange.maxSameDay)} posts num mesmo dia — eles disputam a mesma janela de teste do algoritmo e canibalizam a entrega inicial.`,
+    });
+  }
+
+  // 7. Descoberta otimizada para views/alcance amplo (média): compra número de
+  // vaidade e esfria a base — o diagnóstico manda mudar o objetivo.
+  const VANITY = /OUTCOME_AWARENESS|VIDEO_VIEWS|REACH|BRAND_AWARENESS|THRUPLAY|IMPRESSIONS/;
+  const vanityAds = filterAds(data.adDaily, range).filter(
+    (r) => r.spend > 0 && bucketOfAd(r) === "descoberta" && r.objective && VANITY.test(r.objective.toUpperCase()),
+  );
+  const vanitySpend = vanityAds.reduce((s, r) => s + r.spend, 0);
+  if (vanitySpend > 0) {
+    recs.push({
+      id: "vanity-objective",
+      severity: "media",
+      title: "Mude o objetivo da campanha de descoberta",
+      detail: `${formatCurrency0(vanitySpend)} rodando otimizado para views/alcance amplo — isso compra visualização de quem nunca vai engajar. Prefira engajamento com público restrito (interesse + região + renda) ou mensagens.`,
+    });
+  }
+
+  return recs;
 }
 
 /**
@@ -130,6 +257,7 @@ export function buildRecommendations(
 function buildAwarenessRecommendations(
   data: DashboardData,
   range: DateRange | undefined,
+  nowIso: string,
 ): Recommendation[] {
   const recs: Recommendation[] = [];
   const a = awarenessKpis(data, range);
@@ -176,5 +304,6 @@ function buildAwarenessRecommendations(
     });
   }
 
+  recs.push(...buildOrganicContentRecommendations(data, range, nowIso));
   return recs.sort((a, b) => ORDER[a.severity] - ORDER[b.severity]).slice(0, 6);
 }

@@ -262,32 +262,44 @@ function buildSeedData(): DashboardData {
     const reach = Math.round(rand(380, 900) + i * 140 + rand(0, 400));
     const views = Math.round(reach * rand(1.4, 2.2));
     const reachFollowers = Math.round(reach * (0.7 - Math.min(i, 14) * 0.012));
+    const profileLinkTaps = Math.round(rand(6, 22) + i * 1.5);
     igAccountDaily.push({
       brand: DEFAULT_BRAND,
       date,
       followers,
       reach,
       views,
-      profileLinkTaps: Math.round(rand(6, 22) + i * 1.5),
+      profileLinkTaps,
       accountsEngaged: Math.round(reach * rand(0.06, 0.13)),
       totalInteractions: Math.round(rand(40, 160) + i * 12),
       profileViews: Math.round(rand(40, 140) + i * 6),
       reachFollowers,
       reachNonFollowers: Math.max(0, reach - reachFollowers),
+      // registro manual de conversas de DM — derivado (sem novo rand, p/ não
+      // deslocar a sequência determinística das demais métricas)
+      dmConversations: Math.max(0, Math.round(profileLinkTaps * 0.4) - 2),
     });
   });
 
   // ---- Instagram posts ----------------------------------------------
-  const POST_DEFS: { day: number; type: IgMediaType; caption: string }[] = [
-    { day: 0, type: "reel", caption: "Consórcio é para quem não tem pressa? Mito." },
+  // durationSec só nos reels (entrada manual na vida real); pillar/série em
+  // parte dos posts, como ficaria após o tagueamento manual.
+  const POST_DEFS: {
+    day: number;
+    type: IgMediaType;
+    caption: string;
+    durationSec?: number;
+    pillar?: string;
+  }[] = [
+    { day: 0, type: "reel", caption: "Consórcio é para quem não tem pressa? Mito.", durationSec: 41, pillar: "Mito ou verdade" },
     { day: 1, type: "carrossel", caption: "3 diferenças entre consórcio e financiamento" },
-    { day: 3, type: "feed", caption: "Conheça o head de consórcio do escritório" },
-    { day: 5, type: "reel", caption: "Como a carta de crédito funciona na prática" },
-    { day: 7, type: "carrossel", caption: "5 mitos do consórcio que te fazem perder dinheiro" },
-    { day: 9, type: "reel", caption: "Cliente real: como ela conquistou o imóvel" },
+    { day: 3, type: "feed", caption: "Conheça o head de consórcio do escritório", pillar: "Bastidor" },
+    { day: 5, type: "reel", caption: "Como a carta de crédito funciona na prática", durationSec: 38 },
+    { day: 7, type: "carrossel", caption: "5 mitos do consórcio que te fazem perder dinheiro", pillar: "Mito ou verdade" },
+    { day: 9, type: "reel", caption: "Cliente real: como ela conquistou o imóvel", durationSec: 26, pillar: "Prova social" },
     { day: 11, type: "feed", caption: "Agende uma reunião sem compromisso" },
-    { day: 12, type: "reel", caption: "Consórcio contemplado: e agora?" },
-    { day: 14, type: "carrossel", caption: "Passo a passo para começar hoje" },
+    { day: 12, type: "reel", caption: "Consórcio contemplado: e agora? Me chama na DM.", durationSec: 22 },
+    { day: 14, type: "carrossel", caption: "Passo a passo para começar hoje — salva pra depois" },
   ];
   const igPosts: IgPost[] = POST_DEFS.map((p, idx) => {
     const base = 300 + p.day * 90;
@@ -312,6 +324,8 @@ function buildSeedData(): DashboardData {
       shares,
       avgWatchTime: p.type === "reel" ? Math.round(rand(6, 18) * 10) / 10 : undefined,
       totalWatchTime: p.type === "reel" ? Math.round(views * rand(3, 9)) : undefined,
+      durationSec: p.durationSec,
+      pillar: p.pillar,
     };
   });
 
@@ -322,6 +336,11 @@ function buildSeedData(): DashboardData {
     { brand: DEFAULT_BRAND, metric: "cpl", period: "campanha", target: 40, lowerIsBetter: true },
     { brand: DEFAULT_BRAND, metric: "cpr", period: "campanha", target: 95, lowerIsBetter: true },
     { brand: DEFAULT_BRAND, metric: "followers", period: "campanha", target: 600 },
+    // metas orgânicas do plano de 90 dias (retencao_reels/alcance_base em valor %)
+    { brand: DEFAULT_BRAND, metric: "retencao_reels", period: "campanha", target: 40 },
+    { brand: DEFAULT_BRAND, metric: "saves_1k", period: "campanha", target: 8 },
+    { brand: DEFAULT_BRAND, metric: "posts_semana", period: "campanha", target: 4 },
+    { brand: DEFAULT_BRAND, metric: "conversas_dm", period: "campanha", target: 60 },
   ];
 
   // ---- segunda marca: krone.capital (awareness — só seguidores) ------
@@ -434,12 +453,12 @@ function buildKroneSeed(dates: string[]): {
     });
   });
 
-  const POST_DEFS: { day: number; type: IgMediaType; caption: string }[] = [
-    { day: 1, type: "reel", caption: "3 erros que corroem seu patrimônio sem você perceber" },
+  const POST_DEFS: { day: number; type: IgMediaType; caption: string; durationSec?: number }[] = [
+    { day: 1, type: "reel", caption: "3 erros que corroem seu patrimônio sem você perceber", durationSec: 28 },
     { day: 3, type: "carrossel", caption: "Diversificar não é ter muitos ativos — é ter os certos" },
-    { day: 6, type: "reel", caption: "O custo invisível de deixar dinheiro parado" },
+    { day: 6, type: "reel", caption: "O custo invisível de deixar dinheiro parado", durationSec: 24 },
     { day: 9, type: "feed", caption: "Inteligência patrimonial: por onde começar" },
-    { day: 12, type: "reel", caption: "Como blindar seu patrimônio da inflação" },
+    { day: 12, type: "reel", caption: "Como blindar seu patrimônio da inflação", durationSec: 21 },
   ];
   const igPosts: IgPost[] = POST_DEFS.map((p, idx) => {
     const base = 500 + p.day * 110;
@@ -464,6 +483,7 @@ function buildKroneSeed(dates: string[]): {
       shares,
       avgWatchTime: p.type === "reel" ? Math.round(rand(7, 20) * 10) / 10 : undefined,
       totalWatchTime: p.type === "reel" ? Math.round(views * rand(4, 10)) : undefined,
+      durationSec: p.durationSec,
     };
   });
 

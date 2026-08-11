@@ -51,9 +51,15 @@ export interface IgAccountDaily {
   profileViews: number; // visits to the profile
   reachFollowers?: number; // reach among existing followers
   reachNonFollowers?: number; // reach among non-followers (discovery)
+  /** Conversas de DM iniciadas no dia — registro MANUAL (a API do Instagram não
+   *  expõe DMs). É a métrica de negócio do perfil; semanal = soma dos dias. */
+  dmConversations?: number;
 }
 
 export type IgMediaType = "feed" | "carrossel" | "reel" | "story";
+
+/** Tipo de chamada-para-ação pedida na legenda do post. */
+export type CtaType = "dm" | "comentario" | "salvamento" | "marcacao" | "outro";
 
 export interface IgPost {
   id: string;
@@ -72,6 +78,15 @@ export interface IgPost {
   avgWatchTime?: number;
   // total seconds watched — reels only
   totalWatchTime?: number;
+  /** Duração do vídeo em segundos — entrada MANUAL (a API não expõe a duração).
+   *  Habilita a retenção real: avgWatchTime ÷ durationSec. Reels only. */
+  durationSec?: number;
+  /** Pilar/série de conteúdo (ex.: "Mito ou verdade", "Card de frase") — tag
+   *  manual para comparar performance por categoria. */
+  pillar?: string;
+  /** CTA pedido na legenda — override manual; sem ele a heurística de caption
+   *  (detectCta em metrics.ts) classifica na leitura. */
+  ctaType?: CtaType;
 }
 
 // ------------------------- Paid traffic (Meta Ads) ------------------
@@ -175,7 +190,14 @@ export type GoalMetric =
   | "cpl"
   | "cpr"
   | "spend"
-  | "followers";
+  | "followers"
+  // ---- metas orgânicas do plano de 90 dias (diagnóstico do perfil) ----
+  | "retencao_reels" // retenção média dos reels, em VALOR percentual (40 = 40%)
+  | "alcance_base" // alcance sobre a base por post, em VALOR percentual (35 = 35%)
+  | "saves_1k" // salvamentos por mil views
+  | "comentarios_post" // comentários por post
+  | "posts_semana" // posts por semana
+  | "conversas_dm"; // conversas de DM iniciadas no período (registro manual)
 
 export interface Goal {
   brand: Brand;

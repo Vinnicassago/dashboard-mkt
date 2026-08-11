@@ -13,6 +13,7 @@ import {
   upsertCreatives,
   upsertGoal,
   upsertIgAccountDaily,
+  upsertIgPosts,
 } from "@/lib/data/store";
 import { STATE_KEYS } from "@/lib/data/backend";
 import { parseAdsCsv } from "@/lib/csv";
@@ -23,7 +24,15 @@ import { BRANDS } from "@/lib/brands";
 import { can } from "@/lib/auth/guard";
 import { currentActor, newEventId } from "@/lib/auth/actor";
 import { activeBrandSlug } from "@/lib/active-brand";
-import { DEFAULT_BRAND, type AdDaily, type Creative, type GoalMetric, type LeadStatus } from "@/lib/types";
+import {
+  DEFAULT_BRAND,
+  type AdDaily,
+  type Creative,
+  type CtaType,
+  type GoalMetric,
+  type IgPost,
+  type LeadStatus,
+} from "@/lib/types";
 
 const DENIED: ActionState = { ok: false, message: "Você não tem permissão para esta ação." };
 
@@ -128,6 +137,86 @@ export async function addManualIgDay(
   return { ok: true, message: `Snapshot de ${date} salvo.` };
 }
 
+/**
+ * Registra as conversas de DM iniciadas num dia (métrica de negócio — a API do
+ * Instagram não expõe DMs). Faz MERGE no snapshot existente do dia; sem
+ * snapshot, orienta a criar um primeiro (uma linha só com DMs zeraria
+ * seguidores/alcance do dia e sujaria as séries).
+ */
+export async function setDmConversationsAction(
+  _prev: ActionState | null,
+  formData: FormData,
+): Promise<ActionState> {
+  if (!(await can("data:write"))) return DENIED;
+  const date = String(formData.get("date") ?? "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return { ok: false, message: "Informe uma data válida." };
+  }
+  const count = num(formData, "dmConversations");
+  const brand = await activeBrandSlug();
+  const data = await getData(brand);
+  const row = data.igAccountDaily.find((r) => r.date === date);
+  if (!row) {
+    return {
+      ok: false,
+      message: `Sem snapshot do Instagram em ${date}. Registre o snapshot do dia (ou rode a sincronização) e tente de novo.`,
+    };
+  }
+  await upsertIgAccountDaily([{ ...row, dmConversations: count }]);
+  revalidateAll();
+  return { ok: true, message: `${count} conversa(s) registrada(s) em ${date}.` };
+}
+
+const CTA_VALUES: CtaType[] = ["dm", "comentario", "salvamento", "marcacao", "outro"];
+
+/**
+ * Salva os metadados manuais de conteúdo (duração do reel, pilar/série e CTA)
+ * de todos os posts do formulário de uma vez. Só faz upsert dos que mudaram.
+ */
+export async function updatePostsMetaAction(
+  _prev: ActionState | null,
+  formData: FormData,
+): Promise<ActionState> {
+  if (!(await can("data:write"))) return DENIED;
+  const brand = await activeBrandSlug();
+  const data = await getData(brand);
+  const changed: IgPost[] = [];
+  for (const post of data.igPosts) {
+    const durRaw = formData.get(`duration_${post.id}`);
+    const pillarRaw = formData.get(`pillar_${post.id}`);
+    const ctaRaw = formData.get(`cta_${post.id}`);
+    // Campos ausentes do form (post fora da lista) não tocam o post.
+    if (durRaw == null && pillarRaw == null && ctaRaw == null) continue;
+
+    const durNum = Number(durRaw);
+    const durationSec =
+      durRaw != null && String(durRaw).trim() !== "" && Number.isFinite(durNum) && durNum > 0
+        ? durNum
+        : undefined;
+    const pillar = pillarRaw != null ? String(pillarRaw).trim() || undefined : post.pillar;
+    const ctaStr = ctaRaw != null ? String(ctaRaw).trim() : "";
+    const ctaType =
+      ctaRaw != null
+        ? CTA_VALUES.includes(ctaStr as CtaType)
+          ? (ctaStr as CtaType)
+          : undefined
+        : post.ctaType;
+
+    const nextDuration = durRaw != null ? durationSec : post.durationSec;
+    if (
+      nextDuration !== post.durationSec ||
+      pillar !== post.pillar ||
+      ctaType !== post.ctaType
+    ) {
+      changed.push({ ...post, durationSec: nextDuration, pillar, ctaType });
+    }
+  }
+  if (changed.length === 0) return { ok: true, message: "Nada para atualizar." };
+  await upsertIgPosts(changed);
+  revalidateAll();
+  return { ok: true, message: `${changed.length} post(s) atualizado(s).` };
+}
+
 export async function addLeadAction(
   _prev: ActionState | null,
   formData: FormData,
@@ -184,6 +273,13 @@ export async function setGoalsAction(
     { metric: "cpl", lowerIsBetter: true },
     { metric: "cpr", lowerIsBetter: true },
     { metric: "followers" },
+    // metas orgânicas do plano de 90 dias
+    { metric: "retencao_reels" },
+    { metric: "alcance_base" },
+    { metric: "saves_1k" },
+    { metric: "comentarios_post" },
+    { metric: "posts_semana" },
+    { metric: "conversas_dm" },
   ];
   for (const s of specs) {
     const raw = formData.get(`target_${s.metric}`);

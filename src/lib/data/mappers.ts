@@ -92,6 +92,7 @@ export const toIgDaily = (r: Row): IgAccountDaily => ({
   profileViews: n(r.profile_views),
   reachFollowers: r.reach_followers == null ? undefined : n(r.reach_followers),
   reachNonFollowers: r.reach_non_followers == null ? undefined : n(r.reach_non_followers),
+  dmConversations: r.dm_conversations == null ? undefined : n(r.dm_conversations),
 });
 
 export const fromIgDaily = (r: IgAccountDaily): Row => ({
@@ -106,6 +107,7 @@ export const fromIgDaily = (r: IgAccountDaily): Row => ({
   profile_views: r.profileViews,
   reach_followers: r.reachFollowers ?? null,
   reach_non_followers: r.reachNonFollowers ?? null,
+  dm_conversations: r.dmConversations ?? null,
 });
 
 export const toPost = (r: Row): IgPost => ({
@@ -123,6 +125,9 @@ export const toPost = (r: Row): IgPost => ({
   shares: n(r.shares),
   avgWatchTime: r.avg_watch_time == null ? undefined : n(r.avg_watch_time),
   totalWatchTime: r.total_watch_time == null ? undefined : n(r.total_watch_time),
+  durationSec: r.duration_sec == null ? undefined : n(r.duration_sec),
+  pillar: r.pillar ? s(r.pillar) : undefined,
+  ctaType: r.cta_type ? (s(r.cta_type) as IgPost["ctaType"]) : undefined,
 });
 
 export const fromPost = (p: IgPost): Row => ({
@@ -140,6 +145,9 @@ export const fromPost = (p: IgPost): Row => ({
   shares: p.shares,
   avg_watch_time: p.avgWatchTime ?? null,
   total_watch_time: p.totalWatchTime ?? null,
+  duration_sec: p.durationSec ?? null,
+  pillar: p.pillar ?? null,
+  cta_type: p.ctaType ?? null,
 });
 
 export const toCreative = (r: Row): Creative => ({

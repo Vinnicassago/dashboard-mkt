@@ -32,6 +32,7 @@ import {
 import {
   formatCurrency,
   formatCurrency0,
+  formatCurrencyOrDash,
   formatDecimal,
   formatInt,
   formatPercent,
@@ -187,7 +188,7 @@ export default async function TrafegoPage({
                   />
                   <Stat
                     label="Custo / seguidor (est.)"
-                    value={formatCurrency(obj.costPerFollowerEst)}
+                    value={formatCurrencyOrDash(obj.costPerFollowerEst)}
                     highlight
                   />
                   <p className="pt-1 text-xs text-muted-foreground">

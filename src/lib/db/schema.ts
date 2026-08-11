@@ -153,6 +153,13 @@ alter table ig_account_daily add column if not exists reach_non_followers intege
 alter table ad_daily add column if not exists objective text;
 alter table leads add column if not exists value numeric;
 
+-- Etapa 2 do diagnóstico do perfil: retenção real de reels (duração manual),
+-- taxonomia de conteúdo (pilar/CTA) e conversas de DM (registro manual).
+alter table ig_posts add column if not exists duration_sec numeric;
+alter table ig_posts add column if not exists pillar text;
+alter table ig_posts add column if not exists cta_type text;
+alter table ig_account_daily add column if not exists dm_conversations integer;
+
 -- Multimarca (krone.capital + consorcio.brunno): carimba cada linha com a marca.
 -- Bancos já existentes recebem a coluna com default 'consorcio' (backfill) e têm
 -- suas PKs recompostas para incluir 'brand', evitando que a linha diária/meta de

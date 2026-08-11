@@ -161,9 +161,12 @@ export async function syncInstagram({
   );
   const followersNow = Number(profile.followers_count ?? 0);
 
-  const existing = new Map(
-    (await getData(brand)).igAccountDaily.map((r) => [r.date, r]),
-  );
+  // Dataset atual da marca: além do fallback de seguidores, preserva os campos
+  // MANUAIS (dmConversations; durationSec/pillar/ctaType dos posts) que o sync
+  // não conhece — senão cada rodada apagaria o que o usuário preencheu.
+  const current = await getData(brand);
+  const existing = new Map(current.igAccountDaily.map((r) => [r.date, r]));
+  const existingPosts = new Map(current.igPosts.map((p) => [p.id, p]));
   const today = new Date().toISOString().slice(0, 10);
   const dates = lastNDays(days);
 
@@ -268,6 +271,8 @@ export async function syncInstagram({
       profileViews: readMetric(pv.data, "profile_views"),
       reachFollowers: readBreakdown(rb.data, "reach", "FOLLOWER"),
       reachNonFollowers: readBreakdown(rb.data, "reach", "NON_FOLLOWER"),
+      // registro manual — carregado do dia existente, nunca da API
+      dmConversations: existing.get(date)?.dmConversations,
     });
   }
 
@@ -320,6 +325,10 @@ export async function syncInstagram({
       // API reports milliseconds; the dashboard shows seconds
       avgWatchTime: type === "reel" && avgWatch ? Math.round(avgWatch / 100) / 10 : undefined,
       totalWatchTime: type === "reel" && totalWatchMs ? Math.round(totalWatchMs / 1000) : undefined,
+      // metadados manuais — preservados do post existente (a API não os tem)
+      durationSec: existingPosts.get(m.id)?.durationSec,
+      pillar: existingPosts.get(m.id)?.pillar,
+      ctaType: existingPosts.get(m.id)?.ctaType,
     });
   }
 

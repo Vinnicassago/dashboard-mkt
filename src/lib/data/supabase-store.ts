@@ -5,235 +5,41 @@ import type { DataBackend, LpDelta, PublicUser, StoredUser } from "./backend";
 import { toRole } from "../auth/roles";
 import type {
   AdDaily,
-  Campaign,
-  CampaignStatus,
   Creative,
-  CreativeFormat,
   DashboardData,
   Goal,
-  GoalMetric,
   IgAccountDaily,
-  IgMediaType,
   IgPost,
   Lead,
   LeadEvent,
-  LeadEventAction,
   LeadStatus,
 } from "../types";
-import { DEFAULT_BRAND } from "../types";
-
-/* ------------------------------------------------------------------ */
-/* row mappers: DB snake_case  <->  domain camelCase                   */
-/* ------------------------------------------------------------------ */
-
-type Row = Record<string, unknown>;
-const n = (v: unknown) => Number(v ?? 0);
-const s = (v: unknown) => String(v ?? "");
-const day = (v: unknown) => s(v).slice(0, 10);
-/** Marca da linha; linhas antigas (sem a coluna) caem na marca padrão. */
-const brandOf = (v: unknown) => (v ? s(v) : DEFAULT_BRAND);
-
-const toCampaign = (r: Row): Campaign => ({
-  id: s(r.id),
-  brand: brandOf(r.brand),
-  name: s(r.name),
-  objective: s(r.objective),
-  status: s(r.status) as CampaignStatus,
-  startDate: day(r.start_date),
-  endDate: r.end_date ? day(r.end_date) : undefined,
-  budgetTotal: n(r.budget_total),
-  dailyBudget: r.daily_budget == null ? undefined : n(r.daily_budget),
-});
-
-const fromCampaign = (c: Campaign): Row => ({
-  id: c.id,
-  brand: c.brand,
-  name: c.name,
-  objective: c.objective,
-  status: c.status,
-  start_date: c.startDate,
-  end_date: c.endDate ?? null,
-  budget_total: c.budgetTotal,
-  daily_budget: c.dailyBudget ?? null,
-});
-
-const toIgDaily = (r: Row): IgAccountDaily => ({
-  brand: brandOf(r.brand),
-  date: day(r.date),
-  followers: n(r.followers),
-  reach: n(r.reach),
-  views: n(r.views),
-  profileLinkTaps: n(r.profile_link_taps),
-  accountsEngaged: n(r.accounts_engaged),
-  totalInteractions: n(r.total_interactions),
-  profileViews: n(r.profile_views),
-  reachFollowers: r.reach_followers == null ? undefined : n(r.reach_followers),
-  reachNonFollowers: r.reach_non_followers == null ? undefined : n(r.reach_non_followers),
-});
-
-const fromIgDaily = (r: IgAccountDaily): Row => ({
-  brand: r.brand,
-  date: r.date,
-  followers: r.followers,
-  reach: r.reach,
-  views: r.views,
-  profile_link_taps: r.profileLinkTaps,
-  accounts_engaged: r.accountsEngaged,
-  total_interactions: r.totalInteractions,
-  profile_views: r.profileViews,
-  reach_followers: r.reachFollowers ?? null,
-  reach_non_followers: r.reachNonFollowers ?? null,
-});
-
-const toPost = (r: Row): IgPost => ({
-  id: s(r.id),
-  brand: brandOf(r.brand),
-  publishedAt: s(r.published_at),
-  type: s(r.type) as IgMediaType,
-  caption: s(r.caption),
-  permalink: s(r.permalink),
-  reach: n(r.reach),
-  views: n(r.views),
-  likes: n(r.likes),
-  comments: n(r.comments),
-  saved: n(r.saved),
-  shares: n(r.shares),
-  avgWatchTime: r.avg_watch_time == null ? undefined : n(r.avg_watch_time),
-  totalWatchTime: r.total_watch_time == null ? undefined : n(r.total_watch_time),
-});
-
-const fromPost = (p: IgPost): Row => ({
-  id: p.id,
-  brand: p.brand,
-  published_at: p.publishedAt,
-  type: p.type,
-  caption: p.caption,
-  permalink: p.permalink,
-  reach: p.reach,
-  views: p.views,
-  likes: p.likes,
-  comments: p.comments,
-  saved: p.saved,
-  shares: p.shares,
-  avg_watch_time: p.avgWatchTime ?? null,
-  total_watch_time: p.totalWatchTime ?? null,
-});
-
-const toCreative = (r: Row): Creative => ({
-  adId: s(r.ad_id),
-  brand: brandOf(r.brand),
-  name: s(r.name),
-  format: s(r.format) as CreativeFormat,
-  thumbnailUrl: r.thumbnail_url ? s(r.thumbnail_url) : undefined,
-  videoPlays: r.video_plays == null ? undefined : n(r.video_plays),
-  thruPlays: r.thru_plays == null ? undefined : n(r.thru_plays),
-});
-
-const fromCreative = (c: Creative): Row => ({
-  ad_id: c.adId,
-  brand: c.brand,
-  name: c.name,
-  format: c.format,
-  thumbnail_url: c.thumbnailUrl ?? null,
-  video_plays: c.videoPlays ?? null,
-  thru_plays: c.thruPlays ?? null,
-});
-
-const toAd = (r: Row): AdDaily => ({
-  brand: brandOf(r.brand),
-  date: day(r.date),
-  campaign: s(r.campaign),
-  adset: s(r.adset),
-  adId: s(r.ad_id),
-  objective: r.objective ? s(r.objective) : undefined,
-  spend: n(r.spend),
-  impressions: n(r.impressions),
-  reach: n(r.reach),
-  frequency: n(r.frequency),
-  clicks: n(r.clicks),
-  leads: n(r.leads),
-});
-
-const fromAd = (a: AdDaily): Row => ({
-  brand: a.brand,
-  date: a.date,
-  ad_id: a.adId,
-  campaign: a.campaign,
-  adset: a.adset,
-  objective: a.objective ?? null,
-  spend: a.spend,
-  impressions: a.impressions,
-  reach: a.reach,
-  frequency: a.frequency,
-  clicks: a.clicks,
-  leads: a.leads,
-});
-
-const toLead = (r: Row): Lead => ({
-  id: s(r.id),
-  brand: brandOf(r.brand),
-  createdAt: s(r.created_at),
-  name: s(r.name),
-  email: r.email ? s(r.email) : undefined,
-  phone: r.phone ? s(r.phone) : undefined,
-  utmSource: r.utm_source ? s(r.utm_source) : undefined,
-  utmCampaign: r.utm_campaign ? s(r.utm_campaign) : undefined,
-  utmContent: r.utm_content ? s(r.utm_content) : undefined,
-  status: s(r.status) as LeadStatus,
-  meetingAt: r.meeting_at ? s(r.meeting_at) : undefined,
-  value: r.value == null ? undefined : n(r.value),
-  fbc: r.fbc ? s(r.fbc) : undefined,
-  fbp: r.fbp ? s(r.fbp) : undefined,
-  gaClientId: r.ga_client_id ? s(r.ga_client_id) : undefined,
-  gaSessionId: r.ga_session_id ? s(r.ga_session_id) : undefined,
-});
-
-const fromLead = (l: Lead): Row => ({
-  id: l.id,
-  brand: l.brand,
-  created_at: l.createdAt,
-  name: l.name,
-  email: l.email ?? null,
-  phone: l.phone ?? null,
-  utm_source: l.utmSource ?? null,
-  utm_campaign: l.utmCampaign ?? null,
-  utm_content: l.utmContent ?? null,
-  status: l.status,
-  meeting_at: l.meetingAt ?? null,
-  value: l.value ?? null,
-  fbc: l.fbc ?? null,
-  fbp: l.fbp ?? null,
-  ga_client_id: l.gaClientId ?? null,
-  ga_session_id: l.gaSessionId ?? null,
-});
-
-const toGoal = (r: Row): Goal => ({
-  brand: brandOf(r.brand),
-  metric: s(r.metric) as GoalMetric,
-  period: s(r.period) as Goal["period"],
-  target: n(r.target),
-  lowerIsBetter: Boolean(r.lower_is_better),
-});
-
-const fromGoal = (g: Goal): Row => ({
-  brand: g.brand,
-  metric: g.metric,
-  period: g.period,
-  target: g.target,
-  lower_is_better: g.lowerIsBetter ?? false,
-});
-
-/* ------------------------------------------------------------------ */
-
-const FALLBACK_CAMPAIGN: Campaign = {
-  id: "campanha",
-  brand: DEFAULT_BRAND,
-  name: "Campanha",
-  objective: "Cadastros (leads)",
-  status: "ativa",
-  startDate: "",
-  budgetTotal: 0,
-};
+// Mappers COMPARTILHADOS (mesmos do backend Postgres): campo novo entra num
+// lugar só e vale para os dois backends SQL — nunca duplicar mappers aqui.
+import {
+  FALLBACK_CAMPAIGN,
+  type Row,
+  n,
+  s,
+  toAd,
+  toCampaign,
+  toCreative,
+  toEvent,
+  toGoal,
+  toIgDaily,
+  toLead,
+  toLp,
+  toPost,
+  fromAd,
+  fromCampaign,
+  fromCreative,
+  fromEvent,
+  fromGoal,
+  fromIgDaily,
+  fromLead,
+  fromLp,
+  fromPost,
+} from "./mappers";
 
 async function touch(isSeed?: boolean) {
   const db = supabase();
@@ -278,13 +84,7 @@ export const supabaseBackend: DataBackend = {
       igPosts: (posts.data ?? []).map(toPost),
       adDaily: (ads.data ?? []).map(toAd),
       creatives: (creatives.data ?? []).map(toCreative),
-      lpDaily: (lp.data ?? []).map((r: Row) => ({
-        brand: brandOf(r.brand),
-        date: day(r.date),
-        visits: n(r.visits),
-        clicks: n(r.clicks),
-        formSubmits: n(r.form_submits),
-      })),
+      lpDaily: (lp.data ?? []).map(toLp),
       leads: (leads.data ?? []).map(toLead),
       goals: (goals.data ?? []).map(toGoal),
       updatedAt: String(stateMap.get("updated_at") ?? new Date().toISOString()),
@@ -315,29 +115,10 @@ export const supabaseBackend: DataBackend = {
       db.from("ig_posts").insert(seed.igPosts.map(fromPost)),
       db.from("creatives").insert(seed.creatives.map(fromCreative)),
       db.from("ad_daily").insert(seed.adDaily.map(fromAd)),
-      db.from("lp_daily").insert(
-        seed.lpDaily.map((r) => ({
-          brand: r.brand,
-          date: r.date,
-          visits: r.visits,
-          clicks: r.clicks,
-          form_submits: r.formSubmits,
-        })),
-      ),
+      db.from("lp_daily").insert(seed.lpDaily.map(fromLp)),
       db.from("leads").insert(seed.leads.map(fromLead)),
       db.from("goals").insert(seed.goals.map(fromGoal)),
-      db.from("lead_events").insert(
-        buildSeedLeadEvents(seed.leads).map((e) => ({
-          id: e.id,
-          lead_id: e.leadId,
-          lead_name: e.leadName,
-          actor: e.actor,
-          action: e.action,
-          from_status: e.fromStatus ?? null,
-          to_status: e.toStatus ?? null,
-          created_at: e.createdAt,
-        })),
-      ),
+      db.from("lead_events").insert(buildSeedLeadEvents(seed.leads).map(fromEvent)),
     ]);
 
     await touch(true);
@@ -528,16 +309,7 @@ export const supabaseBackend: DataBackend = {
   },
 
   async addLeadEvent(event: LeadEvent) {
-    const { error } = await supabase().from("lead_events").insert({
-      id: event.id,
-      lead_id: event.leadId,
-      lead_name: event.leadName,
-      actor: event.actor,
-      action: event.action,
-      from_status: event.fromStatus ?? null,
-      to_status: event.toStatus ?? null,
-      created_at: event.createdAt,
-    });
+    const { error } = await supabase().from("lead_events").insert(fromEvent(event));
     check(error, "add lead event");
   },
 
@@ -550,15 +322,6 @@ export const supabaseBackend: DataBackend = {
     if (opts?.leadId) query = query.eq("lead_id", opts.leadId);
     const { data, error } = await query;
     check(error, "list lead events");
-    return (data ?? []).map((r: Row) => ({
-      id: s(r.id),
-      leadId: s(r.lead_id),
-      leadName: s(r.lead_name),
-      actor: s(r.actor),
-      action: s(r.action) as LeadEventAction,
-      fromStatus: r.from_status ? (s(r.from_status) as LeadStatus) : undefined,
-      toStatus: r.to_status ? (s(r.to_status) as LeadStatus) : undefined,
-      createdAt: s(r.created_at),
-    }));
+    return (data ?? []).map(toEvent);
   },
 };

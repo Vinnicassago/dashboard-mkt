@@ -10,6 +10,7 @@
 import type {
   AdDaily,
   Creative,
+  CtaType,
   DashboardData,
   Goal,
   IgAccountDaily,
@@ -261,8 +262,9 @@ export interface ObjectiveBreakdown {
   netNewFollowers: number;
   /** custo por seguidor ESTIMADO = gasto em descoberta ÷ seguidores líquidos.
    *  Estimativa: a Meta não atribui seguidores por anúncio; o crescimento é da
-   *  conta (orgânico + pago). Serve como eficiência de topo, não atribuição exata. */
-  costPerFollowerEst: number;
+   *  conta (orgânico + pago). Serve como eficiência de topo, não atribuição exata.
+   *  `null` quando não houve ganho — a UI mostra "—" em vez de "R$ 0" (de graça). */
+  costPerFollowerEst: number | null;
 }
 
 /**
@@ -330,7 +332,7 @@ export function objectiveBreakdown(data: DashboardData, range?: DateRange): Obje
     organicLeads,
     organicMeetings,
     netNewFollowers,
-    costPerFollowerEst: div(acc.descoberta.spend, netNewFollowers),
+    costPerFollowerEst: netNewFollowers > 0 ? acc.descoberta.spend / netNewFollowers : null,
   };
 }
 
@@ -914,20 +916,340 @@ export function postEngagementRate(p: IgPost): number {
   return div(p.likes + p.comments + p.saved + p.shares, p.reach);
 }
 
+// ---- CTA da legenda -------------------------------------------------
+
+export const CTA_LABEL: Record<CtaType, string> = {
+  dm: "DM",
+  comentario: "Comentário",
+  salvamento: "Salvamento",
+  marcacao: "Marcação",
+  outro: "Outro",
+};
+
+/**
+ * Classifica o CTA pedido na legenda por heurística de texto. Ordem: DM (o CTA
+ * de maior atrito, que o diagnóstico manda racionar) tem precedência, depois os
+ * de baixo atrito. Sem match, undefined (post sem CTA claro).
+ */
+export function detectCta(caption: string): CtaType | undefined {
+  const c = caption.toLowerCase();
+  if (/\b(dm|direct)\b|me chama|chama (no|na|aqui)|manda (uma )?mensagem|fale comigo/.test(c))
+    return "dm";
+  // "comenta/comente" imperativo, ou menção com contexto de CTA ("nos comentários");
+  // o substantivo solto ("os comentários dizem…") não conta.
+  if (/\bcoment[ae]\b|nos coment[áa]rios|responde aqui|deixa (seu|sua) coment|escreve aqui/.test(c))
+    return "comentario";
+  // exige complemento ("salva esse/pra depois") — "Salve, investidor!" (saudação)
+  // e "salvação" não são CTA (\b é ASCII: o "ç" cria fronteira falsa).
+  if (/salv[ae] (ess[ae]|est[ae]|o post|o v[íi]deo|o conte[úu]do|a[íi]|aqui|pra|para|depois)|guarda (ess[ae]|est[ae]|a[íi])/.test(c))
+    return "salvamento";
+  // exige marcação DE ALGUÉM — "a marca Krone" (substantivo) e "marque uma
+  // reunião" (agendamento → "outro") não são marcação.
+  if (/\bmarc(?:a|que) (quem|um amigo|uma amiga|algu[ée]m|aqui|nos coment)/.test(c))
+    return "marcacao";
+  if (/link na bio|toca no link|clica no link|agend[ae]|\bmarque\b.*\b(reuni[ãa]o|convers|hor[áa]rio)|acesse/.test(c))
+    return "outro";
+  return undefined;
+}
+
+/** CTA efetivo do post: override manual quando existe, senão a heurística. */
+export function ctaOf(p: IgPost): CtaType | undefined {
+  return p.ctaType ?? detectCta(p.caption);
+}
+
+/**
+ * Retenção real do reel = tempo médio assistido ÷ duração do vídeo.
+ * `null` quando não dá para calcular (não é reel, sem watch time, ou sem a
+ * duração — que é entrada manual; a API não a fornece).
+ */
+export function reelRetention(p: IgPost): number | null {
+  if (p.type !== "reel" || p.avgWatchTime == null || !p.durationSec || p.durationSec <= 0)
+    return null;
+  return Math.min(1, p.avgWatchTime / p.durationSec);
+}
+
 export interface PostPerf extends IgPost {
   interactions: number;
   engagementRate: number;
+  /** salvamentos por mil views — o sinal nº1 de valor p/ o algoritmo em conteúdo educacional */
+  savesPer1k: number;
+  /** interações ÷ views — engajamento de quem realmente viu */
+  interactionsPerView: number;
+  /** alcance ÷ seguidores na data da publicação — quanto da própria base o post ativou */
+  reachOnBase?: number;
+  /** retenção real (0–1): avgWatchTime ÷ durationSec — só com a duração manual */
+  retention?: number;
+  /** CTA efetivo (override manual ou heurística da legenda) */
+  cta?: CtaType;
 }
 
-export function postPerformance(posts: IgPost[], range?: DateRange): PostPerf[] {
+/**
+ * `igDaily` (opcional) habilita `reachOnBase`: usa o snapshot de seguidores do
+ * dia da publicação (ou o último anterior) como denominador.
+ */
+export function postPerformance(
+  posts: IgPost[],
+  range?: DateRange,
+  igDaily?: IgAccountDaily[],
+): PostPerf[] {
+  const daily = igDaily ? [...igDaily].sort((a, b) => a.date.localeCompare(b.date)) : [];
+  const followersAt = (day: string): number | undefined => {
+    let found: number | undefined;
+    for (const r of daily) {
+      if (r.date > day) break;
+      found = r.followers;
+    }
+    // Sem snapshot até o dia do post: undefined ("—" na UI) — usar a base de uma
+    // data futura subestimaria o alcance sobre a base de posts antigos.
+    return found;
+  };
   return posts
     .filter((p) => inRange(dayOf(p.publishedAt), range))
-    .map((p) => ({
-      ...p,
-      interactions: p.likes + p.comments + p.saved + p.shares,
-      engagementRate: postEngagementRate(p),
-    }))
+    .map((p) => {
+      const interactions = p.likes + p.comments + p.saved + p.shares;
+      const base = followersAt(dayOf(p.publishedAt));
+      return {
+        ...p,
+        interactions,
+        engagementRate: postEngagementRate(p),
+        savesPer1k: div(p.saved, p.views) * 1000,
+        interactionsPerView: div(interactions, p.views),
+        reachOnBase: base && base > 0 ? p.reach / base : undefined,
+        retention: reelRetention(p) ?? undefined,
+        cta: ctaOf(p),
+      };
+    })
     .sort((a, b) => b.publishedAt.localeCompare(a.publishedAt));
+}
+
+// ---- posts: agregado do período ------------------------------------
+
+export interface PostAggregate {
+  count: number;
+  reach: number;
+  avgReach: number;
+  avgEr: number; // média das taxas de engajamento por post
+  /** Σ salvos ÷ Σ views × 1000 — POOLED: posts com mais views pesam mais
+   *  (a coluna "Salvos/1k" da tabela é por post; aqui é o agregado da janela) */
+  savesPer1k: number;
+  sharesPerPost: number;
+  commentsPerPost: number;
+  /** média do alcance/base dos posts com snapshot de seguidores disponível */
+  avgReachOnBase?: number;
+  /** média do tempo assistido dos reels (segundos) */
+  avgWatchTime?: number;
+  /** retenção média real (0–1) dos reels COM duração manual preenchida */
+  avgRetention?: number;
+  /** fração dos posts do período pedindo DM — o diagnóstico manda ≤ 1 a cada 4 */
+  dmCtaShare: number;
+}
+
+export function aggregatePostPerformance(list: PostPerf[]): PostAggregate {
+  const reach = list.reduce((s, p) => s + p.reach, 0);
+  const views = list.reduce((s, p) => s + p.views, 0);
+  const saved = list.reduce((s, p) => s + p.saved, 0);
+  const shares = list.reduce((s, p) => s + p.shares, 0);
+  const comments = list.reduce((s, p) => s + p.comments, 0);
+  const n = list.length;
+  const withBase = list.filter((p) => p.reachOnBase != null);
+  const reels = list.filter((p) => p.type === "reel" && p.avgWatchTime != null);
+  return {
+    count: n,
+    reach,
+    avgReach: div(reach, n),
+    avgEr: div(
+      list.reduce((s, p) => s + p.engagementRate, 0),
+      n,
+    ),
+    savesPer1k: div(saved, views) * 1000,
+    sharesPerPost: div(shares, n),
+    commentsPerPost: div(comments, n),
+    avgReachOnBase: withBase.length
+      ? div(
+          withBase.reduce((s, p) => s + (p.reachOnBase ?? 0), 0),
+          withBase.length,
+        )
+      : undefined,
+    avgWatchTime: reels.length
+      ? div(
+          reels.reduce((s, p) => s + (p.avgWatchTime ?? 0), 0),
+          reels.length,
+        )
+      : undefined,
+    avgRetention: (() => {
+      const withRet = list.filter((p) => p.retention != null);
+      return withRet.length
+        ? div(
+            withRet.reduce((s, p) => s + (p.retention ?? 0), 0),
+            withRet.length,
+          )
+        : undefined;
+    })(),
+    dmCtaShare: div(list.filter((p) => p.cta === "dm").length, n),
+  };
+}
+
+/** Distribuição de CTA dos posts (para ver o excesso de "me chama na DM"). */
+export function ctaDistribution(
+  list: PostPerf[],
+): { cta: CtaType | "nenhum"; label: string; count: number }[] {
+  const counts = new Map<CtaType | "nenhum", number>();
+  for (const p of list) {
+    const key = p.cta ?? "nenhum";
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([cta, count]) => ({
+      cta,
+      label: cta === "nenhum" ? "Sem CTA" : CTA_LABEL[cta],
+      count,
+    }))
+    .sort((a, b) => b.count - a.count);
+}
+
+// ---- posts: performance por pilar/série ----------------------------
+
+export interface PillarPerf {
+  pillar: string;
+  count: number;
+  avgReach: number;
+  avgEngagement: number;
+  saveRate: number; // Σ salvos ÷ Σ alcance
+  sampleOk: boolean;
+}
+
+/** Compara os pilares/séries taggeados manualmente (posts sem tag ficam fora). */
+export function pillarPerformance(posts: IgPost[], range?: DateRange): PillarPerf[] {
+  const byPillar = new Map<string, IgPost[]>();
+  for (const p of posts.filter((p) => p.pillar && inRange(dayOf(p.publishedAt), range))) {
+    const list = byPillar.get(p.pillar!) ?? [];
+    list.push(p);
+    byPillar.set(p.pillar!, list);
+  }
+  return [...byPillar.entries()]
+    .map(([pillar, list]) => {
+      const n = list.length;
+      const totReach = list.reduce((s, p) => s + p.reach, 0);
+      return {
+        pillar,
+        count: n,
+        avgReach: div(totReach, n),
+        avgEngagement: div(
+          list.reduce((s, p) => s + postEngagementRate(p), 0),
+          n,
+        ),
+        saveRate: div(
+          list.reduce((s, p) => s + p.saved, 0),
+          totReach,
+        ),
+        sampleOk: n >= MIN_SAMPLE_POSTS,
+      };
+    })
+    .sort((a, b) => b.avgEngagement - a.avgEngagement);
+}
+
+// ---- reels: tendência de retenção ----------------------------------
+
+export interface ReelWatchPoint {
+  /** ISO completo da publicação — único por reel (dois reels no mesmo dia não
+   *  podem dividir a categoria do eixo X, senão o chart colapsa os pontos). */
+  date: string;
+  caption: string;
+  avgWatchTime: number; // segundos
+  movingAvg: number; // média móvel dos últimos 3 reels (inclusive)
+}
+
+/**
+ * Série de tempo médio assistido por reel, em ordem de publicação, com média
+ * móvel — responde "a retenção está subindo?" mesmo sem a duração do vídeo
+ * (a API não fornece duração; retenção percentual entra com dado manual).
+ */
+export function reelWatchSeries(posts: IgPost[], range?: DateRange): ReelWatchPoint[] {
+  const reels = posts
+    .filter(
+      (p) => p.type === "reel" && p.avgWatchTime != null && inRange(dayOf(p.publishedAt), range),
+    )
+    .sort((a, b) => a.publishedAt.localeCompare(b.publishedAt));
+  return reels.map((p, i) => {
+    const window = reels.slice(Math.max(0, i - 2), i + 1);
+    return {
+      date: p.publishedAt,
+      caption: p.caption,
+      avgWatchTime: p.avgWatchTime ?? 0,
+      movingAvg: div(
+        window.reduce((s, r) => s + (r.avgWatchTime ?? 0), 0),
+        window.length,
+      ),
+    };
+  });
+}
+
+// ---- cadência de publicação ----------------------------------------
+
+export interface PostingCadence {
+  count: number;
+  days: number; // extensão da janela analisada (inclusiva)
+  postsPerWeek: number;
+  maxGapDays: number; // maior buraco entre publicações consecutivas
+  daysSinceLast: number; // dias desde o último post até `nowIso`
+  /** máximo de posts num mesmo dia — 3+ é canibalização (competem entre si) */
+  maxSameDay: number;
+  busiestDay?: string; // yyyy-mm-dd do dia com mais posts
+}
+
+/**
+ * Consistência de publicação da janela. `nowIso` como parâmetro mantém a função
+ * pura (mesmo padrão de campaignPacing/leadQueue). Sem range, usa o intervalo
+ * entre o primeiro e o último post.
+ */
+export function postingCadence(
+  posts: IgPost[],
+  range: DateRange | undefined,
+  nowIso: string,
+): PostingCadence {
+  const sorted = posts
+    .filter((p) => inRange(dayOf(p.publishedAt), range))
+    .sort((a, b) => a.publishedAt.localeCompare(b.publishedAt));
+  const first = sorted[0] ? dayOf(sorted[0].publishedAt) : undefined;
+  const last = sorted.at(-1) ? dayOf(sorted.at(-1)!.publishedAt) : undefined;
+  const from = range?.from ?? first;
+  // Sem range, a janela vai até HOJE (não até o último post) — senão uma grade
+  // parada há 30 dias ainda pareceria ter a cadência da época em que postava.
+  const nowDay = nowIso.slice(0, 10);
+  const to = range?.to ?? (last && nowDay > last ? nowDay : last);
+  const days = from && to ? daysBetween(from, to) + 1 : 0;
+
+  let maxGapDays = 0;
+  for (let i = 1; i < sorted.length; i++) {
+    const gap = daysBetween(dayOf(sorted[i - 1].publishedAt), dayOf(sorted[i].publishedAt));
+    if (gap > maxGapDays) maxGapDays = gap;
+  }
+
+  const byDay = new Map<string, number>();
+  for (const p of sorted) {
+    const d = dayOf(p.publishedAt);
+    byDay.set(d, (byDay.get(d) ?? 0) + 1);
+  }
+  let maxSameDay = 0;
+  let busiestDay: string | undefined;
+  for (const [d, n] of byDay) {
+    if (n > maxSameDay) {
+      maxSameDay = n;
+      busiestDay = d;
+    }
+  }
+
+  const daysSinceLast = last ? Math.max(0, daysBetween(last, nowDay)) : 0;
+  return {
+    count: sorted.length,
+    days,
+    // janela mínima de 7 dias: 1 post num dia só não vira "7 posts/semana"
+    postsPerWeek: div(sorted.length, Math.max(days, 7) / 7),
+    maxGapDays,
+    daysSinceLast,
+    maxSameDay,
+    busiestDay,
+  };
 }
 
 // ---- instagram: account totals (period-over-period ready) ----------
@@ -948,6 +1270,16 @@ export interface IgAccountTotals {
   reachNonFollowers: number;
   discoveryRate: number; // non-follower reach / total split reach
   hasReachSplit: boolean; // whether the follow_type breakdown was available
+  days: number; // dias com dado na janela
+  /** alcance médio diário ÷ base de seguidores — perfis saudáveis: 30–60%/dia */
+  reachRateOnBase: number;
+  /** interações médias diárias ÷ base de seguidores — "a base está esquentando?"
+   *  Normalizado por dia (como reachRateOnBase) p/ não crescer com a janela. */
+  engagementOnBase: number;
+  /** conversas de DM iniciadas no período (registro manual; 0 se nunca preenchido) */
+  dmConversations: number;
+  /** algum dia da janela tem registro manual de DMs? (sem isso, 0 = "sem dado") */
+  hasDmData: boolean;
 }
 
 /** Sum an Instagram account window, reusable for the current and previous period. */
@@ -967,6 +1299,7 @@ export function igAccountTotals(rows: IgAccountDaily[], range?: DateRange): IgAc
   );
   const followersEnd = sorted.at(-1)?.followers ?? 0;
   const followersStart = sorted[0]?.followers ?? 0;
+  const days = sorted.length;
   return {
     followersEnd,
     followersStart,
@@ -983,7 +1316,68 @@ export function igAccountTotals(rows: IgAccountDaily[], range?: DateRange): IgAc
     reachNonFollowers,
     discoveryRate: div(reachNonFollowers, reachFollowers + reachNonFollowers),
     hasReachSplit,
+    days,
+    reachRateOnBase: div(div(reach, days), followersEnd),
+    engagementOnBase: div(div(interactions, days), followersEnd),
+    dmConversations: sum((r) => r.dmConversations ?? 0),
+    hasDmData: sorted.some((r) => r.dmConversations != null),
   };
+}
+
+// ---- conversas de DM por semana ------------------------------------
+
+export interface DmWeekPoint {
+  week: string; // yyyy-mm-dd da segunda-feira
+  label: string; // "dd/mm"
+  conversations: number;
+}
+
+/** Conversas de DM (registro manual) somadas por semana ISO. */
+export function weeklyDmSeries(rows: IgAccountDaily[], range?: DateRange): DmWeekPoint[] {
+  const byWeek = new Map<string, number>();
+  for (const r of rows.filter((r) => inRange(r.date, range))) {
+    if (r.dmConversations == null) continue;
+    const w = weekStart(r.date);
+    byWeek.set(w, (byWeek.get(w) ?? 0) + r.dmConversations);
+  }
+  return [...byWeek.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([week, conversations]) => ({
+      week,
+      label: `${week.slice(8, 10)}/${week.slice(5, 7)}`,
+      conversations,
+    }));
+}
+
+// ---- instagram: série diária orgânica ------------------------------
+
+export interface IgDailyPoint {
+  date: string;
+  reach: number;
+  views: number;
+  interactions: number;
+  profileViews: number;
+  linkTaps: number;
+  engagementRate: number; // interações ÷ alcance do dia
+  /** interações ÷ seguidores do dia — tendência de aquecimento da base */
+  warmth: number;
+}
+
+/** Série diária p/ tendência de engajamento e do funil de perfil (orgânico). */
+export function igEngagementSeries(rows: IgAccountDaily[], range?: DateRange): IgDailyPoint[] {
+  return [...rows]
+    .filter((r) => inRange(r.date, range))
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((r) => ({
+      date: r.date,
+      reach: r.reach,
+      views: r.views,
+      interactions: r.totalInteractions,
+      profileViews: r.profileViews,
+      linkTaps: r.profileLinkTaps,
+      engagementRate: div(r.totalInteractions, r.reach),
+      warmth: div(r.totalInteractions, r.followers),
+    }));
 }
 
 // ---- awareness: North Star de marca de seguidores ------------------
@@ -1049,6 +1443,9 @@ const IG_TYPE_LABEL: Record<IgPost["type"], string> = {
   story: "Story",
 };
 
+/** Amostra mínima para coroar um "melhor formato"/"melhor dia" sem enganar. */
+export const MIN_SAMPLE_POSTS = 2;
+
 export interface FormatPerf {
   type: IgPost["type"];
   label: string;
@@ -1059,6 +1456,8 @@ export interface FormatPerf {
   shareRate: number; // total shares / total reach
   avgWatchTime?: number; // reels only (seconds)
   totalWatchTime?: number; // reels only (sum of seconds watched)
+  /** false = amostra pequena (< MIN_SAMPLE_POSTS) — a UI não deve coroar campeão */
+  sampleOk: boolean;
 }
 
 /** Group posts by format so the planner can compare reel vs carousel vs feed. */
@@ -1095,6 +1494,7 @@ export function formatPerformance(posts: IgPost[], range?: DateRange): FormatPer
           )
         : undefined,
       totalWatchTime: totWatch > 0 ? totWatch : undefined,
+      sampleOk: n >= MIN_SAMPLE_POSTS,
     });
   }
   // best-engaging format first (the "champion" to double down on)
@@ -1111,6 +1511,8 @@ export interface WeekdayPerf {
   count: number;
   avgReach: number;
   avgEngagement: number;
+  /** false = amostra pequena (< MIN_SAMPLE_POSTS) — não tratar como "melhor dia" */
+  sampleOk: boolean;
 }
 
 /** Average engagement/reach per weekday, to hint the best publishing days. */
@@ -1138,6 +1540,7 @@ export function weekdayPerformance(posts: IgPost[], range?: DateRange): WeekdayP
         list.reduce((s, p) => s + postEngagementRate(p), 0),
         list.length,
       ),
+      sampleOk: list.length >= MIN_SAMPLE_POSTS,
     });
   }
   return out;
@@ -1203,8 +1606,12 @@ export function goalProgress(goal: Goal, actual: number): GoalProgress {
   return { metric: goal.metric, target: goal.target, actual, pct, onTrack, lowerIsBetter: lower };
 }
 
-/** Resolve the actual value for a goal metric from the current dataset. */
-export function actualForGoal(goal: Goal, data: DashboardData, range?: DateRange): number {
+/**
+ * Resolve the actual value for a goal metric from the current dataset.
+ * `null` = sem dado para medir (ex.: retenção sem nenhuma duração preenchida) —
+ * a UI mostra "sem dado" em vez de um 0 que se leria como "0% da meta".
+ */
+export function actualForGoal(goal: Goal, data: DashboardData, range?: DateRange): number | null {
   const k = overviewKpis(data, range);
   switch (goal.metric) {
     case "leads":
@@ -1220,6 +1627,33 @@ export function actualForGoal(goal: Goal, data: DashboardData, range?: DateRange
     case "followers": {
       const last = [...data.igAccountDaily].sort((a, b) => a.date.localeCompare(b.date)).at(-1);
       return last?.followers ?? 0;
+    }
+    // ---- metas orgânicas (plano de 90 dias) ----
+    // As percentuais devolvem VALOR percentual (40 = 40%) — o alvo é gravado
+    // na mesma unidade no GoalsForm, e a exibição usa formatPercentValue.
+    case "retencao_reels": {
+      const agg = aggregatePostPerformance(postPerformance(data.igPosts, range));
+      return agg.avgRetention == null ? null : agg.avgRetention * 100;
+    }
+    case "alcance_base": {
+      const agg = aggregatePostPerformance(
+        postPerformance(data.igPosts, range, data.igAccountDaily),
+      );
+      return agg.avgReachOnBase == null ? null : agg.avgReachOnBase * 100;
+    }
+    case "saves_1k":
+      return aggregatePostPerformance(postPerformance(data.igPosts, range)).savesPer1k;
+    case "comentarios_post":
+      return aggregatePostPerformance(postPerformance(data.igPosts, range)).commentsPerPost;
+    case "posts_semana":
+      // updatedAt como "agora": mantém a função pura (só afeta daysSinceLast, não usado aqui)
+      return data.igPosts.length === 0
+        ? null
+        : postingCadence(data.igPosts, range, data.updatedAt || "1970-01-01T00:00:00Z")
+            .postsPerWeek;
+    case "conversas_dm": {
+      const t = igAccountTotals(data.igAccountDaily, range);
+      return t.hasDmData ? t.dmConversations : null;
     }
     default:
       return 0;
@@ -1241,6 +1675,20 @@ export function buildOrganicFunnel(rows: IgAccountDaily[], range?: DateRange): F
     { key: "alcance", label: "Alcance", value: t.reach },
     { key: "visitas", label: "Visitas ao perfil", value: t.profileViews, fromPrev: div(t.profileViews, t.reach) },
     { key: "seguidores", label: "Novos seguidores", value: netNew, fromPrev: div(netNew, t.profileViews) },
+  ];
+}
+
+/**
+ * O braço de CONVERSÃO do perfil: Views → Visitas ao perfil → Cliques no link.
+ * Complementa o funil de crescimento (alcance→seguidor) mostrando onde o
+ * tráfego vaza antes de virar clique na bio (CTR baixo = bio/oferta fraca).
+ */
+export function buildProfileClickFunnel(rows: IgAccountDaily[], range?: DateRange): FunnelStage[] {
+  const t = igAccountTotals(rows, range);
+  return [
+    { key: "views", label: "Views", value: t.views },
+    { key: "visitas", label: "Visitas ao perfil", value: t.profileViews, fromPrev: div(t.profileViews, t.views) },
+    { key: "link", label: "Cliques no link", value: t.profileLinkTaps, fromPrev: div(t.profileLinkTaps, t.profileViews) },
   ];
 }
 

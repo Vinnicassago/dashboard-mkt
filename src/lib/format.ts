@@ -74,15 +74,20 @@ export function formatPercentValue(
   })}%`;
 }
 
+/**
+ * Data-pura ("yyyy-mm-dd") parseia como meia-noite LOCAL — `new Date("2026-07-22")`
+ * seria UTC e, em UTC-3, renderizaria 21/07 (um dia a menos).
+ */
+const toLocalDate = (iso: string) => new Date(iso.length === 10 ? `${iso}T00:00` : iso);
+
 /** 23/07 */
 export function formatDateShort(iso: string): string {
-  const d = new Date(iso);
-  return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+  return toLocalDate(iso).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
 }
 
 /** 23 jul */
 export function formatDateMonth(iso: string): string {
-  return new Date(iso)
+  return toLocalDate(iso)
     .toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })
     .replace(".", "");
 }
@@ -112,6 +117,23 @@ export function formatDecimal(
 }
 
 /**
+ * Duração em segundos legível: 3.4 -> "3,4s" · 45 -> "45s" · 92 -> "1m 32s".
+ * Abaixo de 10s mantém uma casa decimal (retenção de reel vive nessa faixa).
+ */
+export function formatDuration(seconds: number | null | undefined): string {
+  if (seconds == null) return "—";
+  const s = Math.max(0, seconds);
+  // 9.95+ arredondaria para "10,0s" — muda de faixa antes.
+  if (s < 9.95) return `${formatDecimal(s, 1)}s`;
+  // Arredonda o TOTAL antes de fatiar em min/seg — senão 119,5 vira "1m 60s".
+  const total = Math.round(s);
+  if (total < 60) return `${total}s`;
+  const m = Math.floor(total / 60);
+  const rest = total % 60;
+  return rest > 0 ? `${m}m ${rest}s` : `${m}m`;
+}
+
+/**
  * Serializable format kind — passed as a string prop from Server Components to
  * client chart components (functions can't cross the RSC boundary).
  */
@@ -121,7 +143,8 @@ export type NumFmt =
   | "int"
   | "compact"
   | "percent"
-  | "decimal";
+  | "decimal"
+  | "duration";
 
 export function formatBy(kind: NumFmt, v: number): string {
   switch (kind) {
@@ -137,5 +160,7 @@ export function formatBy(kind: NumFmt, v: number): string {
       return formatPercent(v);
     case "decimal":
       return formatDecimal(v);
+    case "duration":
+      return formatDuration(v);
   }
 }

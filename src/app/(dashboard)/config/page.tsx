@@ -1,14 +1,17 @@
-import { Camera, Database, FileSpreadsheet, Layers, Plug, Target, UserPlus, Users, UsersRound } from "lucide-react";
+import { Camera, Clapperboard, Database, FileSpreadsheet, Layers, MessageCircle, Plug, Target, UserPlus, Users, UsersRound } from "lucide-react";
 import {
   BrandMatchForm,
+  DmForm,
   GoalsForm,
   ImportForm,
   LeadForm,
   LeadsImportForm,
   ManualIgForm,
+  PostsMetaForm,
   ReclassifyAdsButton,
   ResetButton,
   SyncPanel,
+  type PostMetaRow,
 } from "@/components/config/config-forms";
 import { UsersManager } from "@/components/config/users-manager";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -25,7 +28,8 @@ import { getLastSync } from "@/lib/meta/sync";
 import { isAuthEnabled } from "@/lib/auth/config";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { can } from "@/lib/auth/guard";
-import { formatCurrency0, formatDateTime } from "@/lib/format";
+import { formatCurrency0, formatDateShort, formatDateTime } from "@/lib/format";
+import { CTA_LABEL, detectCta } from "@/lib/metrics";
 
 // Integration status and last-sync times must reflect runtime, never build time.
 export const dynamic = "force-dynamic";
@@ -68,6 +72,26 @@ export default async function ConfigPage() {
   const creatives = data.creatives.map((c) => ({ adId: c.adId, name: c.name }));
   const currentGoals: Record<string, number> = {};
   for (const g of data.goals) currentGoals[g.metric] = g.target;
+
+  // Metadados manuais de conteúdo: duração de reel, pilar e CTA por post.
+  const TYPE_LABEL: Record<string, string> = { feed: "Feed", carrossel: "Carrossel", reel: "Reel", story: "Story" };
+  const postMeta: PostMetaRow[] = [...data.igPosts]
+    .sort((a, b) => b.publishedAt.localeCompare(a.publishedAt))
+    .map((p) => {
+      // Sempre a heurística pura: o rótulo "Auto (…)" mostra o que valeria ao
+      // voltar para Auto, mesmo com override manual ativo.
+      const detected = detectCta(p.caption);
+      return {
+        id: p.id,
+        dateLabel: formatDateShort(p.publishedAt),
+        type: TYPE_LABEL[p.type] ?? p.type,
+        caption: p.caption,
+        durationSec: p.durationSec,
+        pillar: p.pillar,
+        ctaType: p.ctaType,
+        detectedCta: detected ? CTA_LABEL[detected] : undefined,
+      };
+    });
 
   // Separação por marca: gasto + campanhas atribuídas a cada marca + regra atual.
   const multiBrand = BRANDS.length > 1;
@@ -373,10 +397,47 @@ export default async function ConfigPage() {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
+                <MessageCircle className="size-4 text-primary" />
+                Conversas de DM
+              </CardTitle>
+              <CardDescription>
+                A métrica de negócio do perfil — a API do Instagram não expõe DMs, então o
+                registro é manual. Anote as conversas iniciadas por dia (ou a soma da semana
+                num dia só); o painel agrega por semana.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <DmForm />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Clapperboard className="size-4 text-primary" />
+                Conteúdo dos posts
+              </CardTitle>
+              <CardDescription>
+                A duração do reel habilita a retenção % real (a API não a fornece); pilar/série e
+                CTA alimentam a comparação por categoria e os alertas (ex.: DM em excesso).
+                O CTA em &quot;Auto&quot; é detectado pela legenda.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <PostsMetaForm posts={postMeta} />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
                 <Target className="size-4 text-primary" />
                 Metas
               </CardTitle>
-              <CardDescription>Usadas no bloco "Metas vs. realizado" da Visão Geral.</CardDescription>
+              <CardDescription>
+                Usadas no bloco "Metas vs. realizado" da Visão Geral. As metas orgânicas seguem o
+                plano de 90 dias do diagnóstico (retenção 40%, salvos/1k 8+, 4 posts/semana…).
+              </CardDescription>
             </CardHeader>
             <CardContent>
               <GoalsForm current={currentGoals} />

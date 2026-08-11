@@ -13,8 +13,10 @@ import {
   resetSeedAction,
   resyncAdsCleanAction,
   setBrandMatchAction,
+  setDmConversationsAction,
   setGoalsAction,
   syncNowAction,
+  updatePostsMetaAction,
   type ActionState,
 } from "@/app/(dashboard)/config/actions";
 import { BRANDS } from "@/lib/brands";
@@ -61,7 +63,11 @@ function Message({ state }: { state: ActionState | null }) {
   );
 }
 
-const today = () => new Date().toISOString().slice(0, 10);
+// Data LOCAL (não UTC): à noite no Brasil, toISOString() já apontaria p/ amanhã.
+const today = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
 
 // ---- CSV import -----------------------------------------------------
 
@@ -185,6 +191,139 @@ export function ManualIgForm() {
   );
 }
 
+// ---- conversas de DM (registro manual) ------------------------------
+
+export function DmForm() {
+  const [state, action] = useActionState(setDmConversationsAction, null);
+  return (
+    <form action={action} className="space-y-3">
+      <div className="grid grid-cols-2 gap-3 sm:max-w-sm">
+        <Field label="Data">
+          <input type="date" name="date" defaultValue={today()} className={inputCls} required />
+        </Field>
+        <Field label="Conversas iniciadas">
+          <input type="number" name="dmConversations" min="0" className={inputCls} required />
+        </Field>
+      </div>
+      <SubmitButton>Registrar conversas</SubmitButton>
+      <Message state={state} />
+    </form>
+  );
+}
+
+// ---- conteúdo dos posts (duração de reel, pilar/série, CTA) ---------
+
+export interface PostMetaRow {
+  id: string;
+  dateLabel: string; // dd/mm já formatado
+  type: string;
+  caption: string;
+  durationSec?: number;
+  pillar?: string;
+  ctaType?: string;
+  /** CTA detectado pela heurística da legenda (mostrado como o "Auto") */
+  detectedCta?: string;
+}
+
+const PILLAR_SUGGESTIONS = [
+  "Simulação da semana",
+  "Mito ou verdade",
+  "Bastidor",
+  "Prova social",
+  "Card de frase",
+];
+
+const CTA_OPTIONS: { value: string; label: string }[] = [
+  { value: "dm", label: "DM" },
+  { value: "comentario", label: "Comentário" },
+  { value: "salvamento", label: "Salvamento" },
+  { value: "marcacao", label: "Marcação" },
+  { value: "outro", label: "Outro" },
+];
+
+export function PostsMetaForm({ posts }: { posts: PostMetaRow[] }) {
+  const [state, action] = useActionState(updatePostsMetaAction, null);
+  if (posts.length === 0) {
+    return <p className="text-sm text-muted-foreground">Nenhum post sincronizado ainda.</p>;
+  }
+  return (
+    <form action={action} className="space-y-3">
+      <datalist id="pillar-suggestions">
+        {PILLAR_SUGGESTIONS.map((p) => (
+          <option key={p} value={p} />
+        ))}
+      </datalist>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[640px] text-sm">
+          <thead>
+            <tr className="border-b text-left text-xs text-muted-foreground">
+              <th className="py-2 pr-3 font-medium">Post</th>
+              <th className="py-2 pr-3 font-medium">Duração (s)</th>
+              <th className="py-2 pr-3 font-medium">Pilar / série</th>
+              <th className="py-2 font-medium">CTA</th>
+            </tr>
+          </thead>
+          <tbody>
+            {posts.map((p) => (
+              <tr key={p.id} className="border-b last:border-0">
+                <td className="max-w-[280px] py-2 pr-3">
+                  <p className="line-clamp-1 font-medium">{p.caption}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {p.dateLabel} · {p.type}
+                  </p>
+                </td>
+                <td className="py-2 pr-3">
+                  {p.type === "reel" ? (
+                    <input
+                      type="number"
+                      name={`duration_${p.id}`}
+                      min="1"
+                      step="1"
+                      defaultValue={p.durationSec ?? ""}
+                      placeholder="s"
+                      className={cn(inputCls, "w-20")}
+                    />
+                  ) : (
+                    <span className="text-xs text-muted-foreground">—</span>
+                  )}
+                </td>
+                <td className="py-2 pr-3">
+                  <input
+                    type="text"
+                    name={`pillar_${p.id}`}
+                    list="pillar-suggestions"
+                    defaultValue={p.pillar ?? ""}
+                    placeholder="ex.: Mito ou verdade"
+                    className={cn(inputCls, "w-44")}
+                  />
+                </td>
+                <td className="py-2">
+                  <select
+                    name={`cta_${p.id}`}
+                    defaultValue={p.ctaType ?? ""}
+                    className={cn(inputCls, "w-36")}
+                  >
+                    <option value="">
+                      Auto{p.detectedCta ? ` (${p.detectedCta})` : " (nenhum)"}
+                    </option>
+                    {CTA_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <SubmitButton>Salvar conteúdo</SubmitButton>
+      <Message state={state} />
+    </form>
+  );
+}
+
 // ---- add lead -------------------------------------------------------
 
 export function LeadForm({ creatives }: { creatives: { adId: string; name: string }[] }) {
@@ -246,6 +385,12 @@ export function GoalsForm({ current }: { current: Partial<Record<string, number>
     { metric: "cpl", label: "CPL alvo (R$)" },
     { metric: "cpr", label: "Custo/reunião alvo (R$)" },
     { metric: "followers", label: "Seguidores (meta)" },
+    { metric: "retencao_reels", label: "Retenção de reels (%)" },
+    { metric: "alcance_base", label: "Alcance sobre a base (%)" },
+    { metric: "saves_1k", label: "Salvos por 1k views" },
+    { metric: "comentarios_post", label: "Comentários por post" },
+    { metric: "posts_semana", label: "Posts por semana" },
+    { metric: "conversas_dm", label: "Conversas de DM (período)" },
   ];
   return (
     <form action={action} className="space-y-3">
