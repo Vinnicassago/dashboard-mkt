@@ -87,7 +87,7 @@ export default async function FunilPage({
       </ChartCard>
 
       {/* Conversion rates */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
         <KpiCard label="LP → Lead" value={formatPercent(lp.visitToLead)} Icon={UserPlus} hint="leads ÷ visitas" />
         <KpiCard label="Lead → Reunião" value={formatPercent(k.leadToMeeting)} Icon={CalendarCheck} hint="reuniões ÷ leads" />
         <KpiCard label="Comparecimento" value={formatPercent(k.showRate)} Icon={CheckCircle2} hint="compareceu ÷ agendadas" />

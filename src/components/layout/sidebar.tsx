@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { navForType } from "./nav-items";
@@ -63,19 +64,29 @@ export function Sidebar({ brand }: { brand: BrandDef }) {
 /** Horizontal scrollable nav shown on mobile (md:hidden). */
 export function MobileNav({ brand }: { brand: BrandDef }) {
   const pathname = usePathname();
+  const activeRef = useRef<HTMLAnchorElement>(null);
+
+  // Rola o item ativo para o centro (ex.: "UTMs"/"Config" no fim da lista ficam
+  // escondidos até serem selecionados). No-op no desktop (nav é display:none).
+  useEffect(() => {
+    activeRef.current?.scrollIntoView({ inline: "center", block: "nearest" });
+  }, [pathname]);
+
   return (
-    <nav className="flex gap-1 overflow-x-auto border-b bg-card px-3 py-2 md:hidden">
+    <nav className="flex gap-1 overflow-x-auto border-b bg-card px-3 py-2 [scrollbar-width:none] md:hidden [&::-webkit-scrollbar]:hidden">
       {navForType(brand.type).map((item) => {
         const active = isActive(pathname, item.href);
         return (
           <Link
             key={item.href}
             href={item.href}
+            ref={active ? activeRef : undefined}
+            aria-current={active ? "page" : undefined}
             className={cn(
-              "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium whitespace-nowrap transition-colors",
+              "flex items-center gap-1.5 rounded-lg px-3 py-2.5 text-xs font-medium whitespace-nowrap transition-colors",
               active
                 ? "bg-primary/10 text-primary"
-                : "text-muted-foreground hover:bg-foreground/[0.05]",
+                : "text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
             )}
           >
             <item.Icon className="size-3.5" />

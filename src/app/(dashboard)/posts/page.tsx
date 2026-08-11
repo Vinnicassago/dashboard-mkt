@@ -130,7 +130,7 @@ export default async function PostsPage({
       ) : null}
 
       <div className="space-y-3">
-        <h2 className="text-sm font-semibold tracking-tight">Desempenho por formato</h2>
+        <h2 className="text-base font-semibold tracking-tight">Desempenho por formato</h2>
         <FormatBreakdown formats={formats} />
       </div>
 

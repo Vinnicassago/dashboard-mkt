@@ -29,7 +29,7 @@ export function PeriodSelector() {
             aria-pressed={active}
             onClick={() => select(preset.key)}
             className={cn(
-              "flex h-full items-center rounded-md px-2.5 text-xs font-medium transition-colors",
+              "flex h-full items-center rounded-md px-2 text-xs font-medium transition-colors sm:px-2.5",
               active
                 ? "bg-primary/10 text-primary"
                 : "text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",

@@ -117,6 +117,7 @@ export default async function OverviewPage({
           Icon={DollarSign}
           delta={makeDelta(k.spend, prev?.spend, true)}
           hint={hint}
+          spark={series.map((d) => d.spend)}
         />
         <KpiCard
           label="Leads"
@@ -124,6 +125,7 @@ export default async function OverviewPage({
           Icon={UserPlus}
           delta={makeDelta(k.leads, prev?.leads, true)}
           hint={hint}
+          spark={series.map((d) => d.leads)}
         />
         <KpiCard
           label={k.hasDiscovery ? "CPL · conversão" : "CPL"}

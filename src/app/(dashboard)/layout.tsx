@@ -25,7 +25,9 @@ export default async function DashboardLayout({
       <div className="flex min-w-0 flex-1 flex-col">
         <MobileNav brand={brand} />
         <Header updatedAt={updatedAt} username={sessionUser?.username ?? null} brand={brand.slug} />
-        <main className="flex-1 p-4 md:p-6">{children}</main>
+        <main className="flex-1 p-4 md:p-6">
+          <div className="mx-auto w-full max-w-[1600px]">{children}</div>
+        </main>
       </div>
     </div>
   );

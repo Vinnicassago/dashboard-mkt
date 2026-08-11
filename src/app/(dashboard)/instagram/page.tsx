@@ -202,7 +202,7 @@ export default async function InstagramPage({
         />
       </ChartCard>
 
-      <div className="flex items-start gap-2.5 rounded-lg border bg-card px-4 py-3 text-sm text-muted-foreground">
+      <div className="flex items-start gap-2.5 rounded-xl border bg-card px-4 py-3 text-sm text-muted-foreground">
         <Info className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
         <p>
           Dados demográficos (idade, cidade) e a série de seguidos/deixaram de seguir
