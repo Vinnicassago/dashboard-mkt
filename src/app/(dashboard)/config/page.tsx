@@ -68,13 +68,26 @@ export default async function ConfigPage() {
   const currentGoals: Record<string, number> = {};
   for (const g of data.goals) currentGoals[g.metric] = g.target;
 
-  // Separação por marca: gasto atribuído a cada marca hoje + regra configurada.
+  // Separação por marca: gasto + campanhas atribuídas a cada marca + regra atual.
   const multiBrand = BRANDS.length > 1;
   const brandSpend = multiBrand
     ? await Promise.all(
         BRANDS.map(async (b) => {
           const d = await getData(b.slug);
-          return { slug: b.slug, label: b.label, spend: d.adDaily.reduce((s, r) => s + r.spend, 0) };
+          const byCamp = new Map<string, number>();
+          for (const r of d.adDaily) {
+            const name = r.campaign || "(sem nome)";
+            byCamp.set(name, (byCamp.get(name) ?? 0) + r.spend);
+          }
+          const campaigns = [...byCamp.entries()]
+            .map(([name, spend]) => ({ name, spend }))
+            .sort((a, b) => b.spend - a.spend);
+          return {
+            slug: b.slug,
+            label: b.label,
+            spend: campaigns.reduce((s, c) => s + c.spend, 0),
+            campaigns,
+          };
         }),
       )
     : [];
@@ -266,15 +279,34 @@ export default async function ConfigPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                <div className="grid gap-3 sm:grid-cols-2">
                   {brandSpend.map((b) => (
                     <div key={b.slug} className="rounded-lg border p-3">
-                      <p className="text-xs text-muted-foreground">{b.label}</p>
-                      <p className="tabular text-xl font-semibold">{formatCurrency0(b.spend)}</p>
-                      <p className="text-xs text-muted-foreground">gasto atribuído</p>
+                      <div className="flex items-baseline justify-between gap-2">
+                        <p className="text-sm font-medium">{b.label}</p>
+                        <p className="tabular text-lg font-semibold">{formatCurrency0(b.spend)}</p>
+                      </div>
+                      <p className="text-xs text-muted-foreground">gasto atribuído · campanhas:</p>
+                      <ul className="mt-1.5 space-y-1">
+                        {b.campaigns.length === 0 ? (
+                          <li className="text-xs text-muted-foreground">nenhuma campanha</li>
+                        ) : (
+                          b.campaigns.map((c) => (
+                            <li key={c.name} className="flex items-baseline justify-between gap-2 text-xs">
+                              <span className="truncate text-muted-foreground" title={c.name}>{c.name}</span>
+                              <span className="tabular shrink-0 text-muted-foreground">{formatCurrency0(c.spend)}</span>
+                            </li>
+                          ))
+                        )}
+                      </ul>
                     </div>
                   ))}
                 </div>
+                <p className="text-xs text-muted-foreground">
+                  Confira acima se cada campanha está na marca certa. Uma campanha na marca
+                  errada? Ajuste a regra abaixo (ou renomeie a campanha no Ads Manager) e clique
+                  em Reclassificar.
+                </p>
                 <BrandMatchForm current={currentMatch} />
                 <ReclassifyAdsButton />
               </CardContent>
