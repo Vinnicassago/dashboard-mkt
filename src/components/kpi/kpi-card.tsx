@@ -33,7 +33,7 @@ export function KpiCard({
     delta?.direction === "up" ? ArrowUp : delta?.direction === "down" ? ArrowDown : Minus;
 
   return (
-    <Card className={cn("p-5", highlight && "ring-1 ring-primary/30")}>
+    <Card className={cn("p-5", highlight && "ring-1 ring-primary/40")}>
       <div className="flex items-center justify-between">
         <p className="text-sm font-medium text-muted-foreground">{label}</p>
         {Icon ? <Icon className="size-4 text-muted-foreground" /> : null}

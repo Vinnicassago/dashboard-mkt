@@ -2,9 +2,9 @@ import type { Recommendation, Severity } from "@/lib/recommendations";
 
 /** Lista priorizada de ações. Cor por severidade. Server component. */
 const TONE: Record<Severity, string> = {
-  alta: "var(--critical)",
+  alta: "var(--danger-text)",
   media: "var(--primary)",
-  baixa: "var(--muted)",
+  baixa: "var(--muted-foreground)",
 };
 const SEV_LABEL: Record<Severity, string> = {
   alta: "Agora",

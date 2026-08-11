@@ -166,7 +166,7 @@ export default async function InstagramPage({
           <HorizontalBars
             data={[
               { label: "Seguidores", value: cur.reachFollowers, color: CHART.series[0] },
-              { label: "Não-seguidores", value: cur.reachNonFollowers, color: CHART.good },
+              { label: "Não-seguidores", value: cur.reachNonFollowers, color: CHART.series[1] },
             ]}
             valueFormat="compact"
           />

@@ -13,13 +13,14 @@
 :root {
   color-scheme: light;
 
-  /* Surfaces / ink */
-  --background: #f9f9f7;        /* page plane */
-  --card: #fcfcfb;             /* card / chart surface */
+  /* Surfaces / ink — card BRANCO elevado sobre um fundo levemente creme, p/ o
+     card não sumir no tema claro (antes card #fcfcfb ≈ background #f9f9f7). */
+  --background: #f4f4f1;        /* page plane (creme suave) */
+  --card: #ffffff;             /* card / chart surface (branco elevado) */
   --foreground: #0b0b0b;        /* primary ink */
   --muted-foreground: #52514e;  /* secondary ink */
   --muted: #898781;            /* axis / faint labels */
-  --border: rgba(11, 11, 11, 0.10);
+  --border: rgba(11, 11, 11, 0.12);  /* firme o bastante p/ delimitar no claro */
   --grid: #e1e0d9;             /* chart hairline grid */
   --axis: #c3c2b7;             /* baseline / axis */
 
@@ -35,6 +36,7 @@
   --critical: #d03b3b;
   --success-text: #006300;      /* delta ↑ text on light */
   --danger-text: #b91c1c;
+  --warning-text: #8a5a00;      /* âmbar legível como TEXTO no claro (5.9:1); --warning é só p/ fill */
 
   /* Categorical series (light steps) */
   --chart-1: #2a78d6;  /* blue */
@@ -76,6 +78,7 @@
   --critical: #d03b3b;
   --success-text: #0ca30c;
   --danger-text: #f87171;
+  --warning-text: #fab219;      /* no escuro o âmbar vivo já é legível como texto */
 
   --chart-1: #3987e5;
   --chart-2: #d95926;
@@ -107,8 +110,11 @@
   --primary: #166534;
   --primary-foreground: #ffffff;
   --ring: #166534;
-  /* O líder da série de charts já é o accent verde (--primary); trocamos o
-     verde categórico (--chart-6) por azul para não haver dois verdes iguais. */
+  /* O líder da série de charts já é o accent verde (--primary). Trocamos os
+     verdes categóricos vizinhos para não haver dois verdes lado a lado numa
+     série: --chart-6 (verde) → azul e --chart-3 (esmeralda, a 2ª cor da série)
+     → laranja. Só na krone; o consorcio (âmbar) não tem esse problema. */
+  --chart-3: var(--chart-2);
   --chart-6: var(--chart-1);
 }
 

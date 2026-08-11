@@ -41,7 +41,7 @@ function ContactCell({ row }: { row: LeadDirectoryRow }) {
           rel="noopener noreferrer"
           className="inline-flex items-center gap-1.5 hover:underline"
         >
-          <MessageCircle className="size-3.5 text-[var(--good)]" />
+          <MessageCircle className="size-3.5 text-[var(--success-text)]" />
           {row.phone}
         </a>
       ) : null}

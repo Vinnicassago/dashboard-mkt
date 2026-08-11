@@ -26,7 +26,7 @@ export function Header({
   });
 
   return (
-    <header className="sticky top-0 z-10 flex h-16 items-center justify-between gap-3 border-b bg-background/85 px-4 backdrop-blur md:px-6">
+    <header className="sticky top-0 z-10 flex h-16 items-center justify-between gap-3 border-b bg-background/85 px-4 shadow-sm backdrop-blur md:px-6 dark:shadow-none">
       <div className="min-w-0">
         <h1 className="truncate text-base font-semibold md:text-lg">{section}</h1>
         <p className="hidden text-xs text-muted-foreground sm:block">

@@ -76,7 +76,7 @@ export default async function CriativosPage({
         {bestCpl ? (
           <Card>
             <CardContent className="flex items-center gap-4 p-5">
-              <div className="flex size-10 items-center justify-center rounded-lg bg-[var(--good)]/12 text-[var(--good)]">
+              <div className="flex size-10 items-center justify-center rounded-lg bg-[var(--good)]/12 text-[var(--success-text)]">
                 <Award className="size-5" />
               </div>
               <div>

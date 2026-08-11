@@ -9,7 +9,7 @@ import type { LeadAgeBucket, LeadQueue } from "@/lib/metrics";
 
 const TONE: Record<LeadAgeBucket, string> = {
   novo: "var(--good)",
-  atencao: "var(--primary)",
+  atencao: "var(--warning)",
   atrasado: "var(--critical)",
 };
 const LABEL: Record<LeadAgeBucket, string> = {
@@ -59,7 +59,7 @@ export function LeadQueueCard({ queue }: { queue: LeadQueue }) {
                 href={waLink(l.phone)}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium text-[var(--good)] hover:bg-[var(--good)]/10"
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium text-[var(--success-text)] hover:bg-[var(--good)]/10"
               >
                 <MessageCircle className="size-3.5" />
                 WhatsApp

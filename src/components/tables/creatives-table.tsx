@@ -17,7 +17,7 @@ const formatBadge: Record<CreativePerf["format"], string> = {
 
 const FAT_TONE: Record<FatigueLevel, string> = {
   fadigado: "var(--critical)",
-  atencao: "var(--primary)",
+  atencao: "var(--warning)",
   saudavel: "var(--good)",
   novo: "var(--muted)",
 };
@@ -33,7 +33,7 @@ const FAT_ORDER: Record<FatigueLevel, number> = { fadigado: 3, atencao: 2, sauda
 function tone(v: number | undefined, good: number, ok: number): string {
   if (v == null) return "var(--muted)";
   if (v >= good) return "var(--good)";
-  if (v >= ok) return "var(--primary)";
+  if (v >= ok) return "var(--warning)";
   return "var(--critical)";
 }
 

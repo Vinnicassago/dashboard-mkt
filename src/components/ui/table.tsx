@@ -30,7 +30,7 @@ export function TBody(props: React.ComponentProps<"tbody">) {
 export function TR({ className, ...props }: React.ComponentProps<"tr">) {
   return (
     <tr
-      className={cn("border-b last:border-0 hover:bg-foreground/[0.03]", className)}
+      className={cn("border-b last:border-0 hover:bg-foreground/[0.05]", className)}
       {...props}
     />
   );

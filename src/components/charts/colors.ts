@@ -5,7 +5,9 @@
  */
 export const CHART = {
   grid: "var(--grid)",
-  axis: "var(--muted)",
+  // --muted (#898781) é o mesmo tom nos dois temas e fica ~2.8:1 no claro; os
+  // rótulos de eixo pedem --muted-foreground (legível nos dois temas).
+  axis: "var(--muted-foreground)",
   primary: "var(--primary)",
   good: "var(--good)",
   critical: "var(--critical)",
