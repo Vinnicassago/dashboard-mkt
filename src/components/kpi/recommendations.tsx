@@ -37,16 +37,20 @@ export function RecommendationsCard({
   return (
     <ul className="space-y-3.5">
       {recs.map((r) => (
-        <li key={r.id} className="flex gap-3">
-          <span
-            className="mt-1.5 size-2 shrink-0 rounded-full"
-            style={{ background: TONE[r.severity] }}
-            title={SEV_LABEL[r.severity]}
-          />
-          <div className="min-w-0">
-            <p className="text-sm font-medium">{r.title}</p>
-            <p className="text-sm text-muted-foreground">{r.detail}</p>
+        <li key={r.id} className="flex flex-col gap-0.5">
+          <div className="flex items-center gap-2">
+            <span
+              className="inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide uppercase"
+              style={{
+                color: TONE[r.severity],
+                background: `color-mix(in srgb, ${TONE[r.severity]} 12%, transparent)`,
+              }}
+            >
+              {SEV_LABEL[r.severity]}
+            </span>
+            <p className="min-w-0 text-sm font-medium">{r.title}</p>
           </div>
+          <p className="text-sm text-muted-foreground">{r.detail}</p>
         </li>
       ))}
     </ul>

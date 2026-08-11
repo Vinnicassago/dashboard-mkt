@@ -76,7 +76,7 @@ export function StatusSelect({
             });
           }}
           className={cn(
-            "h-7 rounded-md border bg-background px-1.5 text-xs outline-none",
+            "h-7 rounded-md border bg-background px-1.5 text-xs focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none",
             pending && "opacity-50",
           )}
         >

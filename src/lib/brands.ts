@@ -20,6 +20,8 @@ export const BRAND_COOKIE = "brand";
 
 export type BrandType = "conversao" | "awareness";
 
+export type ThemeMode = "dark" | "light";
+
 export interface BrandDef {
   slug: Brand;
   /** Nome de exibição completo (o @handle sem o arroba). */
@@ -31,6 +33,14 @@ export interface BrandDef {
   /** @handle do Instagram. */
   handle: string;
   type: BrandType;
+  /**
+   * Identidade visual da marca: o tema (claro/escuro) é definido pela MARCA, não
+   * por preferência do usuário. O accent (âmbar vs. verde) é derivado do slug via
+   * `[data-brand]` em globals.css. Estampado no <html> pelo SSR (cookie da marca
+   * já é conhecido no servidor) → sem flash — e aplicado otimisticamente no
+   * cliente ao trocar de marca para a animação de transição.
+   */
+  theme: ThemeMode;
 }
 
 export const BRANDS: BrandDef[] = [
@@ -41,6 +51,7 @@ export const BRANDS: BrandDef[] = [
     initial: "C",
     handle: "@consorcio.brunno",
     type: "conversao",
+    theme: "dark", // escuro + accent âmbar/ouro
   },
   {
     slug: "krone",
@@ -49,12 +60,21 @@ export const BRANDS: BrandDef[] = [
     initial: "K",
     handle: "@krone.capital",
     type: "awareness",
+    theme: "light", // claro + accent verde floresta
   },
 ];
 
 /** Definição de uma marca pelo slug; cai na marca padrão se o slug for desconhecido. */
 export function brandDef(slug: string): BrandDef {
   return BRANDS.find((b) => b.slug === slug) ?? BRANDS[0];
+}
+
+/**
+ * Tema (claro/escuro) da marca — fonte única usada tanto no SSR (layout raiz
+ * estampa data-theme) quanto no cliente (brand-selector aplica otimista ao trocar).
+ */
+export function brandTheme(slug: string): ThemeMode {
+  return brandDef(slug).theme;
 }
 
 /** A marca é do tipo "awareness" (só seguidores, sem funil de leads)? */

@@ -31,7 +31,15 @@ export function GoalBar({
           / {targetText}
         </span>
       </div>
-      <div className="relative h-2.5 w-full overflow-hidden rounded-full bg-foreground/[0.07]">
+      <div
+        role="progressbar"
+        aria-label={`${label}: ${valueText} de ${targetText}`}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round(Math.min(100, Math.max(0, pct * 100)))}
+        aria-valuetext={`${Math.round(pct * 100)}% da meta`}
+        className="relative h-2.5 w-full overflow-hidden rounded-full bg-foreground/[0.07]"
+      >
         <div
           className={cn(
             "h-full rounded-full transition-all",

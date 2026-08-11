@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { activeBrand } from "@/lib/active-brand";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -13,30 +14,30 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Dashboard de Campanha — Consórcio",
+  title: "Dashboard de Campanha",
   description:
-    "Central de análise da campanha: Instagram orgânico, tráfego pago, criativos e funil de leads até o agendamento de reunião.",
+    "Central de análise das contas: Instagram orgânico, tráfego pago, criativos e funil de leads até o agendamento de reunião.",
 };
 
-// Applies the saved theme before first paint to avoid a flash. Default is dark:
-// only an explicit saved 'light' switches away from it (first visit = dark).
-const themeScript = `(function(){try{var t=localStorage.getItem('theme');if(t!=='light'&&t!=='dark'){t='dark';}document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','dark');}})();`;
-
-export default function RootLayout({
+// O tema é definido pela MARCA ativa (não por preferência do usuário): consórcio
+// = escuro/âmbar, krone = claro/verde. Como o cookie da marca já é conhecido no
+// servidor, estampamos data-theme + data-brand no <html> aqui, no SSR — a página
+// já pinta no tema certo, sem flash e sem script inline de localStorage.
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const brand = await activeBrand();
+
   return (
     <html
       lang="pt-BR"
-      data-theme="dark"
+      data-theme={brand.theme}
+      data-brand={brand.slug}
       suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} h-full`}
     >
-      <head>
-        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
-      </head>
       <body className="min-h-full">{children}</body>
     </html>
   );

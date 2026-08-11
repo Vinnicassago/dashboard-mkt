@@ -5,7 +5,6 @@ import { Suspense } from "react";
 import { sectionFromPath } from "./nav-items";
 import { PeriodSelector } from "./period-selector";
 import { BrandSelector } from "./brand-selector";
-import { ThemeToggle } from "./theme-toggle";
 import { UserMenu } from "./user-menu";
 
 export function Header({
@@ -39,7 +38,6 @@ export function Header({
         <Suspense fallback={null}>
           <PeriodSelector />
         </Suspense>
-        <ThemeToggle />
         {username ? <UserMenu username={username} /> : null}
       </div>
     </header>

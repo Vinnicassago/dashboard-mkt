@@ -19,19 +19,20 @@ export function PeriodSelector() {
   }
 
   return (
-    <div className="inline-flex items-center rounded-lg border p-0.5">
+    <div className="inline-flex h-9 items-center gap-0.5 rounded-lg border bg-card p-0.5">
       {RANGE_PRESETS.map((preset) => {
         const active = current === preset.key;
         return (
           <button
             key={preset.key}
             type="button"
+            aria-pressed={active}
             onClick={() => select(preset.key)}
             className={cn(
-              "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+              "flex h-full items-center rounded-md px-2.5 text-xs font-medium transition-colors",
               active
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:text-foreground",
+                ? "bg-primary/10 text-primary"
+                : "text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
             )}
           >
             {preset.label}

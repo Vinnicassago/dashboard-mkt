@@ -28,7 +28,7 @@ export default async function LoginPage({
           </div>
           <div className="leading-tight">
             <p className="text-sm font-semibold">Dashboard de Campanha</p>
-            <p className="text-xs text-muted-foreground">Consórcio · acesso restrito</p>
+            <p className="text-xs text-muted-foreground">Acesso restrito</p>
           </div>
         </div>
         {firstRun ? <SetupForm /> : <LoginForm next={next} />}

@@ -9,9 +9,10 @@ export const CHART = {
   primary: "var(--primary)",
   good: "var(--good)",
   critical: "var(--critical)",
-  // A marca é âmbar (var(--primary)); a série lidera com ela e evita azul (chart-1),
-  // laranja (chart-2, vizinho do âmbar) e amarelo (chart-4, duplicaria), usando
-  // cores bem separadas para preservar a distinção entre séries.
+  // A série lidera com o accent da MARCA (var(--primary): âmbar no consorcio,
+  // verde na krone) e evita azul (chart-1), laranja (chart-2, vizinho do âmbar)
+  // e amarelo (chart-4, duplicaria). Na krone, --chart-6 (verde) é reapontado
+  // para azul em globals.css p/ não colidir com o líder verde.
   series: [
     "var(--primary)",
     "var(--chart-3)",

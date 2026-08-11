@@ -1,7 +1,9 @@
 @import "tailwindcss";
 
-/* Toggle-based dark mode: html[data-theme="dark"] wins over OS setting.
-   The inline script in layout.tsx stamps data-theme before paint. */
+/* O tema é definido pela MARCA ativa (não por preferência do usuário): o layout
+   raiz (server) estampa data-theme + data-brand no <html> a partir do cookie da
+   marca — sem flash, sem script. html[data-theme="dark"] traz as superfícies
+   escuras; data-brand só troca o accent. */
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 /* ------------------------------------------------------------------ */
@@ -92,6 +94,24 @@
   --funnel-5: #86b6ef;
 }
 
+/* ------------------------------------------------------------------ */
+/* Accent por MARCA                                                    */
+/* O tema (superfícies claro/escuro) vem de data-theme; data-brand só  */
+/* troca o ACCENT. consorcio = âmbar (default). krone = verde floresta */
+/* sobre superfícies claras. Vem DEPOIS do bloco dark porque tem a     */
+/* mesma especificidade — a ordem de fonte decide se ambos coexistirem.*/
+/* Verde floresta #166534: contraste AAA como preenchimento c/ texto   */
+/* branco (7.1:1) e como texto sobre o fundo claro (6.8:1).            */
+/* ------------------------------------------------------------------ */
+:root[data-brand="krone"] {
+  --primary: #166534;
+  --primary-foreground: #ffffff;
+  --ring: #166534;
+  /* O líder da série de charts já é o accent verde (--primary); trocamos o
+     verde categórico (--chart-6) por azul para não haver dois verdes iguais. */
+  --chart-6: var(--chart-1);
+}
+
 /* Expose tokens to Tailwind utilities (bg-card, text-muted-foreground, ...) */
 @theme inline {
   --color-background: var(--background);
@@ -124,6 +144,9 @@
 
 html {
   scroll-behavior: smooth;
+  /* Scrollbar fina também no Firefox (o ::-webkit abaixo cobre Chrome/Edge). */
+  scrollbar-width: thin;
+  scrollbar-color: var(--axis) var(--background);
 }
 
 body {
@@ -147,4 +170,63 @@ body {
   background: var(--axis);
   border-radius: 9999px;
   border: 2px solid var(--background);
+}
+
+/* ------------------------------------------------------------------ */
+/* Foco visível por teclado — usa --ring, então segue o accent da marca.*/
+/* :where() tem especificidade 0 → estilos de foco locais (focus:ring)  */
+/* continuam vencendo. Não desloca layout (outline segue o border-radius).*/
+/* ------------------------------------------------------------------ */
+:where(a, button, select, [role="button"], [tabindex]):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Transição de cores ao trocar de marca (crossfade dos tokens).       */
+/* Não roda no load (o SSR já pinta o tema certo) — só quando           */
+/* data-theme/data-brand mudam. Utilitários Tailwind (transition-colors,*/
+/* 150ms) vencem por especificidade nos hovers; isto entra onde nada    */
+/* define. É o fallback do circular reveal e suaviza o conteúdo que     */
+/* re-renderiza após o revalidate.                                      */
+/* ------------------------------------------------------------------ */
+@media (prefers-reduced-motion: no-preference) {
+  *,
+  *::before,
+  *::after {
+    transition-property: background-color, border-color, color, fill, stroke;
+    transition-duration: 300ms;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  }
+}
+
+/* Revelação circular na troca de marca (View Transitions API). Desliga o
+   cross-fade padrão; o círculo é animado via JS no brand-selector, expandindo
+   do botão clicado. Browsers sem suporte caem no crossfade de tokens acima. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+::view-transition-new(root) {
+  z-index: 1;
+}
+::view-transition-old(root) {
+  z-index: 0;
+}
+
+/* Respeita quem prefere menos movimento: zera transições/animações, desliga o
+   scroll suave e (via gate no brand-selector) pula a revelação circular. */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
