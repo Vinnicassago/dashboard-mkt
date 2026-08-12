@@ -185,8 +185,9 @@ export async function updatePostsMetaAction(
     const durRaw = formData.get(`duration_${post.id}`);
     const pillarRaw = formData.get(`pillar_${post.id}`);
     const ctaRaw = formData.get(`cta_${post.id}`);
+    const testRaw = formData.get(`test_${post.id}`);
     // Campos ausentes do form (post fora da lista) não tocam o post.
-    if (durRaw == null && pillarRaw == null && ctaRaw == null) continue;
+    if (durRaw == null && pillarRaw == null && ctaRaw == null && testRaw == null) continue;
 
     const durNum = Number(durRaw);
     const durationSec =
@@ -203,12 +204,15 @@ export async function updatePostsMetaAction(
         : post.ctaType;
 
     const nextDuration = durRaw != null ? durationSec : post.durationSec;
+    // "1" = teste; "" = não; ausente = mantém. Guardado como true|undefined.
+    const isTest = testRaw != null ? (String(testRaw) === "1" ? true : undefined) : post.isTest;
     if (
       nextDuration !== post.durationSec ||
       pillar !== post.pillar ||
-      ctaType !== post.ctaType
+      ctaType !== post.ctaType ||
+      isTest !== post.isTest
     ) {
-      changed.push({ ...post, durationSec: nextDuration, pillar, ctaType });
+      changed.push({ ...post, durationSec: nextDuration, pillar, ctaType, isTest });
     }
   }
   if (changed.length === 0) return { ok: true, message: "Nada para atualizar." };

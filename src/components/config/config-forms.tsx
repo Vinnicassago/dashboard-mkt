@@ -223,6 +223,8 @@ export interface PostMetaRow {
   ctaType?: string;
   /** CTA detectado pela heurística da legenda (mostrado como o "Auto") */
   detectedCta?: string;
+  /** post de teste (validação de gancho) — fora da análise orgânica */
+  isTest?: boolean;
 }
 
 const PILLAR_SUGGESTIONS = [
@@ -260,7 +262,8 @@ export function PostsMetaForm({ posts }: { posts: PostMetaRow[] }) {
               <th className="py-2 pr-3 font-medium">Post</th>
               <th className="py-2 pr-3 font-medium">Duração (s)</th>
               <th className="py-2 pr-3 font-medium">Pilar / série</th>
-              <th className="py-2 font-medium">CTA</th>
+              <th className="py-2 pr-3 font-medium">CTA</th>
+              <th className="py-2 font-medium">Teste?</th>
             </tr>
           </thead>
           <tbody>
@@ -297,7 +300,7 @@ export function PostsMetaForm({ posts }: { posts: PostMetaRow[] }) {
                     className={cn(inputCls, "w-44")}
                   />
                 </td>
-                <td className="py-2">
+                <td className="py-2 pr-3">
                   <select
                     name={`cta_${p.id}`}
                     defaultValue={p.ctaType ?? ""}
@@ -311,6 +314,17 @@ export function PostsMetaForm({ posts }: { posts: PostMetaRow[] }) {
                         {o.label}
                       </option>
                     ))}
+                  </select>
+                </td>
+                <td className="py-2">
+                  {/* select (não checkbox): ausente do form = não mexe; "" = não; "1" = sim */}
+                  <select
+                    name={`test_${p.id}`}
+                    defaultValue={p.isTest ? "1" : ""}
+                    className={cn(inputCls, "w-20")}
+                  >
+                    <option value="">Não</option>
+                    <option value="1">Sim</option>
                   </select>
                 </td>
               </tr>

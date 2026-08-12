@@ -93,6 +93,10 @@ export const toIgDaily = (r: Row): IgAccountDaily => ({
   reachFollowers: r.reach_followers == null ? undefined : n(r.reach_followers),
   reachNonFollowers: r.reach_non_followers == null ? undefined : n(r.reach_non_followers),
   dmConversations: r.dm_conversations == null ? undefined : n(r.dm_conversations),
+  followsDay: r.follows_day == null ? undefined : n(r.follows_day),
+  unfollowsDay: r.unfollows_day == null ? undefined : n(r.unfollows_day),
+  linkTapsWebsite: r.link_taps_website == null ? undefined : n(r.link_taps_website),
+  linkTapsWhatsApp: r.link_taps_whatsapp == null ? undefined : n(r.link_taps_whatsapp),
 });
 
 export const fromIgDaily = (r: IgAccountDaily): Row => ({
@@ -108,6 +112,10 @@ export const fromIgDaily = (r: IgAccountDaily): Row => ({
   reach_followers: r.reachFollowers ?? null,
   reach_non_followers: r.reachNonFollowers ?? null,
   dm_conversations: r.dmConversations ?? null,
+  follows_day: r.followsDay ?? null,
+  unfollows_day: r.unfollowsDay ?? null,
+  link_taps_website: r.linkTapsWebsite ?? null,
+  link_taps_whatsapp: r.linkTapsWhatsApp ?? null,
 });
 
 export const toPost = (r: Row): IgPost => ({
@@ -128,6 +136,11 @@ export const toPost = (r: Row): IgPost => ({
   durationSec: r.duration_sec == null ? undefined : n(r.duration_sec),
   pillar: r.pillar ? s(r.pillar) : undefined,
   ctaType: r.cta_type ? (s(r.cta_type) as IgPost["ctaType"]) : undefined,
+  profileVisits: r.profile_visits == null ? undefined : n(r.profile_visits),
+  follows: r.follows == null ? undefined : n(r.follows),
+  mediaUrl: r.media_url ? s(r.media_url) : undefined,
+  thumbnailUrl: r.thumbnail_url ? s(r.thumbnail_url) : undefined,
+  isTest: r.is_test ? true : undefined,
 });
 
 export const fromPost = (p: IgPost): Row => ({
@@ -148,6 +161,11 @@ export const fromPost = (p: IgPost): Row => ({
   duration_sec: p.durationSec ?? null,
   pillar: p.pillar ?? null,
   cta_type: p.ctaType ?? null,
+  profile_visits: p.profileVisits ?? null,
+  follows: p.follows ?? null,
+  media_url: p.mediaUrl ?? null,
+  thumbnail_url: p.thumbnailUrl ?? null,
+  is_test: p.isTest ?? false,
 });
 
 export const toCreative = (r: Row): Creative => ({
@@ -158,6 +176,8 @@ export const toCreative = (r: Row): Creative => ({
   thumbnailUrl: r.thumbnail_url ? s(r.thumbnail_url) : undefined,
   videoPlays: r.video_plays == null ? undefined : n(r.video_plays),
   thruPlays: r.thru_plays == null ? undefined : n(r.thru_plays),
+  instagramMediaId: r.instagram_media_id ? s(r.instagram_media_id) : undefined,
+  instagramPermalink: r.instagram_permalink ? s(r.instagram_permalink) : undefined,
 });
 
 export const fromCreative = (c: Creative): Row => ({
@@ -168,6 +188,8 @@ export const fromCreative = (c: Creative): Row => ({
   thumbnail_url: c.thumbnailUrl ?? null,
   video_plays: c.videoPlays ?? null,
   thru_plays: c.thruPlays ?? null,
+  instagram_media_id: c.instagramMediaId ?? null,
+  instagram_permalink: c.instagramPermalink ?? null,
 });
 
 export const toAd = (r: Row): AdDaily => ({

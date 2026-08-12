@@ -47,6 +47,8 @@ const columns: Column<PostPerf>[] = [
         )}
         <div className="flex flex-wrap gap-1">
           <Badge variant="muted">{typeLabel[r.type]}</Badge>
+          {r.isTest ? <Badge variant="warning">Teste</Badge> : null}
+          {r.boosted && !r.isTest ? <Badge variant="default">Impulsionado</Badge> : null}
           {r.pillar ? <Badge variant="muted">{r.pillar}</Badge> : null}
           {r.cta ? <Badge variant="muted">CTA: {CTA_LABEL[r.cta]}</Badge> : null}
         </div>
@@ -101,16 +103,22 @@ const columns: Column<PostPerf>[] = [
 const ALL_TYPES = ["feed", "carrossel", "reel", "story"] as const;
 
 export function PostsTable({ rows }: { rows: PostPerf[] }) {
-  const [type, setType] = useState<"all" | PostPerf["type"]>("all");
+  const [type, setType] = useState<"all" | "test" | PostPerf["type"]>("all");
   const present = useMemo(
     () => ALL_TYPES.filter((t) => rows.some((r) => r.type === t)),
     [rows],
   );
-  const filtered = type === "all" ? rows : rows.filter((r) => r.type === type);
+  const hasTests = useMemo(() => rows.some((r) => r.isTest), [rows]);
+  const filtered =
+    type === "all"
+      ? rows
+      : type === "test"
+        ? rows.filter((r) => r.isTest)
+        : rows.filter((r) => r.type === type);
 
   return (
     <div className="space-y-3">
-      {present.length > 1 ? (
+      {present.length > 1 || hasTests ? (
         <div className="flex flex-wrap gap-1.5">
           <Chip active={type === "all"} onClick={() => setType("all")}>
             Todos
@@ -120,6 +128,11 @@ export function PostsTable({ rows }: { rows: PostPerf[] }) {
               {typeLabel[t]}
             </Chip>
           ))}
+          {hasTests ? (
+            <Chip active={type === "test"} onClick={() => setType("test")}>
+              Testes
+            </Chip>
+          ) : null}
         </div>
       ) : null}
       <DataTable

@@ -143,7 +143,10 @@ function buildOrganicContentRecommendations(
   // SEM early-return com posts vazio: o alerta de cadência usa o histórico
   // completo e precisa disparar justamente quando a janela está sem posts
   // (grade parada), e o de objetivo de campanha nem depende de posts.
-  const posts = postPerformance(data.igPosts, range);
+  // Mesmo universo orgânico da página Posts: sem testes nem impulsionados.
+  const posts = postPerformance(data.igPosts, range, undefined, data.creatives).filter(
+    (p) => !p.isTest && !p.boosted,
+  );
   const agg = aggregatePostPerformance(posts);
 
   // 1. Sem publicar há dias (alta com 5+): a base só esquenta com cadência.
@@ -161,7 +164,9 @@ function buildOrganicContentRecommendations(
 
   // 2. Retenção de reels caindo vs período anterior (média).
   if (range) {
-    const prevAgg = aggregatePostPerformance(postPerformance(data.igPosts, previousRange(range)));
+    const prevAgg = aggregatePostPerformance(
+      postPerformance(data.igPosts, previousRange(range), undefined, data.creatives),
+    );
     const cur = agg.avgRetention ?? null;
     const prev = prevAgg.avgRetention ?? null;
     if (cur != null && prev != null && prev > 0 && cur < prev * 0.85) {

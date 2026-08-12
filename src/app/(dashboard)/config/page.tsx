@@ -90,6 +90,7 @@ export default async function ConfigPage() {
         pillar: p.pillar,
         ctaType: p.ctaType,
         detectedCta: detected ? CTA_LABEL[detected] : undefined,
+        isTest: p.isTest,
       };
     });
 
@@ -420,7 +421,9 @@ export default async function ConfigPage() {
               <CardDescription>
                 A duração do reel habilita a retenção % real (a API não a fornece); pilar/série e
                 CTA alimentam a comparação por categoria e os alertas (ex.: DM em excesso).
-                O CTA em &quot;Auto&quot; é detectado pela legenda.
+                O CTA em &quot;Auto&quot; é detectado pela legenda. Marque{" "}
+                <strong>Teste? = Sim</strong> nos reels de validação de formato/gancho — eles
+                ganham selo e ficam FORA de toda a análise orgânica.
               </CardDescription>
             </CardHeader>
             <CardContent>

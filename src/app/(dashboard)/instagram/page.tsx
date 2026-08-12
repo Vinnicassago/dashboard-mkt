@@ -167,6 +167,30 @@ export default async function InstagramPage({
               : undefined
           }
         />
+        {cur.hasFollowSplit ? (
+          <>
+            <KpiCard
+              label="Começaram a seguir"
+              value={`+${formatInt(cur.followsTotal)}`}
+              Icon={UserRound}
+              hint="crescimento bruto"
+              delta={
+                prev?.hasFollowSplit ? pctDelta(cur.followsTotal, prev.followsTotal) : undefined
+              }
+            />
+            <KpiCard
+              label="Deixaram de seguir"
+              value={`−${formatInt(cur.unfollowsTotal)}`}
+              Icon={UserRound}
+              hint="churn da base"
+              delta={
+                prev?.hasFollowSplit
+                  ? pctDelta(cur.unfollowsTotal, prev.unfollowsTotal, { lowerIsBetter: true })
+                  : undefined
+              }
+            />
+          </>
+        ) : null}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -178,7 +202,11 @@ export default async function InstagramPage({
         </ChartCard>
         <ChartCard
           title="Funil do link da bio"
-          description={`Views → visita ao perfil → clique no link. CTR da bio (cliques ÷ visitas): ${formatPercent(cur.linkTapRate)}.`}
+          description={`Views → visita ao perfil → clique no link. CTR da bio (cliques ÷ visitas): ${formatPercent(cur.linkTapRate)}.${
+            cur.hasLinkTapSplit
+              ? ` Destino: ${formatInt(cur.linkTapsWebsite)} site · ${formatInt(cur.linkTapsWhatsApp)} WhatsApp.`
+              : ""
+          }`}
         >
           <FunnelChart stages={clickFunnel} />
         </ChartCard>

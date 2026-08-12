@@ -52,7 +52,14 @@ export default async function PostsPage({
   const data = await getData(await activeBrandSlug());
   const { range } = pageRange(data, (await searchParams).range);
 
-  const posts = postPerformance(data.igPosts, range, data.igAccountDaily);
+  const posts = postPerformance(data.igPosts, range, data.igAccountDaily, data.creatives);
+  const testCount = posts.filter((p) => p.isTest).length;
+  const boostedCount = posts.filter((p) => p.boosted && !p.isTest).length;
+  // Universo ORGÂNICO: alimenta todos os números e gráficos da página; a tabela
+  // mostra tudo (testes/impulsionados com selo). Cadência usa a grade completa.
+  const organic = posts.filter((p) => !p.isTest && !p.boosted);
+  const organicIds = new Set(organic.map((p) => p.id));
+  const organicIgPosts = data.igPosts.filter((p) => organicIds.has(p.id));
 
   if (posts.length === 0) {
     return (
@@ -67,17 +74,17 @@ export default async function PostsPage({
   const cur = aggregatePostPerformance(posts);
   const prev = range
     ? aggregatePostPerformance(
-        postPerformance(data.igPosts, previousRange(range), data.igAccountDaily),
+        postPerformance(data.igPosts, previousRange(range), data.igAccountDaily, data.creatives),
       )
     : undefined;
 
-  const formats = formatPerformance(data.igPosts, range);
+  const formats = formatPerformance(organicIgPosts, range);
   // Campeão = melhor formato COM amostra confiável (a lista vem ordenada por engajamento).
   const champion = formats.find((f) => f.sampleOk) ?? formats[0];
 
   const cadence = postingCadence(data.igPosts, range, new Date().toISOString());
-  const reelSeries = reelWatchSeries(data.igPosts, range);
-  const topReels = [...posts]
+  const reelSeries = reelWatchSeries(organicIgPosts, range);
+  const topReels = [...organic]
     .filter((p) => p.type === "reel" && p.avgWatchTime != null)
     .sort((a, b) => (b.avgWatchTime ?? 0) - (a.avgWatchTime ?? 0))
     .slice(0, 5)
@@ -88,20 +95,20 @@ export default async function PostsPage({
     }));
 
   // CTA e pilar: onde o diagnóstico manda racionar DM e cortar card de frase.
-  const ctas = ctaDistribution(posts);
+  const ctas = ctaDistribution(organic);
   const ctaBars = ctas.map((c) => ({
     label: `${c.label} · ${c.count} post${c.count > 1 ? "s" : ""}`,
     value: c.count,
     color: c.cta === "dm" && cur.dmCtaShare > 0.25 ? CHART.critical : CHART.series[0],
   }));
-  const pillars = pillarPerformance(data.igPosts, range);
+  const pillars = pillarPerformance(organicIgPosts, range);
   const pillarBars = pillars.map((p, i) => ({
     label: `${p.pillar} · ${p.count} post${p.count > 1 ? "s" : ""}`,
     value: p.avgEngagement,
     color: i === 0 && p.sampleOk ? CHART.good : CHART.series[0],
   }));
 
-  const byWeekday = [...weekdayPerformance(data.igPosts, range)].sort(
+  const byWeekday = [...weekdayPerformance(organicIgPosts, range)].sort(
     (a, b) => b.avgEngagement - a.avgEngagement,
   );
   // Verde no melhor dia COM amostra confiável (dias de 1 post não coroam).
@@ -115,6 +122,16 @@ export default async function PostsPage({
 
   return (
     <div className="space-y-6">
+      {testCount > 0 || boostedCount > 0 ? (
+        <p className="text-xs text-muted-foreground">
+          Fora da análise orgânica:{" "}
+          {testCount > 0 ? `${formatInt(testCount)} post(s) de teste` : null}
+          {testCount > 0 && boostedCount > 0 ? " · " : null}
+          {boostedCount > 0 ? `${formatInt(boostedCount)} impulsionado(s)` : null}
+          {" — aparecem na tabela com selo, mas ficam fora de todos os números e gráficos desta página (exceto a cadência, que conta tudo que foi publicado)."}
+        </p>
+      ) : null}
+
       {/* Métricas-mestre do orgânico: sinais que compram alcance, não views */}
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         <KpiCard label="Posts" value={formatInt(cur.count)} Icon={FileText} />

@@ -34,7 +34,11 @@ async function handle(request: Request) {
   const source: SyncSource =
     sourceParam === "ads" || sourceParam === "instagram" ? sourceParam : "all";
   const daysParam = Number(url.searchParams.get("days"));
-  const days = Number.isFinite(daysParam) && daysParam > 0 ? daysParam : undefined;
+  // Teto de 30 dias por rodada: cada dia custa ~5 requests de insights e o teto
+  // da superfície Instagram Login é ~200 calls/hora — backfill maior deve ser
+  // feito em janelas de ≤30 com 1h de intervalo.
+  const days =
+    Number.isFinite(daysParam) && daysParam > 0 ? Math.min(daysParam, 30) : undefined;
   // Opcional: sincroniza só uma marca (útil p/ cron por marca / rate-limit).
   const brand = url.searchParams.get("brand")?.trim() || undefined;
 

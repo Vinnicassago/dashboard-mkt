@@ -134,6 +134,10 @@ function buildSeedData(): DashboardData {
     format: c.format,
     videoPlays: 0,
     thruPlays: 0,
+    // AD-07 é o impulsionamento do reel POST-08 — demonstra o vínculo
+    // orgânico<->pago (selo "Impulsionado" e exclusão dos agregados orgânicos).
+    instagramMediaId: c.adId === "AD-07" ? "POST-08" : undefined,
+    instagramPermalink: c.adId === "AD-07" ? "https://instagram.com/p/seed-8" : undefined,
   }));
   const creativeById = new Map(creatives.map((c) => [c.adId, c]));
 
@@ -278,6 +282,11 @@ function buildSeedData(): DashboardData {
       // registro manual de conversas de DM — derivado (sem novo rand, p/ não
       // deslocar a sequência determinística das demais métricas)
       dmConversations: Math.max(0, Math.round(profileLinkTaps * 0.4) - 2),
+      // crescimento bruto e destino da bio — também derivados, sem novo rand
+      followsDay: gain + Math.round(gain * 0.15),
+      unfollowsDay: Math.round(gain * 0.15),
+      linkTapsWebsite: Math.round(profileLinkTaps * 0.65),
+      linkTapsWhatsApp: profileLinkTaps - Math.round(profileLinkTaps * 0.65),
     });
   });
 
@@ -290,6 +299,7 @@ function buildSeedData(): DashboardData {
     caption: string;
     durationSec?: number;
     pillar?: string;
+    isTest?: boolean;
   }[] = [
     { day: 0, type: "reel", caption: "Consórcio é para quem não tem pressa? Mito.", durationSec: 41, pillar: "Mito ou verdade" },
     { day: 1, type: "carrossel", caption: "3 diferenças entre consórcio e financiamento" },
@@ -300,6 +310,8 @@ function buildSeedData(): DashboardData {
     { day: 11, type: "feed", caption: "Agende uma reunião sem compromisso" },
     { day: 12, type: "reel", caption: "Consórcio contemplado: e agora? Me chama na DM.", durationSec: 22 },
     { day: 14, type: "carrossel", caption: "Passo a passo para começar hoje — salva pra depois" },
+    // reel de TESTE (validação de gancho) — flagado, fica fora da análise
+    { day: 13, type: "reel", caption: "[TESTE] Gancho A — R$ 1,5 mi, três caminhos", durationSec: 15, isTest: true },
   ];
   const igPosts: IgPost[] = POST_DEFS.map((p, idx) => {
     const base = 300 + p.day * 90;
@@ -326,6 +338,7 @@ function buildSeedData(): DashboardData {
       totalWatchTime: p.type === "reel" ? Math.round(views * rand(3, 9)) : undefined,
       durationSec: p.durationSec,
       pillar: p.pillar,
+      isTest: p.isTest,
     };
   });
 

@@ -160,6 +160,20 @@ alter table ig_posts add column if not exists pillar text;
 alter table ig_posts add column if not exists cta_type text;
 alter table ig_account_daily add column if not exists dm_conversations integer;
 
+-- Etapa 3: vínculo orgânico<->pago (posts impulsionados / dark posts), posts de
+-- teste fora da análise, atribuição por post e crescimento bruto de seguidores.
+alter table ig_posts add column if not exists profile_visits integer;
+alter table ig_posts add column if not exists follows integer;
+alter table ig_posts add column if not exists media_url text;
+alter table ig_posts add column if not exists thumbnail_url text;
+alter table ig_posts add column if not exists is_test boolean not null default false;
+alter table ig_account_daily add column if not exists follows_day integer;
+alter table ig_account_daily add column if not exists unfollows_day integer;
+alter table ig_account_daily add column if not exists link_taps_website integer;
+alter table ig_account_daily add column if not exists link_taps_whatsapp integer;
+alter table creatives add column if not exists instagram_media_id text;
+alter table creatives add column if not exists instagram_permalink text;
+
 -- Multimarca (krone.capital + consorcio.brunno): carimba cada linha com a marca.
 -- Bancos já existentes recebem a coluna com default 'consorcio' (backfill) e têm
 -- suas PKs recompostas para incluir 'brand', evitando que a linha diária/meta de

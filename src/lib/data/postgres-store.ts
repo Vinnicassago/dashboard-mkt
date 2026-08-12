@@ -49,9 +49,9 @@ import {
 
 // Column lists (order matches the from* mapper output keys).
 const CAMPAIGN_COLS = ["id", "brand", "name", "objective", "status", "start_date", "end_date", "budget_total", "daily_budget"];
-const IG_DAILY_COLS = ["brand", "date", "followers", "reach", "views", "profile_link_taps", "accounts_engaged", "total_interactions", "profile_views", "reach_followers", "reach_non_followers", "dm_conversations"];
-const POST_COLS = ["id", "brand", "published_at", "type", "caption", "permalink", "reach", "views", "likes", "comments", "saved", "shares", "avg_watch_time", "total_watch_time", "duration_sec", "pillar", "cta_type"];
-const CREATIVE_COLS = ["ad_id", "brand", "name", "format", "thumbnail_url", "video_plays", "thru_plays"];
+const IG_DAILY_COLS = ["brand", "date", "followers", "reach", "views", "profile_link_taps", "accounts_engaged", "total_interactions", "profile_views", "reach_followers", "reach_non_followers", "dm_conversations", "follows_day", "unfollows_day", "link_taps_website", "link_taps_whatsapp"];
+const POST_COLS = ["id", "brand", "published_at", "type", "caption", "permalink", "reach", "views", "likes", "comments", "saved", "shares", "avg_watch_time", "total_watch_time", "duration_sec", "pillar", "cta_type", "profile_visits", "follows", "media_url", "thumbnail_url", "is_test"];
+const CREATIVE_COLS = ["ad_id", "brand", "name", "format", "thumbnail_url", "video_plays", "thru_plays", "instagram_media_id", "instagram_permalink"];
 const AD_COLS = ["brand", "date", "ad_id", "campaign", "adset", "objective", "spend", "impressions", "reach", "frequency", "clicks", "leads"];
 const LP_COLS = ["brand", "date", "visits", "clicks", "form_submits"];
 const LEAD_COLS = ["id", "brand", "created_at", "name", "email", "phone", "utm_source", "utm_campaign", "utm_content", "status", "meeting_at", "value", "fbc", "fbp", "ga_client_id", "ga_session_id"];

@@ -1,7 +1,7 @@
 import "server-only";
 import { GRAPH_FB, brandForCampaign, type BrandMeta } from "./config";
 import { graphUrl, isoDaysAgo, isoToday, metaGet } from "./http";
-import { upsertAdDaily, upsertCreatives } from "../data/store";
+import { getData, upsertAdDaily, upsertCreatives } from "../data/store";
 import type { AdDaily, Creative, CreativeFormat } from "../types";
 
 /**
@@ -97,7 +97,12 @@ async function fetchAllPages(firstUrl: string): Promise<InsightRow[]> {
 interface AdCreativeRow {
   id: string;
   name?: string;
-  creative?: { thumbnail_url?: string; object_type?: string };
+  creative?: {
+    thumbnail_url?: string;
+    object_type?: string;
+    effective_instagram_media_id?: string;
+    instagram_permalink_url?: string;
+  };
 }
 
 const FORMAT_BY_OBJECT_TYPE: Record<string, CreativeFormat> = {
@@ -150,28 +155,43 @@ async function fetchAdsetMeta(account: string, token: string) {
   }
 }
 
-/** Thumbnails + format per ad (one extra call, not per-ad). */
+/** Thumbnails + format + mídia do IG por trás do anúncio (one extra call, not per-ad). */
 async function fetchAdCreatives(account: string, token: string) {
   const url = graphUrl(GRAPH_FB, `/${account}/ads`, {
-    fields: "id,name,creative{thumbnail_url,object_type}",
+    fields:
+      "id,name,creative{thumbnail_url,object_type,effective_instagram_media_id,instagram_permalink_url}",
     limit: 500,
     access_token: token,
   });
   try {
-    const page = await metaGet<Paged<AdCreativeRow>>(url);
+    // Paginação igual à do fetchAdsetMeta — acima de 500 ads, a 2ª página
+    // carrega o vínculo com a mídia do IG dos criativos restantes.
+    const rows: AdCreativeRow[] = [];
+    let next: string | undefined = url;
+    let guard = 0;
+    while (next && guard++ < 50) {
+      const page: Paged<AdCreativeRow> = await metaGet<Paged<AdCreativeRow>>(next);
+      rows.push(...(page.data ?? []));
+      next = page.paging?.next;
+    }
     return new Map(
-      (page.data ?? []).map((r) => [
+      rows.map((r) => [
         r.id,
         {
           name: r.name ?? r.id,
           thumbnailUrl: r.creative?.thumbnail_url,
           format: FORMAT_BY_OBJECT_TYPE[r.creative?.object_type ?? ""] ?? undefined,
+          // id da mídia pode divergir entre superfícies (Business vs Instagram
+          // Login) — o permalink é o fallback de match, idêntico nas duas.
+          instagramMediaId: r.creative?.effective_instagram_media_id,
+          instagramPermalink: r.creative?.instagram_permalink_url,
         },
       ]),
     );
   } catch {
-    // thumbnails are a nice-to-have — never fail the whole sync for them
-    return new Map<string, { name: string; thumbnailUrl?: string; format?: CreativeFormat }>();
+    // FALHA (≠ vazio): o caller preserva os metadados já armazenados em vez de
+    // regravar os criativos com null e desfazer o vínculo orgânico<->pago.
+    return null;
   }
 }
 
@@ -234,8 +254,28 @@ export async function syncAdsAccount({
   });
 
   const raw = await fetchAllPages(url);
-  const meta = await fetchAdCreatives(account, token);
+  const creativeMeta = await fetchAdCreatives(account, token); // null = falhou
+  const meta =
+    creativeMeta ??
+    new Map<
+      string,
+      {
+        name: string;
+        thumbnailUrl?: string;
+        format?: CreativeFormat;
+        instagramMediaId?: string;
+        instagramPermalink?: string;
+      }
+    >();
   const adsetMeta = await fetchAdsetMeta(account, token);
+
+  // Metadados já armazenados por criativo: fallback quando a API de creatives
+  // falha (upsert é de linha inteira — sem isso o vínculo IG viraria null).
+  const existingCreatives = new Map<string, Creative>();
+  for (const b of brands) {
+    const d = await getData(b.slug).catch(() => null);
+    for (const c of d?.creatives ?? []) existingCreatives.set(c.adId, c);
+  }
 
   const adRows: AdDaily[] = [];
   const creativeAcc = new Map<string, Creative>();
@@ -277,14 +317,18 @@ export async function syncAdsAccount({
     const thru = sumActions(r.video_thruplay_watched_actions);
     const info = meta.get(adId);
     const prev = creativeAcc.get(adId);
+    const stored = existingCreatives.get(adId);
     creativeAcc.set(adId, {
       adId,
       brand,
       name: info?.name ?? r.ad_name ?? adId,
       format: info?.format ?? (plays > 0 ? "video" : (prev?.format ?? "imagem")),
-      thumbnailUrl: info?.thumbnailUrl ?? prev?.thumbnailUrl,
+      thumbnailUrl: info?.thumbnailUrl ?? prev?.thumbnailUrl ?? stored?.thumbnailUrl,
       videoPlays: (prev?.videoPlays ?? 0) + plays,
       thruPlays: (prev?.thruPlays ?? 0) + thru,
+      instagramMediaId: info?.instagramMediaId ?? prev?.instagramMediaId ?? stored?.instagramMediaId,
+      instagramPermalink:
+        info?.instagramPermalink ?? prev?.instagramPermalink ?? stored?.instagramPermalink,
     });
   }
 

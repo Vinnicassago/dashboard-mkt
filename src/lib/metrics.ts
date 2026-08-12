@@ -981,17 +981,31 @@ export interface PostPerf extends IgPost {
   retention?: number;
   /** CTA efetivo (override manual ou heurística da legenda) */
   cta?: CtaType;
+  /** post IMPULSIONADO: um criativo de anúncio aponta para esta mídia — as
+   *  métricas do post podem incluir entrega paga (fora dos agregados orgânicos) */
+  boosted?: boolean;
 }
 
 /**
  * `igDaily` (opcional) habilita `reachOnBase`: usa o snapshot de seguidores do
  * dia da publicação (ou o último anterior) como denominador.
+ * `creatives` (opcional) habilita `boosted`: post cuja mídia aparece em um
+ * criativo de anúncio (match por effective_instagram_media_id, com o permalink
+ * como fallback — o id pode divergir entre superfícies da API).
+ * Posts de TESTE entram na lista (flagados) — quem agrega/rankeia os exclui.
  */
 export function postPerformance(
   posts: IgPost[],
   range?: DateRange,
   igDaily?: IgAccountDaily[],
+  creatives?: Creative[],
 ): PostPerf[] {
+  const boostedIds = new Set<string>();
+  const boostedPermalinks = new Set<string>();
+  for (const c of creatives ?? []) {
+    if (c.instagramMediaId) boostedIds.add(c.instagramMediaId);
+    if (c.instagramPermalink) boostedPermalinks.add(c.instagramPermalink);
+  }
   const daily = igDaily ? [...igDaily].sort((a, b) => a.date.localeCompare(b.date)) : [];
   const followersAt = (day: string): number | undefined => {
     let found: number | undefined;
@@ -1017,6 +1031,10 @@ export function postPerformance(
         reachOnBase: base && base > 0 ? p.reach / base : undefined,
         retention: reelRetention(p) ?? undefined,
         cta: ctaOf(p),
+        boosted:
+          boostedIds.has(p.id) || (p.permalink !== "" && boostedPermalinks.has(p.permalink))
+            ? true
+            : undefined,
       };
     })
     .sort((a, b) => b.publishedAt.localeCompare(a.publishedAt));
@@ -1044,7 +1062,11 @@ export interface PostAggregate {
   dmCtaShare: number;
 }
 
-export function aggregatePostPerformance(list: PostPerf[]): PostAggregate {
+export function aggregatePostPerformance(input: PostPerf[]): PostAggregate {
+  // Análise ORGÂNICA: posts de teste (validação de gancho) e impulsionados
+  // (entrega paga misturada) ficam fora — é exatamente a leitura enganosa
+  // que o diagnóstico mandou matar.
+  const list = input.filter((p) => !p.isTest && !p.boosted);
   const reach = list.reduce((s, p) => s + p.reach, 0);
   const views = list.reduce((s, p) => s + p.views, 0);
   const saved = list.reduce((s, p) => s + p.saved, 0);
@@ -1121,7 +1143,9 @@ export interface PillarPerf {
 /** Compara os pilares/séries taggeados manualmente (posts sem tag ficam fora). */
 export function pillarPerformance(posts: IgPost[], range?: DateRange): PillarPerf[] {
   const byPillar = new Map<string, IgPost[]>();
-  for (const p of posts.filter((p) => p.pillar && inRange(dayOf(p.publishedAt), range))) {
+  for (const p of posts.filter(
+    (p) => p.pillar && !p.isTest && inRange(dayOf(p.publishedAt), range),
+  )) {
     const list = byPillar.get(p.pillar!) ?? [];
     list.push(p);
     byPillar.set(p.pillar!, list);
@@ -1167,7 +1191,11 @@ export interface ReelWatchPoint {
 export function reelWatchSeries(posts: IgPost[], range?: DateRange): ReelWatchPoint[] {
   const reels = posts
     .filter(
-      (p) => p.type === "reel" && p.avgWatchTime != null && inRange(dayOf(p.publishedAt), range),
+      (p) =>
+        p.type === "reel" &&
+        !p.isTest &&
+        p.avgWatchTime != null &&
+        inRange(dayOf(p.publishedAt), range),
     )
     .sort((a, b) => a.publishedAt.localeCompare(b.publishedAt));
   return reels.map((p, i) => {
@@ -1207,6 +1235,8 @@ export function postingCadence(
   range: DateRange | undefined,
   nowIso: string,
 ): PostingCadence {
+  // Cadência conta TODO post publicado (inclusive testes): mede o ritmo físico
+  // da grade — a exclusão de teste vale para performance, não para frequência.
   const sorted = posts
     .filter((p) => inRange(dayOf(p.publishedAt), range))
     .sort((a, b) => a.publishedAt.localeCompare(b.publishedAt));
@@ -1280,6 +1310,14 @@ export interface IgAccountTotals {
   dmConversations: number;
   /** algum dia da janela tem registro manual de DMs? (sem isso, 0 = "sem dado") */
   hasDmData: boolean;
+  /** crescimento BRUTO no período (follows_and_unfollows): ganho vs churn */
+  followsTotal: number;
+  unfollowsTotal: number;
+  hasFollowSplit: boolean;
+  /** cliques na bio por destino (breakdown contact_button_type) */
+  linkTapsWebsite: number;
+  linkTapsWhatsApp: number;
+  hasLinkTapSplit: boolean;
 }
 
 /** Sum an Instagram account window, reusable for the current and previous period. */
@@ -1321,6 +1359,14 @@ export function igAccountTotals(rows: IgAccountDaily[], range?: DateRange): IgAc
     engagementOnBase: div(div(interactions, days), followersEnd),
     dmConversations: sum((r) => r.dmConversations ?? 0),
     hasDmData: sorted.some((r) => r.dmConversations != null),
+    followsTotal: sum((r) => r.followsDay ?? 0),
+    unfollowsTotal: sum((r) => r.unfollowsDay ?? 0),
+    hasFollowSplit: sorted.some((r) => r.followsDay != null || r.unfollowsDay != null),
+    linkTapsWebsite: sum((r) => r.linkTapsWebsite ?? 0),
+    linkTapsWhatsApp: sum((r) => r.linkTapsWhatsApp ?? 0),
+    hasLinkTapSplit: sorted.some(
+      (r) => r.linkTapsWebsite != null || r.linkTapsWhatsApp != null,
+    ),
   };
 }
 
@@ -1463,7 +1509,7 @@ export interface FormatPerf {
 /** Group posts by format so the planner can compare reel vs carousel vs feed. */
 export function formatPerformance(posts: IgPost[], range?: DateRange): FormatPerf[] {
   const byType = new Map<IgPost["type"], IgPost[]>();
-  for (const p of posts.filter((p) => inRange(dayOf(p.publishedAt), range))) {
+  for (const p of posts.filter((p) => !p.isTest && inRange(dayOf(p.publishedAt), range))) {
     const list = byType.get(p.type) ?? [];
     list.push(p);
     byType.set(p.type, list);
@@ -1518,7 +1564,7 @@ export interface WeekdayPerf {
 /** Average engagement/reach per weekday, to hint the best publishing days. */
 export function weekdayPerformance(posts: IgPost[], range?: DateRange): WeekdayPerf[] {
   const byDay = new Map<number, IgPost[]>();
-  for (const p of posts.filter((p) => inRange(dayOf(p.publishedAt), range))) {
+  for (const p of posts.filter((p) => !p.isTest && inRange(dayOf(p.publishedAt), range))) {
     const wd = new Date(p.publishedAt).getUTCDay();
     const list = byDay.get(wd) ?? [];
     list.push(p);
@@ -1631,20 +1677,28 @@ export function actualForGoal(goal: Goal, data: DashboardData, range?: DateRange
     // ---- metas orgânicas (plano de 90 dias) ----
     // As percentuais devolvem VALOR percentual (40 = 40%) — o alvo é gravado
     // na mesma unidade no GoalsForm, e a exibição usa formatPercentValue.
+    // data.creatives habilita a exclusão de posts impulsionados — mesmas contas
+    // da página Posts, senão a meta leria um universo diferente do painel.
     case "retencao_reels": {
-      const agg = aggregatePostPerformance(postPerformance(data.igPosts, range));
+      const agg = aggregatePostPerformance(
+        postPerformance(data.igPosts, range, undefined, data.creatives),
+      );
       return agg.avgRetention == null ? null : agg.avgRetention * 100;
     }
     case "alcance_base": {
       const agg = aggregatePostPerformance(
-        postPerformance(data.igPosts, range, data.igAccountDaily),
+        postPerformance(data.igPosts, range, data.igAccountDaily, data.creatives),
       );
       return agg.avgReachOnBase == null ? null : agg.avgReachOnBase * 100;
     }
     case "saves_1k":
-      return aggregatePostPerformance(postPerformance(data.igPosts, range)).savesPer1k;
+      return aggregatePostPerformance(
+        postPerformance(data.igPosts, range, undefined, data.creatives),
+      ).savesPer1k;
     case "comentarios_post":
-      return aggregatePostPerformance(postPerformance(data.igPosts, range)).commentsPerPost;
+      return aggregatePostPerformance(
+        postPerformance(data.igPosts, range, undefined, data.creatives),
+      ).commentsPerPost;
     case "posts_semana":
       // updatedAt como "agora": mantém a função pura (só afeta daysSinceLast, não usado aqui)
       return data.igPosts.length === 0

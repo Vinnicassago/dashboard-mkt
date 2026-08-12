@@ -1,6 +1,6 @@
 import "server-only";
 import { GRAPH_IG } from "./config";
-import { graphUrl, metaGet } from "./http";
+import { graphUrl, metaGet, MetaApiError } from "./http";
 import { getData, upsertIgAccountDaily, upsertIgPosts } from "../data/store";
 import type { IgAccountDaily, IgMediaType, IgPost } from "../types";
 
@@ -67,6 +67,17 @@ function readMetric(data: InsightEntry[] | undefined, name: string): number {
   return typeof v === "number" ? v : 0;
 }
 
+/** Como readMetric, mas distingue AUSÊNCIA (undefined) de zero real. */
+function readMetricOpt(data: InsightEntry[] | undefined, name: string): number | undefined {
+  const entry = data?.find((d) => d.name === name);
+  if (!entry) return undefined;
+  if (entry.total_value && typeof entry.total_value.value === "number") {
+    return entry.total_value.value;
+  }
+  const v = entry.values?.[0]?.value;
+  return typeof v === "number" ? v : undefined;
+}
+
 /** Read one dimension of a `total_value.breakdowns` insight (e.g. reach by follow_type). */
 function readBreakdown(
   data: InsightEntry[] | undefined,
@@ -74,9 +85,33 @@ function readBreakdown(
   dimensionValue: string,
 ): number | undefined {
   const results = data?.find((d) => d.name === name)?.total_value?.breakdowns?.[0]?.results;
-  const hit = results?.find((r) => r.dimension_values?.[0] === dimensionValue);
+  const hit = results?.find(
+    (r) => r.dimension_values?.[0]?.toUpperCase() === dimensionValue.toUpperCase(),
+  );
+  if (hit === undefined && results?.length) {
+    // Enum divergente é silencioso demais: loga os valores crus UMA vez por rodada
+    // p/ corrigir as strings (ex. contact_button_type pode não usar WEBSITE/WHATSAPP).
+    console.warn(
+      `[instagram] breakdown ${name}: "${dimensionValue}" não encontrado; recebidos: ${results
+        .map((r) => r.dimension_values?.join("/"))
+        .join(", ")}`,
+    );
+  }
   return typeof hit?.value === "number" ? hit.value : undefined;
 }
+
+/** Throttle NUNCA é engolido: aborta a rodada antes de gravar lixo por cima de
+ *  dado bom; erro de métrica não suportada vira null (o caller usa fallback). */
+function isThrottle(e: unknown): boolean {
+  return (
+    e instanceof MetaApiError &&
+    (e.status === 429 || [4, 17, 32, 613, 80000].includes(e.code ?? -1))
+  );
+}
+const nullUnlessThrottled = (e: unknown): null => {
+  if (isThrottle(e)) throw e;
+  return null;
+};
 
 function dayBounds(isoDate: string): { since: number; until: number } {
   const start = Math.floor(Date.parse(`${isoDate}T00:00:00Z`) / 1000);
@@ -129,6 +164,8 @@ interface MediaRow {
   permalink?: string;
   timestamp?: string;
   is_shared_to_feed?: boolean;
+  media_url?: string;
+  thumbnail_url?: string;
 }
 
 export interface InstagramSyncResult {
@@ -221,7 +258,7 @@ export async function syncInstagram({
 
   for (const date of dates) {
     const { since, until } = dayBounds(date);
-    const [res, pv, rb] = await Promise.all([
+    const [res, pv, rb, fu, lt] = await Promise.all([
       metaGet<InsightsResponse>(
         graphUrl(GRAPH_IG, `/${userId}/insights`, {
           metric: ACCOUNT_METRICS,
@@ -231,7 +268,7 @@ export async function syncInstagram({
           until,
           access_token: token,
         }),
-      ).catch(() => ({ data: [] }) as InsightsResponse),
+      ).catch(nullUnlessThrottled),
       // profile_views isolado de proposito: se estiver indisponivel nesta conta
       // ou versao da API, NAO pode derrubar as metricas centrais ja provadas acima.
       metaGet<InsightsResponse>(
@@ -243,7 +280,7 @@ export async function syncInstagram({
           until,
           access_token: token,
         }),
-      ).catch(() => ({ data: [] }) as InsightsResponse),
+      ).catch(nullUnlessThrottled),
       // alcance dividido em seguidor vs nao-seguidor (descoberta). Tambem isolado:
       // se o breakdown nao existir na conta/versao, nao afeta as metricas acima.
       metaGet<InsightsResponse>(
@@ -256,23 +293,67 @@ export async function syncInstagram({
           until,
           access_token: token,
         }),
-      ).catch(() => ({ data: [] }) as InsightsResponse),
+      ).catch(nullUnlessThrottled),
+      // crescimento BRUTO (seguiu vs deixou de seguir) — exige 100+ seguidores;
+      // isolado: indisponível => campos ficam undefined sem quebrar o resto.
+      metaGet<InsightsResponse>(
+        graphUrl(GRAPH_IG, `/${userId}/insights`, {
+          metric: "follows_and_unfollows",
+          period: "day",
+          metric_type: "total_value",
+          breakdown: "follow_type",
+          since,
+          until,
+          access_token: token,
+        }),
+      ).catch(nullUnlessThrottled),
+      // cliques na bio por tipo de botão (site vs WhatsApp) — também isolado.
+      metaGet<InsightsResponse>(
+        graphUrl(GRAPH_IG, `/${userId}/insights`, {
+          metric: "profile_links_taps",
+          period: "day",
+          metric_type: "total_value",
+          breakdown: "contact_button_type",
+          since,
+          until,
+          access_token: token,
+        }),
+      ).catch(nullUnlessThrottled),
     ]);
 
+    // Request FALHOU (null) => preserva o valor já armazenado do dia; request
+    // ok mas sem a métrica => semântica anterior (0/undefined). Upsert é de
+    // linha inteira nos 3 backends — sem isso, uma falha transitória apagaria
+    // dado bom.
+    const prev = existing.get(date);
     rows.push({
       brand,
       date,
       followers: followerByDate.get(date) ?? followersNow,
-      reach: readMetric(res.data, "reach"),
-      views: readMetric(res.data, "views"),
-      accountsEngaged: readMetric(res.data, "accounts_engaged"),
-      totalInteractions: readMetric(res.data, "total_interactions"),
-      profileLinkTaps: readMetric(res.data, "profile_links_taps"),
-      profileViews: readMetric(pv.data, "profile_views"),
-      reachFollowers: readBreakdown(rb.data, "reach", "FOLLOWER"),
-      reachNonFollowers: readBreakdown(rb.data, "reach", "NON_FOLLOWER"),
+      reach: res ? readMetric(res.data, "reach") : (prev?.reach ?? 0),
+      views: res ? readMetric(res.data, "views") : (prev?.views ?? 0),
+      accountsEngaged: res ? readMetric(res.data, "accounts_engaged") : (prev?.accountsEngaged ?? 0),
+      totalInteractions: res
+        ? readMetric(res.data, "total_interactions")
+        : (prev?.totalInteractions ?? 0),
+      profileLinkTaps: res ? readMetric(res.data, "profile_links_taps") : (prev?.profileLinkTaps ?? 0),
+      profileViews: pv ? readMetric(pv.data, "profile_views") : (prev?.profileViews ?? 0),
+      reachFollowers: rb ? readBreakdown(rb.data, "reach", "FOLLOWER") : prev?.reachFollowers,
+      reachNonFollowers: rb
+        ? readBreakdown(rb.data, "reach", "NON_FOLLOWER")
+        : prev?.reachNonFollowers,
       // registro manual — carregado do dia existente, nunca da API
-      dmConversations: existing.get(date)?.dmConversations,
+      dmConversations: prev?.dmConversations,
+      followsDay: fu ? readBreakdown(fu.data, "follows_and_unfollows", "FOLLOWER") : prev?.followsDay,
+      unfollowsDay: fu
+        ? readBreakdown(fu.data, "follows_and_unfollows", "NON_FOLLOWER")
+        : prev?.unfollowsDay,
+      linkTapsWebsite: lt
+        ? readBreakdown(lt.data, "profile_links_taps", "WEBSITE")
+        : prev?.linkTapsWebsite,
+      linkTapsWhatsApp: lt
+        ? readBreakdown(lt.data, "profile_links_taps", "WHATSAPP")
+        : prev?.linkTapsWhatsApp,
     });
   }
 
@@ -280,17 +361,30 @@ export async function syncInstagram({
 
   // ---- recent media + per-media insights ----
   // NOTE: /media never returns Stories (they live on /stories and vanish in 24h).
-  const media = await metaGet<{ data?: MediaRow[] }>(
-    graphUrl(GRAPH_IG, `/${userId}/media`, {
-      fields:
-        "id,caption,media_type,media_product_type,permalink,timestamp,is_shared_to_feed",
-      limit: postLimit,
-      access_token: token,
-    }),
-  ).catch(() => ({ data: [] }));
+  // Paginação: segue paging.next até juntar `postLimit` mídias (o request traz
+  // até 25 por página) — janelas de 30/90 dias precisam de mais que a 1ª página.
+  const mediaRows: MediaRow[] = [];
+  let mediaUrl: string | undefined = graphUrl(GRAPH_IG, `/${userId}/media`, {
+    fields:
+      "id,caption,media_type,media_product_type,permalink,timestamp,is_shared_to_feed,media_url,thumbnail_url",
+    limit: Math.min(postLimit, 25),
+    access_token: token,
+  });
+  while (mediaUrl && mediaRows.length < postLimit) {
+    const page: { data?: MediaRow[]; paging?: { next?: string } } = await metaGet<{
+      data?: MediaRow[];
+      paging?: { next?: string };
+    }>(mediaUrl).catch(() => ({}));
+    mediaRows.push(...(page.data ?? []));
+    mediaUrl = page.paging?.next;
+    if (!page.data?.length) break;
+  }
 
   const posts: IgPost[] = [];
-  for (const m of media.data ?? []) {
+  // Se a lista estendida falhar uma vez, os posts seguintes já vão direto na
+  // base — evita DOBRAR os requests justamente nas contas que não a suportam.
+  let extendedUnsupported = false;
+  for (const m of mediaRows.slice(0, postLimit)) {
     const type = mediaType(
       m.media_product_type,
       m.media_type,
@@ -300,12 +394,32 @@ export async function syncInstagram({
     const metrics = ["reach", "likes", "comments", "saved", "shares", "views"];
     if (type === "reel") metrics.push("ig_reels_avg_watch_time", "ig_reels_video_view_total_time");
 
-    const ins = await metaGet<InsightsResponse>(
-      graphUrl(GRAPH_IG, `/${m.id}/insights`, {
-        metric: metrics.join(","),
-        access_token: token,
-      }),
-    ).catch(() => ({ data: [] }) as InsightsResponse);
+    // Atribuição por post (visitas ao perfil / follows): historicamente instável
+    // por tipo de mídia e tamanho da conta — tenta a lista estendida e, se o
+    // request inteiro falhar por métrica não suportada, repete com a base.
+    const fetchInsights = (list: string[]) =>
+      metaGet<InsightsResponse>(
+        graphUrl(GRAPH_IG, `/${m.id}/insights`, {
+          metric: list.join(","),
+          access_token: token,
+        }),
+      );
+    let ins: InsightsResponse | null = null;
+    if (!extendedUnsupported) {
+      try {
+        ins = await fetchInsights([...metrics, "profile_visits", "follows"]);
+      } catch (e) {
+        if (isThrottle(e)) throw e;
+        extendedUnsupported = true;
+      }
+    }
+    if (ins === null) ins = await fetchInsights(metrics).catch(nullUnlessThrottled);
+    if (ins === null) {
+      // Insights indisponíveis para esta mídia: mantém o que já está armazenado
+      // (não reescreve o post com zeros); mídia nova sem insights entra zerada.
+      if (existingPosts.has(m.id)) continue;
+      ins = { data: [] };
+    }
 
     const avgWatch = readMetric(ins.data, "ig_reels_avg_watch_time");
     const totalWatchMs = readMetric(ins.data, "ig_reels_video_view_total_time");
@@ -325,10 +439,18 @@ export async function syncInstagram({
       // API reports milliseconds; the dashboard shows seconds
       avgWatchTime: type === "reel" && avgWatch ? Math.round(avgWatch / 100) / 10 : undefined,
       totalWatchTime: type === "reel" && totalWatchMs ? Math.round(totalWatchMs / 1000) : undefined,
+      // atribuição por post — readMetricOpt distingue 0 real de "não exposto";
+      // ausente (fallback na lista base) preserva o valor já armazenado
+      profileVisits:
+        readMetricOpt(ins.data, "profile_visits") ?? existingPosts.get(m.id)?.profileVisits,
+      follows: readMetricOpt(ins.data, "follows") ?? existingPosts.get(m.id)?.follows,
+      mediaUrl: m.media_url,
+      thumbnailUrl: m.thumbnail_url,
       // metadados manuais — preservados do post existente (a API não os tem)
       durationSec: existingPosts.get(m.id)?.durationSec,
       pillar: existingPosts.get(m.id)?.pillar,
       ctaType: existingPosts.get(m.id)?.ctaType,
+      isTest: existingPosts.get(m.id)?.isTest,
     });
   }
 

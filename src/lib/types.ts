@@ -54,6 +54,13 @@ export interface IgAccountDaily {
   /** Conversas de DM iniciadas no dia — registro MANUAL (a API do Instagram não
    *  expõe DMs). É a métrica de negócio do perfil; semanal = soma dos dias. */
   dmConversations?: number;
+  /** Crescimento BRUTO do dia (métrica follows_and_unfollows): quem começou a
+   *  seguir vs quem deixou — o líquido esconde churn. Exige conta 100+. */
+  followsDay?: number;
+  unfollowsDay?: number;
+  /** Cliques no link da bio por tipo de botão (breakdown contact_button_type). */
+  linkTapsWebsite?: number;
+  linkTapsWhatsApp?: number;
 }
 
 export type IgMediaType = "feed" | "carrossel" | "reel" | "story";
@@ -87,6 +94,17 @@ export interface IgPost {
   /** CTA pedido na legenda — override manual; sem ele a heurística de caption
    *  (detectCta em metrics.ts) classifica na leitura. */
   ctaType?: CtaType;
+  /** Visitas ao perfil atribuídas ao post (media insight; instável p/ contas pequenas). */
+  profileVisits?: number;
+  /** Seguidores ganhos atribuídos ao post (media insight; idem). */
+  follows?: number;
+  /** URLs do CDN da Meta — EXPIRAM em dias; o re-sync renova, a UI tolera 404. */
+  mediaUrl?: string;
+  thumbnailUrl?: string;
+  /** Post de TESTE (validação de formato/gancho) — marcado manualmente; fica
+   *  FORA da análise orgânica de performance (agregados, formatos, rankings).
+   *  Conta para a cadência: é uma publicação real no perfil. */
+  isTest?: boolean;
 }
 
 // ------------------------- Paid traffic (Meta Ads) ------------------
@@ -124,6 +142,11 @@ export interface Creative {
   // video engagement (for hook rate / retention study)
   videoPlays?: number; // 3s plays
   thruPlays?: number; // 15s / completed
+  /** Mídia do IG por trás do anúncio (effective_instagram_media_id). Se casa com
+   *  um IgPost da marca → post impulsionado; se não casa → dark post (anúncio
+   *  sem post na grade). O permalink é o fallback de match entre superfícies. */
+  instagramMediaId?: string;
+  instagramPermalink?: string;
 }
 
 // ------------------------- Landing page -----------------------------
