@@ -1341,10 +1341,26 @@ export function igAccountTotals(rows: IgAccountDaily[], range?: DateRange): IgAc
   const interactions = sum((r) => r.totalInteractions);
   const profileLinkTaps = sum((r) => r.profileLinkTaps);
   const profileViews = sum((r) => r.profileViews ?? 0);
-  const reachFollowers = sum((r) => r.reachFollowers ?? 0);
-  const reachNonFollowers = sum((r) => r.reachNonFollowers ?? 0);
-  const hasReachSplit = sorted.some(
-    (r) => r.reachFollowers != null || r.reachNonFollowers != null,
+  /**
+   * Split de alcance seguidor/não-seguidor: só entram os dias com AS DUAS
+   * dimensões. A Meta OMITE a dimensão quando o valor é zero ou pequeno demais
+   * para expor (o log de produção mostrou rodadas devolvendo só NON_FOLLOWER);
+   * somar o lado ausente como 0 faria a taxa de descoberta virar 100% — uma
+   * afirmação forte tirada de um dado que não temos. Sem par completo, o painel
+   * declara "sem dado" via `hasReachSplit: false`.
+   */
+  const diasComSplit = sorted.filter(
+    (r) => r.reachFollowers != null && r.reachNonFollowers != null,
+  );
+  const reachFollowers = diasComSplit.reduce((s, r) => s + (r.reachFollowers ?? 0), 0);
+  const reachNonFollowers = diasComSplit.reduce((s, r) => s + (r.reachNonFollowers ?? 0), 0);
+  const hasReachSplit = diasComSplit.length > 0;
+  // Mesmo critério para os outros dois breakdowns da Meta.
+  const diasComFollowSplit = sorted.filter(
+    (r) => r.followsDay != null && r.unfollowsDay != null,
+  );
+  const diasComLinkSplit = sorted.filter(
+    (r) => r.linkTapsWebsite != null && r.linkTapsWhatsApp != null,
   );
   const followersEnd = sorted.at(-1)?.followers ?? 0;
   const followersStart = sorted[0]?.followers ?? 0;
@@ -1370,14 +1386,14 @@ export function igAccountTotals(rows: IgAccountDaily[], range?: DateRange): IgAc
     engagementOnBase: div(div(interactions, days), followersEnd),
     dmConversations: sum((r) => r.dmConversations ?? 0),
     hasDmData: sorted.some((r) => r.dmConversations != null),
-    followsTotal: sum((r) => r.followsDay ?? 0),
-    unfollowsTotal: sum((r) => r.unfollowsDay ?? 0),
-    hasFollowSplit: sorted.some((r) => r.followsDay != null || r.unfollowsDay != null),
-    linkTapsWebsite: sum((r) => r.linkTapsWebsite ?? 0),
-    linkTapsWhatsApp: sum((r) => r.linkTapsWhatsApp ?? 0),
-    hasLinkTapSplit: sorted.some(
-      (r) => r.linkTapsWebsite != null || r.linkTapsWhatsApp != null,
-    ),
+    // Mesma regra dos dias com split: sem os dois lados, "0 deixaram de seguir"
+    // seria uma afirmação inventada a partir de dimensão omitida pela Meta.
+    followsTotal: diasComFollowSplit.reduce((s, r) => s + (r.followsDay ?? 0), 0),
+    unfollowsTotal: diasComFollowSplit.reduce((s, r) => s + (r.unfollowsDay ?? 0), 0),
+    hasFollowSplit: diasComFollowSplit.length > 0,
+    linkTapsWebsite: diasComLinkSplit.reduce((s, r) => s + (r.linkTapsWebsite ?? 0), 0),
+    linkTapsWhatsApp: diasComLinkSplit.reduce((s, r) => s + (r.linkTapsWhatsApp ?? 0), 0),
+    hasLinkTapSplit: diasComLinkSplit.length > 0,
   };
 }
 
