@@ -13,6 +13,7 @@ import type {
   Lead,
   LeadEvent,
   LeadStatus,
+  PostDraft,
 } from "../types";
 // Mappers COMPARTILHADOS (mesmos do backend Postgres): campo novo entra num
 // lugar só e vale para os dois backends SQL — nunca duplicar mappers aqui.
@@ -24,6 +25,7 @@ import {
   toAd,
   toCampaign,
   toCreative,
+  toDraft,
   toEvent,
   toGoal,
   toIgDaily,
@@ -33,6 +35,7 @@ import {
   fromAd,
   fromCampaign,
   fromCreative,
+  fromDraft,
   fromEvent,
   fromGoal,
   fromIgDaily,
@@ -172,6 +175,33 @@ export const supabaseBackend: DataBackend = {
     check(error, "upsert ig_posts");
     await touch(false);
     return rows.length;
+  },
+
+  async listDrafts(brand: string): Promise<PostDraft[]> {
+    const { data, error } = await supabase()
+      .from("post_drafts")
+      .select("*")
+      .eq("brand", brand)
+      .order("updated_at", { ascending: false });
+    check(error, "list post_drafts");
+    return (data ?? []).map(toDraft);
+  },
+
+  async getDraft(id: string): Promise<PostDraft | null> {
+    const { data } = await supabase().from("post_drafts").select("*").eq("id", id).maybeSingle();
+    return data ? toDraft(data as Row) : null;
+  },
+
+  async upsertDraft(draft: PostDraft) {
+    const { error } = await supabase()
+      .from("post_drafts")
+      .upsert(fromDraft(draft), { onConflict: "id" });
+    check(error, "upsert post_draft");
+  },
+
+  async deleteDraft(id: string) {
+    const { error } = await supabase().from("post_drafts").delete().eq("id", id);
+    check(error, "delete post_draft");
   },
 
   async addLead(lead: Lead) {

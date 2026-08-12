@@ -8,6 +8,7 @@ import type {
   Lead,
   LeadEvent,
   LeadStatus,
+  PostDraft,
 } from "../types";
 import type { Role } from "../auth/roles";
 
@@ -28,6 +29,13 @@ export interface DataBackend {
   clearAdData(): Promise<void>;
   upsertIgAccountDaily(rows: IgAccountDaily[]): Promise<number>;
   upsertIgPosts(rows: IgPost[]): Promise<number>;
+
+  // ---- produção (peças antes de publicar) ----
+  /** Rascunhos de uma marca, mais recentes primeiro. `descartado` inclusive. */
+  listDrafts(brand: string): Promise<PostDraft[]>;
+  getDraft(id: string): Promise<PostDraft | null>;
+  upsertDraft(draft: PostDraft): Promise<void>;
+  deleteDraft(id: string): Promise<void>;
 
   addLead(lead: Lead): Promise<void>;
   setLeadStatus(id: string, status: LeadStatus, meetingAt?: string, value?: number): Promise<void>;
@@ -86,6 +94,13 @@ export const STATE_KEYS = {
    *  Sobrepõem o env (<SLUG>_CAMPAIGN_MATCH) quando presentes. */
   brandCampaignMatch: "brand_campaign_match",
 } as const;
+
+/**
+ * Chave da última análise de IA de uma marca. Fica no state bag (não numa tabela
+ * própria): é UM registro por marca, sobrescrito a cada rodada — histórico de
+ * análises não é requisito, e uma tabela para isso seria peso morto.
+ */
+export const aiAnalysisKey = (brand: string) => `ai_analysis_${brand}`;
 
 export interface StoredToken {
   token: string;

@@ -10,7 +10,8 @@ import { FunnelChart } from "@/components/charts/funnel-chart";
 import { TimeSeriesChart } from "@/components/charts/time-series-chart";
 import { ChartCard } from "@/components/ui/chart-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { getData } from "@/lib/data/store";
+import { getData, getState } from "@/lib/data/store";
+import { aiAnalysisKey } from "@/lib/data/backend";
 import { activeBrandSlug } from "@/lib/active-brand";
 import { brandDef } from "@/lib/brands";
 import { pageRange } from "@/lib/page-range";
@@ -33,8 +34,13 @@ import {
 import { getLastSync } from "@/lib/meta/sync";
 import { buildInsights } from "@/lib/insights";
 import { buildRecommendations, type Recommendation } from "@/lib/recommendations";
-import type { DashboardData } from "@/lib/types";
+import type { AiAnalysis, DashboardData } from "@/lib/types";
 import { RecommendationsCard } from "@/components/kpi/recommendations";
+import { AiAnalysisCard } from "@/components/kpi/ai-analysis";
+import { isAiConfigured } from "@/lib/ai/config";
+import { periodOf } from "@/lib/ai/briefing";
+import { can } from "@/lib/auth/guard";
+import { RANGE_PRESETS } from "@/lib/range";
 import {
   formatCompact,
   formatCurrency,
@@ -75,6 +81,7 @@ const GOAL_LABEL: Record<GoalMetric, string> = {
   alcance_base: "Alcance sobre a base",
   saves_1k: "Salvos / 1k views",
   comentarios_post: "Coment. / post",
+  compartilhamentos_post: "Compart. / post",
   posts_semana: "Posts / semana",
   conversas_dm: "Conversas de DM",
 };
@@ -83,7 +90,12 @@ function goalValueText(metric: GoalMetric, v: number): string {
   if (metric === "cpl" || metric === "cpr" || metric === "spend") return formatCurrency0(v);
   // metas percentuais guardam VALOR percentual (40 = 40%)
   if (metric === "retencao_reels" || metric === "alcance_base") return formatPercentValue(v, 0);
-  if (metric === "saves_1k" || metric === "comentarios_post" || metric === "posts_semana")
+  if (
+    metric === "saves_1k" ||
+    metric === "comentarios_post" ||
+    metric === "compartilhamentos_post" ||
+    metric === "posts_semana"
+  )
     return formatDecimal(v, 1);
   return formatInt(v);
 }
@@ -95,7 +107,22 @@ export default async function OverviewPage({
 }) {
   const brand = brandDef(await activeBrandSlug());
   const data = await getData(brand.slug);
-  const { range } = pageRange(data, (await searchParams).range);
+  const { range, rangeKey } = pageRange(data, (await searchParams).range);
+
+  // Leitura de IA guardada (Etapa 3). Só é buscada e exibida quando a camada de
+  // IA está ligada — sem chave, o card nem existe.
+  const aiEnabled = isAiConfigured();
+  const analysis = aiEnabled ? await getState<AiAnalysis>(aiAnalysisKey(brand.slug)) : null;
+  const canWrite = await can("data:write");
+  const aiCard = aiEnabled ? (
+    <AiAnalysisCard
+      analysis={analysis}
+      rangeKey={rangeKey}
+      rangeLabel={RANGE_PRESETS.find((r) => r.key === rangeKey)?.label ?? "o período"}
+      currentPeriod={periodOf(range)}
+      canWrite={canWrite}
+    />
+  ) : null;
 
   const insights = buildInsights(data, range);
   const recs = buildRecommendations(data, range, new Date().toISOString());
@@ -110,7 +137,7 @@ export default async function OverviewPage({
   // Marca de awareness (krone.capital): visão de crescimento de perfil, não de funil.
   if (brand.type === "awareness") {
     return (
-      <AwarenessOverview data={data} range={range} recs={recs} insights={insights} warnings={warnings} hint={hint} />
+      <AwarenessOverview data={data} range={range} recs={recs} insights={insights} warnings={warnings} hint={hint} aiCard={aiCard} />
     );
   }
 
@@ -172,6 +199,8 @@ export default async function OverviewPage({
           highlight
         />
       </div>
+
+      {aiCard}
 
       {/* Orçamento por objetivo — só aparece quando há gasto de descoberta */}
       {k.hasDiscovery ? (
@@ -356,6 +385,7 @@ function AwarenessOverview({
   insights,
   warnings,
   hint,
+  aiCard,
 }: {
   data: DashboardData;
   range: DateRange | undefined;
@@ -363,6 +393,7 @@ function AwarenessOverview({
   insights: string[];
   warnings: DataWarning[];
   hint: string;
+  aiCard: React.ReactNode;
 }) {
   const a = awarenessKpis(data, range);
   const prevA = range ? awarenessKpis(data, previousRange(range)) : undefined;
@@ -413,6 +444,8 @@ function AwarenessOverview({
           hint="alcance da conta"
         />
       </div>
+
+      {aiCard}
 
       {/* Meta de seguidores */}
       {followersGoal && gp ? (

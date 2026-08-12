@@ -14,6 +14,7 @@ import {
   resyncAdsCleanAction,
   setBrandMatchAction,
   setDmConversationsAction,
+  setPresenceRoutineAction,
   setGoalsAction,
   syncNowAction,
   updatePostsMetaAction,
@@ -211,6 +212,48 @@ export function DmForm() {
   );
 }
 
+// ---- rotina diária de presença -------------------------------------
+
+/**
+ * O trabalho manual que o guia cobra todo dia útil e que nenhuma API expõe:
+ * stories, comentários no nicho, contas seguidas e "respondi tudo". Faz merge no
+ * snapshot do dia — campo em branco preserva o que já estava lá.
+ */
+export function RoutineForm() {
+  const [state, action] = useActionState(setPresenceRoutineAction, null);
+  return (
+    <form action={action} className="space-y-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <Field label="Data">
+          <input type="date" name="date" defaultValue={today()} className={inputCls} required />
+        </Field>
+        <Field label="Stories (meta 3–5)">
+          <input type="number" name="storiesPosted" min="0" className={inputCls} />
+        </Field>
+        <Field label="Destes, interativos (≥1)">
+          <input type="number" name="storiesInteractive" min="0" className={inputCls} />
+        </Field>
+        <Field label="Comentários no nicho (20)">
+          <input type="number" name="nicheComments" min="0" className={inputCls} />
+        </Field>
+        <Field label="Contas seguidas (10–15)">
+          <input type="number" name="accountsFollowed" min="0" className={inputCls} />
+        </Field>
+      </div>
+      <label className="flex items-center gap-2 text-sm">
+        <input type="checkbox" name="repliedAll" className="size-4 rounded border" />
+        Respondi 100% dos comentários e DMs do dia
+      </label>
+      <SubmitButton>Registrar rotina</SubmitButton>
+      <Message state={state} />
+      <p className="text-xs text-muted-foreground">
+        Campo em branco mantém o valor anterior. Precisa existir o snapshot do dia (vem da
+        sincronização do Instagram ou do registro manual acima).
+      </p>
+    </form>
+  );
+}
+
 // ---- conteúdo dos posts (duração de reel, pilar/série, CTA) ---------
 
 export interface PostMetaRow {
@@ -403,6 +446,7 @@ export function GoalsForm({ current }: { current: Partial<Record<string, number>
     { metric: "alcance_base", label: "Alcance sobre a base (%)" },
     { metric: "saves_1k", label: "Salvos por 1k views" },
     { metric: "comentarios_post", label: "Comentários por post" },
+    { metric: "compartilhamentos_post", label: "Compartilhamentos por post" },
     { metric: "posts_semana", label: "Posts por semana" },
     { metric: "conversas_dm", label: "Conversas de DM (período)" },
   ];

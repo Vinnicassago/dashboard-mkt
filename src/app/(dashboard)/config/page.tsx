@@ -1,4 +1,4 @@
-import { Camera, Clapperboard, Database, FileSpreadsheet, Layers, MessageCircle, Plug, Target, UserPlus, Users, UsersRound } from "lucide-react";
+import { CalendarCheck, Camera, Clapperboard, Database, FileSpreadsheet, Layers, MessageCircle, Plug, Target, UserPlus, Users, UsersRound } from "lucide-react";
 import {
   BrandMatchForm,
   DmForm,
@@ -10,6 +10,7 @@ import {
   PostsMetaForm,
   ReclassifyAdsButton,
   ResetButton,
+  RoutineForm,
   SyncPanel,
   type PostMetaRow,
 } from "@/components/config/config-forms";
@@ -409,6 +410,24 @@ export default async function ConfigPage() {
             </CardHeader>
             <CardContent>
               <DmForm />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <CalendarCheck className="size-4 text-primary" />
+                Rotina diária de presença
+              </CardTitle>
+              <CardDescription>
+                Os 15–20 min por dia útil que o guia cobra e que nenhuma API expõe: 3–5 stories
+                (ao menos 1 interativo), 20 comentários em perfis do nicho, responder 100% e
+                seguir 10–15 contas. Sem registro não há como cobrar aderência — nem saber se a
+                base esquentou por causa disso.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <RoutineForm />
             </CardContent>
           </Card>
 

@@ -16,6 +16,7 @@ import type {
   Lead,
   LeadEvent,
   LeadStatus,
+  PostDraft,
 } from "../types";
 
 /**
@@ -32,6 +33,8 @@ interface LocalFile {
   state: Record<string, unknown>;
   users: StoredUser[];
   leadEvents: LeadEvent[];
+  /** Peças em produção — fora de `data` porque não são dados de campanha. */
+  drafts: PostDraft[];
 }
 
 let cache: LocalFile | null = null;
@@ -68,6 +71,8 @@ function load(): LocalFile {
       if (parsed?.data?.campaign) {
         if (!Array.isArray(parsed.users)) parsed.users = [];
         if (!Array.isArray(parsed.leadEvents)) parsed.leadEvents = [];
+        // Arquivos criados antes da Etapa 1 não têm a chave.
+        if (!Array.isArray(parsed.drafts)) parsed.drafts = [];
         migrateBrand(parsed.data);
         return parsed;
       }
@@ -81,6 +86,7 @@ function load(): LocalFile {
     state: {},
     users: [],
     leadEvents: buildSeedLeadEvents(data.leads),
+    drafts: [],
   };
   persist(fresh);
   return fresh;
@@ -120,16 +126,42 @@ export const localBackend: DataBackend = {
   },
 
   async resetToSeed() {
-    // keep users and the state bag — only the dashboard data goes back to seed
+    // keep users, drafts and the state bag — só os dados de campanha voltam ao
+    // seed (rascunho é trabalho de produção, não dado de exemplo)
     const data = buildSeedData();
     cache = {
       data,
       state: file().state,
       users: file().users,
       leadEvents: buildSeedLeadEvents(data.leads),
+      drafts: file().drafts,
     };
     persist(cache);
     return cache.data;
+  },
+
+  async listDrafts(brand: string) {
+    return file()
+      .drafts.filter((d) => d.brand === brand)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  },
+
+  async getDraft(id: string) {
+    return file().drafts.find((d) => d.id === id) ?? null;
+  },
+
+  async upsertDraft(draft: PostDraft) {
+    const f = file();
+    f.drafts = [draft, ...f.drafts.filter((d) => d.id !== draft.id)];
+    persist(f);
+    cache = f;
+  },
+
+  async deleteDraft(id: string) {
+    const f = file();
+    f.drafts = f.drafts.filter((d) => d.id !== id);
+    persist(f);
+    cache = f;
   },
 
   async upsertAdDaily(rows: AdDaily[]) {

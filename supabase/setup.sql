@@ -242,3 +242,46 @@ alter table goals             enable row level security;
 alter table app_state         enable row level security;
 alter table app_users         enable row level security;
 alter table lead_events       enable row level security;
+
+-- ---------------------------------------------------------------------------
+-- Etapa 1 (produção): peças ANTES de publicar. O painel só conhecia post já
+-- publicado (vindo da API); sem esta tabela não há o que validar contra o guia.
+-- Espelha `src/lib/db/schema.ts` — mantenha os dois em sincronia.
+create table if not exists post_drafts (
+  id text primary key,
+  brand text not null default 'consorcio',
+  status text not null default 'rascunho',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  planned_for date,
+  type text not null default 'reel',
+  pillar text,
+  hook_text text not null default '',
+  hook_spoken text not null default '',
+  promise text,
+  script text not null default '',
+  caption text not null default '',
+  cta_type text,
+  cta_keyword text,
+  duration_sec numeric,
+  has_burned_captions boolean not null default false,
+  score numeric,
+  validated_at timestamptz,
+  playbook_version text,
+  published_post_id text,
+  notes text,
+  ai_review jsonb,
+  validation_failed jsonb
+);
+
+create index if not exists post_drafts_planned_idx on post_drafts (brand, planned_for);
+
+alter table post_drafts enable row level security;
+
+-- Etapa 4: loop fechado e rotina diária de presença.
+alter table post_drafts      add column if not exists validation_failed jsonb;
+alter table ig_account_daily add column if not exists stories_posted integer;
+alter table ig_account_daily add column if not exists stories_interactive integer;
+alter table ig_account_daily add column if not exists niche_comments integer;
+alter table ig_account_daily add column if not exists accounts_followed integer;
+alter table ig_account_daily add column if not exists replied_all boolean;

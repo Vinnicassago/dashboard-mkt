@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { navForType } from "./nav-items";
+import { navForBrand } from "./nav-items";
 import type { BrandDef } from "@/lib/brands";
 import { cn } from "@/lib/utils";
 
@@ -18,7 +18,7 @@ function brandSubtitle(brand: BrandDef): string {
 
 export function Sidebar({ brand }: { brand: BrandDef }) {
   const pathname = usePathname();
-  const nav = navForType(brand.type);
+  const nav = navForBrand(brand);
 
   return (
     <aside className="hidden w-60 shrink-0 flex-col border-r bg-card md:flex">
@@ -74,7 +74,7 @@ export function MobileNav({ brand }: { brand: BrandDef }) {
 
   return (
     <nav className="flex gap-1 overflow-x-auto border-b bg-card px-3 py-2 [scrollbar-width:none] md:hidden [&::-webkit-scrollbar]:hidden">
-      {navForType(brand.type).map((item) => {
+      {navForBrand(brand).map((item) => {
         const active = isActive(pathname, item.href);
         return (
           <Link

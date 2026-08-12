@@ -10,12 +10,24 @@ import {
   formatPerformance,
   overviewKpis,
   postPerformance,
+  inRange,
   postingCadence,
   previousRange,
   type DateRange,
 } from "./metrics";
 import { isAwareness } from "./brands";
-import { formatCompact, formatCurrency, formatCurrency0, formatInt, formatPercent } from "./format";
+// A régua editorial mora no playbook (o guia como código) — nunca hardcode aqui.
+import { DM_MAX_SHARE, PILARES_PROIBIDOS, REEL, ROTINA_DIARIA, WEEKLY_MIX } from "./content/playbook";
+import { presenceRoutine } from "./content/outcomes";
+import {
+  formatCompact,
+  formatCurrency,
+  formatCurrency0,
+  formatDateShort,
+  formatDecimal,
+  formatInt,
+  formatPercent,
+} from "./format";
 
 /**
  * Motor de "Próximas ações": transforma os números em decisões priorizadas
@@ -190,22 +202,27 @@ function buildOrganicContentRecommendations(
     }
   }
 
-  // 3. Reels longos demais (média): o diagnóstico pede ≤25s até a retenção subir.
-  const longReels = posts.filter(
-    (p) => p.type === "reel" && p.durationSec != null && p.durationSec > 30,
+  // 3. Reels longos demais. O guia separa dois patamares: acima de 25s sai do
+  //    padrão (aviso); acima de 30s é "Nunca mais" (alta) até a retenção subir.
+  const overSoft = posts.filter(
+    (p) => p.type === "reel" && p.durationSec != null && p.durationSec > REEL.maxDurationSec,
   );
-  if (longReels.length > 0) {
-    const maxDur = Math.max(...longReels.map((p) => p.durationSec ?? 0));
+  const overHard = overSoft.filter((p) => (p.durationSec ?? 0) > REEL.hardMaxDurationSec);
+  if (overSoft.length > 0) {
+    const maxDur = Math.max(...overSoft.map((p) => p.durationSec ?? 0));
     recs.push({
       id: "reels-too-long",
-      severity: "media",
-      title: "Encurte os reels para até 25s",
-      detail: `${formatInt(longReels.length)} reel(s) do período acima de 30s (maior: ${formatInt(maxDur)}s). Nos seus dados, reels curtos retêm ~2× mais — corte a introdução e entre direto no conflito.`,
+      severity: overHard.length > 0 ? "alta" : "media",
+      title: `Encurte os reels para até ${REEL.maxDurationSec}s`,
+      detail:
+        overHard.length > 0
+          ? `${formatInt(overHard.length)} reel(s) acima de ${REEL.hardMaxDurationSec}s (maior: ${formatInt(maxDur)}s) — é o limite que o guia proíbe. Formato longo só quando a retenção média passar de 40%.`
+          : `${formatInt(overSoft.length)} reel(s) do período acima de ${REEL.maxDurationSec}s (maior: ${formatInt(maxDur)}s). Corte a introdução e entre direto no conflito.`,
     });
   }
 
   // 4. CTA de DM em excesso (média): pedir DM em tudo mata comentário/salvamento.
-  if (posts.length >= 4 && agg.dmCtaShare > 0.25) {
+  if (posts.length >= 4 && agg.dmCtaShare > DM_MAX_SHARE) {
     recs.push({
       id: "cta-dm-excess",
       severity: "media",
@@ -215,7 +232,7 @@ function buildOrganicContentRecommendations(
   }
 
   // 5. Card de frase na grade (baixa): pior formato do perfil, com folga.
-  const frasePosts = posts.filter((p) => p.pillar && /frase|motivacional/i.test(p.pillar));
+  const frasePosts = posts.filter((p) => p.pillar && PILARES_PROIBIDOS.test(p.pillar));
   if (frasePosts.length > 0) {
     recs.push({
       id: "pillar-frase",
@@ -225,13 +242,46 @@ function buildOrganicContentRecommendations(
     });
   }
 
-  // 6. Canibalização (baixa): várias peças no mesmo dia competem entre si.
-  if (cadenceInRange.maxSameDay >= 3) {
+  // 6. Canibalização (média): o guia é literal — "nunca 2 peças no mesmo dia".
+  if (cadenceInRange.maxSameDay >= 2) {
     recs.push({
       id: "same-day-pileup",
-      severity: "baixa",
+      severity: "media",
       title: "Espace as publicações (1 por dia)",
-      detail: `${formatInt(cadenceInRange.maxSameDay)} posts num mesmo dia — eles disputam a mesma janela de teste do algoritmo e canibalizam a entrega inicial.`,
+      detail: `${formatInt(cadenceInRange.daysWithPileup)} dia(s) com 2+ peças (pico de ${formatInt(cadenceInRange.maxSameDay)} em ${cadenceInRange.busiestDay ? formatDateShort(cadenceInRange.busiestDay) : "um mesmo dia"}) — elas disputam a mesma janela de teste do algoritmo e canibalizam a entrega inicial.`,
+    });
+  }
+
+  // 6b. Composição da grade (baixa): o guia pede 4 reels + 2 carrosséis/semana.
+  //     Só cobra quando há janela suficiente para a média significar algo.
+  if (cadenceInRange.days >= 7 && cadenceInRange.count > 0) {
+    const faltamReels = WEEKLY_MIX.reels - cadenceInRange.reelsPerWeek;
+    const faltamCarros = WEEKLY_MIX.carrosseis - cadenceInRange.carrosseisPerWeek;
+    if (faltamReels >= 1 || faltamCarros >= 1) {
+      const partes: string[] = [];
+      if (faltamReels >= 1)
+        partes.push(`${formatDecimal(cadenceInRange.reelsPerWeek, 1)} reels/semana (meta ${WEEKLY_MIX.reels})`);
+      if (faltamCarros >= 1)
+        partes.push(`${formatDecimal(cadenceInRange.carrosseisPerWeek, 1)} carrosséis/semana (meta ${WEEKLY_MIX.carrosseis})`);
+      recs.push({
+        id: "grade-composicao",
+        severity: "baixa",
+        title: "Complete a grade da semana",
+        detail: `${partes.join(" · ")}. A grade do guia é 4 reels + 2 carrosséis — é ela que cria hábito e expectativa na base.`,
+      });
+    }
+  }
+
+  // 6c. Rotina de presença (média): "dia útil sem story" é um "Nunca mais", e a
+  //     rotina é o que aquece a base entre um post e outro. Só cobra quando há
+  //     registro — sem dado, o alerta seria sobre a ausência de anotação.
+  const rotina = presenceRoutine(data.igAccountDaily.filter((r) => inRange(r.date, range)));
+  if (rotina.temDados && rotina.diasUteisSemStory > 0) {
+    recs.push({
+      id: "dias-sem-story",
+      severity: "media",
+      title: "Publique stories todo dia útil",
+      detail: `${formatInt(rotina.diasUteisSemStory)} dia(s) útil(eis) sem nenhum story (de ${formatInt(rotina.diasUteis)} registrados). O guia pede ${ROTINA_DIARIA.storiesMin}–${ROTINA_DIARIA.storiesMax} por dia, com ao menos 1 interativo — é o que mantém a base quente entre um post e outro.`,
     });
   }
 

@@ -1220,9 +1220,14 @@ export interface PostingCadence {
   postsPerWeek: number;
   maxGapDays: number; // maior buraco entre publicações consecutivas
   daysSinceLast: number; // dias desde o último post até `nowIso`
-  /** máximo de posts num mesmo dia — 3+ é canibalização (competem entre si) */
+  /** máximo de posts num mesmo dia — 2+ já é canibalização (competem entre si) */
   maxSameDay: number;
   busiestDay?: string; // yyyy-mm-dd do dia com mais posts
+  /** quantos DIAS da janela tiveram 2+ peças (o guia proíbe qualquer um) */
+  daysWithPileup: number;
+  /** composição por formato, normalizada por semana — o guia pede 4 reels + 2 carrosséis */
+  reelsPerWeek: number;
+  carrosseisPerWeek: number;
 }
 
 /**
@@ -1262,23 +1267,29 @@ export function postingCadence(
   }
   let maxSameDay = 0;
   let busiestDay: string | undefined;
+  let daysWithPileup = 0;
   for (const [d, n] of byDay) {
     if (n > maxSameDay) {
       maxSameDay = n;
       busiestDay = d;
     }
+    if (n >= 2) daysWithPileup += 1;
   }
 
+  // janela mínima de 7 dias: 1 post num dia só não vira "7 posts/semana"
+  const weeks = Math.max(days, 7) / 7;
   const daysSinceLast = last ? Math.max(0, daysBetween(last, nowDay)) : 0;
   return {
     count: sorted.length,
     days,
-    // janela mínima de 7 dias: 1 post num dia só não vira "7 posts/semana"
-    postsPerWeek: div(sorted.length, Math.max(days, 7) / 7),
+    postsPerWeek: div(sorted.length, weeks),
     maxGapDays,
     daysSinceLast,
     maxSameDay,
     busiestDay,
+    daysWithPileup,
+    reelsPerWeek: div(sorted.filter((p) => p.type === "reel").length, weeks),
+    carrosseisPerWeek: div(sorted.filter((p) => p.type === "carrossel").length, weeks),
   };
 }
 
@@ -1699,6 +1710,10 @@ export function actualForGoal(goal: Goal, data: DashboardData, range?: DateRange
       return aggregatePostPerformance(
         postPerformance(data.igPosts, range, undefined, data.creatives),
       ).commentsPerPost;
+    case "compartilhamentos_post":
+      return aggregatePostPerformance(
+        postPerformance(data.igPosts, range, undefined, data.creatives),
+      ).sharesPerPost;
     case "posts_semana":
       // updatedAt como "agora": mantém a função pura (só afeta daysSinceLast, não usado aqui)
       return data.igPosts.length === 0

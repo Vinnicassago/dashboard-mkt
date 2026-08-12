@@ -13,6 +13,7 @@ import type {
   Lead,
   LeadEvent,
   LeadStatus,
+  PostDraft,
 } from "../types";
 import {
   FALLBACK_CAMPAIGN,
@@ -21,6 +22,7 @@ import {
   toAd,
   toCampaign,
   toCreative,
+  toDraft,
   toEvent,
   toGoal,
   toIgDaily,
@@ -32,6 +34,7 @@ import {
   fromAd,
   fromCampaign,
   fromCreative,
+  fromDraft,
   fromEvent,
   fromGoal,
   fromIgDaily,
@@ -49,7 +52,7 @@ import {
 
 // Column lists (order matches the from* mapper output keys).
 const CAMPAIGN_COLS = ["id", "brand", "name", "objective", "status", "start_date", "end_date", "budget_total", "daily_budget"];
-const IG_DAILY_COLS = ["brand", "date", "followers", "reach", "views", "profile_link_taps", "accounts_engaged", "total_interactions", "profile_views", "reach_followers", "reach_non_followers", "dm_conversations", "follows_day", "unfollows_day", "link_taps_website", "link_taps_whatsapp"];
+const IG_DAILY_COLS = ["brand", "date", "followers", "reach", "views", "profile_link_taps", "accounts_engaged", "total_interactions", "profile_views", "reach_followers", "reach_non_followers", "dm_conversations", "follows_day", "unfollows_day", "link_taps_website", "link_taps_whatsapp", "stories_posted", "stories_interactive", "niche_comments", "accounts_followed", "replied_all"];
 const POST_COLS = ["id", "brand", "published_at", "type", "caption", "permalink", "reach", "views", "likes", "comments", "saved", "shares", "avg_watch_time", "total_watch_time", "duration_sec", "pillar", "cta_type", "profile_visits", "follows", "media_url", "thumbnail_url", "is_test"];
 const CREATIVE_COLS = ["ad_id", "brand", "name", "format", "thumbnail_url", "video_plays", "thru_plays", "instagram_media_id", "instagram_permalink"];
 const AD_COLS = ["brand", "date", "ad_id", "campaign", "adset", "objective", "spend", "impressions", "reach", "frequency", "clicks", "leads"];
@@ -57,6 +60,7 @@ const LP_COLS = ["brand", "date", "visits", "clicks", "form_submits"];
 const LEAD_COLS = ["id", "brand", "created_at", "name", "email", "phone", "utm_source", "utm_campaign", "utm_content", "status", "meeting_at", "value", "fbc", "fbp", "ga_client_id", "ga_session_id"];
 const GOAL_COLS = ["brand", "metric", "period", "target", "lower_is_better"];
 const EVENT_COLS = ["id", "lead_id", "lead_name", "actor", "action", "from_status", "to_status", "created_at"];
+const DRAFT_COLS = ["id", "brand", "status", "created_at", "updated_at", "planned_for", "type", "pillar", "hook_text", "hook_spoken", "promise", "script", "caption", "cta_type", "cta_keyword", "duration_sec", "has_burned_captions", "score", "validated_at", "playbook_version", "published_post_id", "notes", "ai_review", "validation_failed"];
 
 const withoutPk = (cols: string[], pk: string[]) => cols.filter((c) => !pk.includes(c));
 
@@ -222,6 +226,27 @@ export const postgresBackend: DataBackend = {
     await upsertMany("ig_posts", POST_COLS, rows.map(fromPost), ["id"], withoutPk(POST_COLS, ["id"]));
     await touch(false);
     return rows.length;
+  },
+
+  async listDrafts(brand: string): Promise<PostDraft[]> {
+    const rows = await q(
+      "select * from post_drafts where brand = $1 order by updated_at desc",
+      [brand],
+    );
+    return rows.map(toDraft);
+  },
+
+  async getDraft(id: string): Promise<PostDraft | null> {
+    const rows = await q("select * from post_drafts where id = $1", [id]);
+    return rows[0] ? toDraft(rows[0]) : null;
+  },
+
+  async upsertDraft(draft: PostDraft) {
+    await upsertMany("post_drafts", DRAFT_COLS, [fromDraft(draft)], ["id"], withoutPk(DRAFT_COLS, ["id", "created_at"]));
+  },
+
+  async deleteDraft(id: string) {
+    await run("delete from post_drafts where id = $1", [id]);
   },
 
   async addLead(lead: Lead) {

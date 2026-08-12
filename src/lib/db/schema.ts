@@ -30,6 +30,11 @@ create table if not exists ig_account_daily (
   profile_views integer not null default 0,
   reach_followers integer,
   reach_non_followers integer,
+  stories_posted integer,
+  stories_interactive integer,
+  niche_comments integer,
+  accounts_followed integer,
+  replied_all boolean,
   primary key (brand, date)
 );
 
@@ -137,6 +142,35 @@ create table if not exists lead_events (
   created_at timestamptz not null default now()
 );
 
+create table if not exists post_drafts (
+  id text primary key,
+  brand text not null default 'consorcio',
+  status text not null default 'rascunho',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  planned_for date,
+  type text not null default 'reel',
+  pillar text,
+  hook_text text not null default '',
+  hook_spoken text not null default '',
+  promise text,
+  script text not null default '',
+  caption text not null default '',
+  cta_type text,
+  cta_keyword text,
+  duration_sec numeric,
+  has_burned_captions boolean not null default false,
+  score numeric,
+  validated_at timestamptz,
+  playbook_version text,
+  published_post_id text,
+  notes text,
+  ai_review jsonb,
+  validation_failed jsonb
+);
+
+create index if not exists post_drafts_planned_idx on post_drafts (brand, planned_for);
+
 create index if not exists ad_daily_date_idx on ad_daily (date);
 create index if not exists leads_created_idx on leads (created_at desc);
 create index if not exists ig_posts_pub_idx on ig_posts (published_at desc);
@@ -173,6 +207,18 @@ alter table ig_account_daily add column if not exists link_taps_website integer;
 alter table ig_account_daily add column if not exists link_taps_whatsapp integer;
 alter table creatives add column if not exists instagram_media_id text;
 alter table creatives add column if not exists instagram_permalink text;
+
+-- Etapa 2 da produção: revisão de IA guardada junto do rascunho (bancos criados
+-- na Etapa 1 já têm post_drafts, então o create acima não adiciona a coluna).
+alter table post_drafts add column if not exists ai_review jsonb;
+
+-- Etapa 4: loop fechado (quais regras a peça violou) e rotina diária de presença.
+alter table post_drafts      add column if not exists validation_failed jsonb;
+alter table ig_account_daily add column if not exists stories_posted integer;
+alter table ig_account_daily add column if not exists stories_interactive integer;
+alter table ig_account_daily add column if not exists niche_comments integer;
+alter table ig_account_daily add column if not exists accounts_followed integer;
+alter table ig_account_daily add column if not exists replied_all boolean;
 
 -- Multimarca (krone.capital + consorcio.brunno): carimba cada linha com a marca.
 -- Bancos já existentes recebem a coluna com default 'consorcio' (backfill) e têm

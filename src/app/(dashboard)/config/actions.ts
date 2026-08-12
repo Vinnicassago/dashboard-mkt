@@ -167,6 +167,53 @@ export async function setDmConversationsAction(
   return { ok: true, message: `${count} conversa(s) registrada(s) em ${date}.` };
 }
 
+/**
+ * Registra a rotina diária de presença do guia (stories, comentários no nicho,
+ * contas seguidas, "respondi tudo"). Nada disso vem da API — é o trabalho manual
+ * de aquecer a base, e sem registro não há como cobrar aderência.
+ *
+ * Faz MERGE no snapshot do dia, como o registro de DMs: uma linha só com a
+ * rotina zeraria seguidores/alcance e sujaria todas as séries.
+ */
+export async function setPresenceRoutineAction(
+  _prev: ActionState | null,
+  formData: FormData,
+): Promise<ActionState> {
+  if (!(await can("data:write"))) return DENIED;
+  const date = String(formData.get("date") ?? "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return { ok: false, message: "Informe uma data válida." };
+  }
+  const brand = await activeBrandSlug();
+  const data = await getData(brand);
+  const row = data.igAccountDaily.find((r) => r.date === date);
+  if (!row) {
+    return {
+      ok: false,
+      message: `Sem snapshot do Instagram em ${date}. Registre o snapshot do dia (ou rode a sincronização) e tente de novo.`,
+    };
+  }
+  // Campo em branco fica como estava; "0" é um registro legítimo de zero.
+  const opt = (key: string) => {
+    const raw = formData.get(key);
+    if (raw == null || String(raw).trim() === "") return undefined;
+    const v = Number(raw);
+    return Number.isFinite(v) && v >= 0 ? v : undefined;
+  };
+  await upsertIgAccountDaily([
+    {
+      ...row,
+      storiesPosted: opt("storiesPosted") ?? row.storiesPosted,
+      storiesInteractive: opt("storiesInteractive") ?? row.storiesInteractive,
+      nicheComments: opt("nicheComments") ?? row.nicheComments,
+      accountsFollowed: opt("accountsFollowed") ?? row.accountsFollowed,
+      repliedAll: formData.get("repliedAll") === "on",
+    },
+  ]);
+  revalidateAll();
+  return { ok: true, message: `Rotina de ${date} registrada.` };
+}
+
 const CTA_VALUES: CtaType[] = ["dm", "comentario", "salvamento", "marcacao", "outro"];
 
 /**
@@ -282,6 +329,7 @@ export async function setGoalsAction(
     { metric: "alcance_base" },
     { metric: "saves_1k" },
     { metric: "comentarios_post" },
+    { metric: "compartilhamentos_post" },
     { metric: "posts_semana" },
     { metric: "conversas_dm" },
   ];

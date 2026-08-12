@@ -26,6 +26,7 @@ import type {
   Lead,
   LeadEvent,
   LeadStatus,
+  PostDraft,
 } from "../types";
 import { DEFAULT_BRAND } from "../types";
 
@@ -60,6 +61,13 @@ export const upsertIgAccountDaily = (rows: IgAccountDaily[]) =>
   backend().upsertIgAccountDaily(rows);
 
 export const upsertIgPosts = (rows: IgPost[]) => backend().upsertIgPosts(rows);
+
+// ---- produção (peças antes de publicar) -----------------------------
+
+export const listDrafts = (brand: string = DEFAULT_BRAND) => backend().listDrafts(brand);
+export const getDraft = (id: string) => backend().getDraft(id);
+export const upsertDraft = (draft: PostDraft) => backend().upsertDraft(draft);
+export const deleteDraft = (id: string) => backend().deleteDraft(id);
 
 export const addLead = (lead: Lead) => backend().addLead(lead);
 

@@ -34,6 +34,18 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   admin). Toda mutação chama `can(cap)` de `auth/guard.ts` (modo aberto sem
   `AUTH_SECRET` = tudo liberado). Enforçar SEMPRE no server, não só na UI.
 - **KPIs:** somente em `src/lib/metrics.ts`, funções **puras** (sem I/O). Reutilize-as.
+- **Régua editorial** (`src/lib/content/playbook.ts`): o "Guia de Produção" como código
+  — grade semanal, ≤25s, gancho de 7 palavras, ciclo de CTA, "Nunca mais", metas de
+  90 dias. Fonte ÚNICA: `validator.ts` (pré-publicação) e `recommendations.ts`
+  (pós-publicação) leem dali — nunca hardcode um limite. Guia novo = subir
+  `PLAYBOOK_VERSION` (cada validação grava contra qual régua passou). Só marcas em
+  `hasPlaybook()` têm a página Produção.
+- **Validação de peça** (`content/validator.ts`): função **pura**, roda no servidor e
+  no cliente. `bloqueio` = item do checklist ou "Nunca mais" (não publica);
+  `aviso` = fora do padrão. A nota gravada é sempre recalculada no servidor —
+  o cliente valida só para retorno imediato. Regra que dá para checar
+  mecanicamente fica AQUI; julgamento (gancho cria tensão? soa como anúncio?)
+  fica para a camada de IA (Etapa 2), nunca misturado.
 - **Formatação:** sempre via `src/lib/format.ts` (pt-BR). Para charts, passe o
   **tipo de formato** (`NumFmt`, string) — nunca uma função (fronteira RSC).
 - **Charts (client) recebem props serializáveis.** Server Components não podem

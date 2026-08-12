@@ -14,6 +14,8 @@ import type {
   CampaignStatus,
   Creative,
   CreativeFormat,
+  AiReview,
+  DraftStatus,
   Goal,
   GoalMetric,
   IgAccountDaily,
@@ -24,6 +26,7 @@ import type {
   LeadEventAction,
   LeadStatus,
   LpDaily,
+  PostDraft,
 } from "../types";
 import { DEFAULT_BRAND } from "../types";
 import type { PublicUser, StoredUser } from "./backend";
@@ -97,6 +100,11 @@ export const toIgDaily = (r: Row): IgAccountDaily => ({
   unfollowsDay: r.unfollows_day == null ? undefined : n(r.unfollows_day),
   linkTapsWebsite: r.link_taps_website == null ? undefined : n(r.link_taps_website),
   linkTapsWhatsApp: r.link_taps_whatsapp == null ? undefined : n(r.link_taps_whatsapp),
+  storiesPosted: r.stories_posted == null ? undefined : n(r.stories_posted),
+  storiesInteractive: r.stories_interactive == null ? undefined : n(r.stories_interactive),
+  nicheComments: r.niche_comments == null ? undefined : n(r.niche_comments),
+  accountsFollowed: r.accounts_followed == null ? undefined : n(r.accounts_followed),
+  repliedAll: r.replied_all == null ? undefined : Boolean(r.replied_all),
 });
 
 export const fromIgDaily = (r: IgAccountDaily): Row => ({
@@ -116,6 +124,11 @@ export const fromIgDaily = (r: IgAccountDaily): Row => ({
   unfollows_day: r.unfollowsDay ?? null,
   link_taps_website: r.linkTapsWebsite ?? null,
   link_taps_whatsapp: r.linkTapsWhatsApp ?? null,
+  stories_posted: r.storiesPosted ?? null,
+  stories_interactive: r.storiesInteractive ?? null,
+  niche_comments: r.nicheComments ?? null,
+  accounts_followed: r.accountsFollowed ?? null,
+  replied_all: r.repliedAll ?? null,
 });
 
 export const toPost = (r: Row): IgPost => ({
@@ -290,6 +303,76 @@ export const fromGoal = (g: Goal): Row => ({
   period: g.period,
   target: g.target,
   lower_is_better: g.lowerIsBetter ?? false,
+});
+
+export const toDraft = (r: Row): PostDraft => ({
+  id: s(r.id),
+  brand: brandOf(r.brand),
+  status: s(r.status) as DraftStatus,
+  createdAt: iso(r.created_at),
+  updatedAt: iso(r.updated_at),
+  plannedFor: r.planned_for ? day(r.planned_for) : undefined,
+  type: s(r.type) as IgMediaType,
+  pillar: r.pillar ? s(r.pillar) : undefined,
+  hookText: s(r.hook_text),
+  hookSpoken: s(r.hook_spoken),
+  promise: r.promise ? s(r.promise) : undefined,
+  script: s(r.script),
+  caption: s(r.caption),
+  ctaType: r.cta_type ? (s(r.cta_type) as PostDraft["ctaType"]) : undefined,
+  ctaKeyword: r.cta_keyword ? s(r.cta_keyword) : undefined,
+  durationSec: r.duration_sec == null ? undefined : n(r.duration_sec),
+  hasBurnedCaptions: r.has_burned_captions ? true : undefined,
+  score: r.score == null ? undefined : n(r.score),
+  validatedAt: r.validated_at ? iso(r.validated_at) : undefined,
+  playbookVersion: r.playbook_version ? s(r.playbook_version) : undefined,
+  publishedPostId: r.published_post_id ? s(r.published_post_id) : undefined,
+  notes: r.notes ? s(r.notes) : undefined,
+  // jsonb: o Postgres devolve objeto já parseado; o Supabase idem. String só
+  // aparece se alguém gravou texto na coluna — tolera sem quebrar a leitura.
+  aiReview: parseJson<AiReview>(r.ai_review),
+  validationFailed: parseJson<string[]>(r.validation_failed),
+});
+
+function parseJson<T>(v: unknown): T | undefined {
+  if (v == null) return undefined;
+  if (typeof v === "object") return v as T;
+  if (typeof v === "string") {
+    try {
+      return JSON.parse(v) as T;
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
+export const fromDraft = (d: PostDraft): Row => ({
+  id: d.id,
+  brand: d.brand,
+  status: d.status,
+  created_at: d.createdAt,
+  updated_at: d.updatedAt,
+  planned_for: d.plannedFor ?? null,
+  type: d.type,
+  pillar: d.pillar ?? null,
+  hook_text: d.hookText,
+  hook_spoken: d.hookSpoken,
+  promise: d.promise ?? null,
+  script: d.script,
+  caption: d.caption,
+  cta_type: d.ctaType ?? null,
+  cta_keyword: d.ctaKeyword ?? null,
+  duration_sec: d.durationSec ?? null,
+  has_burned_captions: d.hasBurnedCaptions ?? false,
+  score: d.score ?? null,
+  validated_at: d.validatedAt ?? null,
+  playbook_version: d.playbookVersion ?? null,
+  published_post_id: d.publishedPostId ?? null,
+  notes: d.notes ?? null,
+  // jsonb precisa de string no driver `pg`; o Supabase aceita ambos.
+  ai_review: d.aiReview ? JSON.stringify(d.aiReview) : null,
+  validation_failed: d.validationFailed ? JSON.stringify(d.validationFailed) : null,
 });
 
 export const toStoredUser = (r: Row): StoredUser => ({

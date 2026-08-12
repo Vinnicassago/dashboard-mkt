@@ -61,6 +61,17 @@ export interface IgAccountDaily {
   /** Cliques no link da bio por tipo de botão (breakdown contact_button_type). */
   linkTapsWebsite?: number;
   linkTapsWhatsApp?: number;
+  // ---- rotina diária de presença (registro MANUAL — a API não expõe nada disto) ----
+  /** Stories publicados no dia (o guia pede 3–5). */
+  storiesPosted?: number;
+  /** Destes, quantos eram interativos: enquete, quiz, caixinha (o guia pede ≥1). */
+  storiesInteractive?: number;
+  /** Comentários feitos em perfis do nicho (o guia pede 20/dia). */
+  nicheComments?: number;
+  /** Contas do nicho seguidas no dia (o guia pede 10–15). */
+  accountsFollowed?: number;
+  /** Respondeu 100% dos comentários e DMs do dia? */
+  repliedAll?: boolean;
 }
 
 export type IgMediaType = "feed" | "carrossel" | "reel" | "story";
@@ -105,6 +116,153 @@ export interface IgPost {
    *  FORA da análise orgânica de performance (agregados, formatos, rankings).
    *  Conta para a cadência: é uma publicação real no perfil. */
   isTest?: boolean;
+}
+
+// ------------------------- Produção (pré-publicação) ----------------
+
+/**
+ * Estágio de uma peça antes (e depois) de ir ao ar. `publicado` é terminal e
+ * carrega `publishedPostId` — é o vínculo que fecha o loop entre o que foi
+ * planejado e o que a API do Instagram devolveu.
+ */
+export type DraftStatus = "rascunho" | "aprovado" | "publicado" | "descartado";
+
+/**
+ * Uma peça EM PRODUÇÃO — o que o painel não conhecia até aqui. `IgPost` só
+ * existe depois que a Meta devolve; sem esta entidade não há o que validar
+ * antes de publicar, nem como medir aderência à grade do guia.
+ *
+ * Os campos espelham o "Padrão de reel" e o "Checklist antes de publicar":
+ * gancho falado e escrito são campos separados porque o guia trata os dois como
+ * obrigações distintas ("gancho falado + escrito ao mesmo tempo nos 2 primeiros
+ * segundos"), e sem separá-los não dá para validar as 7 palavras do texto de tela.
+ */
+export interface PostDraft {
+  id: string;
+  brand: Brand;
+  status: DraftStatus;
+  createdAt: string; // ISO completo
+  updatedAt: string; // ISO completo
+  /** Dia planejado de publicação (yyyy-mm-dd) — casa com a grade semanal. */
+  plannedFor?: string;
+  type: IgMediaType;
+  /** Série/pilar do guia ("Simulação da semana", "Mito ou verdade", "Bastidor"). */
+  pillar?: string;
+  /** Texto de tela do gancho — máx. 7 palavras. */
+  hookText: string;
+  /** Gancho FALADO: a 1ª frase, a que passa no teste do áudio. */
+  hookSpoken: string;
+  /** 2ª frase: a promessa do que a pessoa leva (seg. 2–5). */
+  promise?: string;
+  /** Roteiro do reel ou os slides do carrossel (um por linha). */
+  script: string;
+  /** Legenda como vai ao ar (a 1ª linha precisa sobreviver ao "… mais"). */
+  caption: string;
+  ctaType?: CtaType;
+  /** Palavra-chave do CTA de comentário ("SIMULA") — vira automação na Fase 3. */
+  ctaKeyword?: string;
+  /** Duração planejada em segundos (reels). */
+  durationSec?: number;
+  /** Legenda embutida no vídeo inteiro (85% assistem no mudo). */
+  hasBurnedCaptions?: boolean;
+  /** Nota da última validação (0–100) e quando ela rodou. */
+  score?: number;
+  validatedAt?: string;
+  /**
+   * Ids das regras que a peça violou na última validação (`gancho`, `duracao`,
+   * `cta-da-vez`, …). Guardado como SNAPSHOT porque a validação é contextual —
+   * "única peça do dia" e "CTA da vez" dependem do que mais existia na época.
+   * Revalidar um rascunho antigo daria outra resposta; é isto que permite
+   * perguntar depois "violar esta regra custou alcance?".
+   */
+  validationFailed?: string[];
+  /** Versão do guia contra a qual a peça foi validada (a régua evolui). */
+  playbookVersion?: string;
+  /** Id do IgPost publicado a partir deste rascunho — fecha o loop (Etapa 4). */
+  publishedPostId?: string;
+  /** Anotações livres da produção (não vão para a legenda). */
+  notes?: string;
+  /** Última revisão de IA (Etapa 2). Conselho, nunca veredito — quem bloqueia
+   *  a publicação é o validador determinístico. */
+  aiReview?: AiReview;
+}
+
+/** Um julgamento da IA sobre um critério que regex não consegue avaliar. */
+export interface AiJudgement {
+  /** Passou no critério? */
+  ok: boolean;
+  /** Por quê, em uma frase, citando o texto da peça. */
+  porque: string;
+}
+
+/** Reescrita de gancho proposta pela IA, usando um molde do banco do guia. */
+export interface AiHookSuggestion {
+  /** `key` de um molde de `HOOK_MOLDS` (caso-cliente, pergunta-real, …). */
+  molde: string;
+  /** Texto de tela — precisa caber em 7 palavras. */
+  textoDeTela: string;
+  /** Gancho falado (1ª frase). */
+  falado: string;
+}
+
+/**
+ * Resultado da revisão de IA. Só carrega JULGAMENTO — nada que o validador
+ * determinístico já resolve, e nenhum número calculado pelo modelo.
+ */
+export interface AiReview {
+  /** Veredito editorial: publica, ajusta o que foi apontado, ou refaz o gancho. */
+  veredito: "aprova" | "ajusta" | "refaz";
+  /** Resumo em uma frase, na voz de quem edita o perfil. */
+  resumo: string;
+  /** O gancho soa como áudio de WhatsApp (ok) ou como locutor de anúncio? */
+  testeDoAudio: AiJudgement;
+  /** Cria tensão ou apenas anuncia o tema? */
+  ganchoCriaTensao: AiJudgement;
+  /** A 2ª frase promete algo concreto que a pessoa leva? */
+  promessaConcreta: AiJudgement;
+  /** O número é uma conta de verdade ou enfeite? */
+  numeroEspecifico: AiJudgement;
+  /** O último segundo volta ao gancho (gera replay)? */
+  fechaEmReplay: AiJudgement;
+  /** Três reescritas do gancho usando os moldes do banco. */
+  ganchosAlternativos: AiHookSuggestion[];
+  // ---- proveniência (a UI mostra; sem isto o conselho vira "verdade") ----
+  modelo: string;
+  criadoEm: string; // ISO
+  playbookVersion: string;
+}
+
+// ------------------------- Análise de IA (Etapa 3) ------------------
+
+/** Uma ação priorizada. `comoMedir` é o que separa conselho de palpite. */
+export interface AiAction {
+  prioridade: "alta" | "media" | "baixa";
+  /** A ação, começando por verbo. */
+  titulo: string;
+  /** O número do período que justifica a ação. */
+  porque: string;
+  /** O que olhar, e quando, para saber se funcionou. */
+  comoMedir: string;
+}
+
+/**
+ * Leitura do período escrita pela IA a partir do briefing numérico. Guardada no
+ * `app_state` por marca — não é recalculada a cada render (chamada custa).
+ */
+export interface AiAnalysis {
+  /** O que aconteceu no período, em 2–4 frases. */
+  diagnostico: string;
+  /** Três ações priorizadas. */
+  acoes: AiAction[];
+  /** A hipótese a testar na próxima semana. */
+  testarNaSemana: string;
+  /** O que NÃO mudou apesar do esforço — o ponto cego do painel. */
+  naoMudou: string;
+  // ---- proveniência ----
+  modelo: string;
+  criadoEm: string; // ISO
+  /** Período que a análise cobriu — para a UI avisar quando está velha. */
+  periodo: { de: string; ate: string };
 }
 
 // ------------------------- Paid traffic (Meta Ads) ------------------
@@ -219,6 +377,7 @@ export type GoalMetric =
   | "alcance_base" // alcance sobre a base por post, em VALOR percentual (35 = 35%)
   | "saves_1k" // salvamentos por mil views
   | "comentarios_post" // comentários por post
+  | "compartilhamentos_post" // compartilhamentos por post
   | "posts_semana" // posts por semana
   | "conversas_dm"; // conversas de DM iniciadas no período (registro manual)
 
