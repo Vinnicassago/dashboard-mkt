@@ -153,7 +153,9 @@ export interface ComercialRow {
   telefone: string | null;
   email: string | null;
   score: number | null;
+  saudacao_em: string | null;
   transferido_em: string | null;
+  minutos_ate_transferencia: number | null;
   briefing: string | null;
   transcricao: string | null;
   abordado_em: string | null;
@@ -170,6 +172,7 @@ export interface ComercialKpis {
   taxa_abordagem: number | null;
   minutos_medios_ate_abordagem: number | null;
   pior_tempo_minutos: number | null;
+  minutos_medios_ate_transferencia: number | null;
   reunioes_marcadas: number;
   reunioes_realizadas: number;
   negocios_fechados: number;
