@@ -4,7 +4,7 @@ import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Download, Mail, MessageCircle, Search, Trash2 } from "lucide-react";
 import { DataTable, type Column } from "@/components/ui/data-table";
-import { StatusSelect, statusMeta, statusOrder } from "@/components/tables/lead-status";
+import { statusMeta } from "@/components/tables/lead-status";
 import { deleteLeadAction } from "@/app/(dashboard)/funil/actions";
 import type { LeadStatus } from "@/lib/types";
 import { formatDateTime } from "@/lib/format";
@@ -112,15 +112,6 @@ function buildColumns(canEdit: boolean): Column<LeadDirectoryRow>[] {
       sortable: true,
       sortValue: (r) => r.creativeName,
       render: (r) => <span className="text-muted-foreground">{r.creativeName}</span>,
-    },
-    {
-      key: "status",
-      header: "Status",
-      sortable: true,
-      sortValue: (r) => statusOrder[r.status],
-      render: (r) => (
-        <StatusSelect id={r.id} name={r.name} status={r.status} canEdit={canEdit} />
-      ),
     },
     {
       key: "createdAt",
