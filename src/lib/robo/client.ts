@@ -144,3 +144,68 @@ export async function getTransferidos(desde?: string, ate?: string): Promise<num
   if (!data) return null;
   return (data as { transferidos: number }[]).reduce((a, d) => a + (d.transferidos ?? 0), 0);
 }
+
+// ---------------------------------------------------------------- comercial
+
+export interface ComercialRow {
+  session_id: string;
+  nome: string | null;
+  telefone: string | null;
+  email: string | null;
+  score: number | null;
+  transferido_em: string | null;
+  briefing: string | null;
+  transcricao: string | null;
+  abordado_em: string | null;
+  reuniao_marcada: "sim" | "nao" | null;
+  reuniao_realizada: "sim" | "nao" | null;
+  negocio_fechado: "sim" | "nao" | null;
+  obs_comercial: string | null;
+  minutos_ate_abordagem: number | null;
+}
+
+export interface ComercialKpis {
+  transferidos: number;
+  abordados: number;
+  taxa_abordagem: number | null;
+  minutos_medios_ate_abordagem: number | null;
+  pior_tempo_minutos: number | null;
+  reunioes_marcadas: number;
+  reunioes_realizadas: number;
+  negocios_fechados: number;
+  aguardando_abordagem: number;
+}
+
+export async function getComercial(): Promise<{
+  rows: ComercialRow[];
+  kpis: ComercialKpis | null;
+}> {
+  if (!isRoboConfigured()) return { rows: [], kpis: null };
+  const sb = client();
+  const [rows, kpis] = await Promise.all([
+    sb.from("vw_robo_comercial").select("*").order("transferido_em", { ascending: false }),
+    sb.from("vw_robo_comercial_kpis").select("*").maybeSingle(),
+  ]);
+  return {
+    rows: (rows.data as ComercialRow[]) ?? [],
+    kpis: (kpis.data as ComercialKpis) ?? null,
+  };
+}
+
+/** Campos que o painel pode alterar no acompanhamento comercial. */
+export type ComercialPatch = Partial<{
+  abordado_em: string | null;
+  reuniao_marcada: string | null;
+  reuniao_realizada: string | null;
+  negocio_fechado: string | null;
+  obs_comercial: string | null;
+}>;
+
+export async function updateComercial(sessionId: string, patch: ComercialPatch) {
+  if (!isRoboConfigured()) throw new Error("Robô não configurado.");
+  const { error } = await client()
+    .from("Leads WhatsApp")
+    .update(patch)
+    .eq("Session_id", sessionId);
+  if (error) throw new Error(error.message);
+}
