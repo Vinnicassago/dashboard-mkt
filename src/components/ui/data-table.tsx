@@ -86,7 +86,7 @@ export function DataTable<T>({
                   type="button"
                   onClick={() => toggle(c.key)}
                   className={cn(
-                    "inline-flex items-center gap-1 hover:text-foreground",
+                    "inline-flex items-center gap-1 uppercase hover:text-foreground",
                     c.align === "right" && "flex-row-reverse",
                     sortKey === c.key && "text-foreground",
                   )}
