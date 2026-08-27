@@ -1,7 +1,6 @@
-import { Bot, MessageSquare, Timer, Gauge, ShieldAlert } from "lucide-react";
+import { Handshake, Timer, CalendarCheck, Trophy, AlertCircle } from "lucide-react";
 import { KpiCard } from "@/components/kpi/kpi-card";
-import { FunnelChart } from "@/components/charts/funnel-chart";
-import { MotivosTable, PendentesTable } from "@/components/robo/robo-tables";
+import { ComercialTable } from "@/components/robo/comercial-table";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
   Card,
@@ -11,189 +10,100 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { formatInt, formatPercentValue } from "@/lib/format";
-import { getRoboSnapshot } from "@/lib/robo/client";
-import type { FunnelStage } from "@/lib/metrics";
-import { getData } from "@/lib/data/store";
-import { activeBrandSlug } from "@/lib/active-brand";
-import { pageRange } from "@/lib/page-range";
+import { getComercial } from "@/lib/robo/client";
+import { can } from "@/lib/auth/guard";
 
 export const dynamic = "force-dynamic";
 
-function horas(n: number | null): string {
-  if (n == null) return "—";
-  if (n < 1) return `${Math.round(n * 60)} min`;
-  return `${n.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} h`;
+/** 135 → "2 h 15 min" */
+function duracao(min: number | null): string {
+  if (min == null) return "—";
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return m ? `${h} h ${m} min` : `${h} h`;
 }
 
-export default async function RoboPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ range?: string }>;
-}) {
-  // mesmo seletor de período das outras abas
-  const data = await getData(await activeBrandSlug());
-  const { range } = pageRange(data, (await searchParams).range);
-
-  const { kpis, diario, motivos, saude, pendentes } = await getRoboSnapshot(range?.from);
+export default async function ComercialPage() {
+  const { rows, kpis } = await getComercial();
+  const canEdit = await can("leads:write");
 
   if (!kpis) {
     return (
       <EmptyState
         title="Robô não conectado"
-        hint="Defina ROBO_SUPABASE_URL e ROBO_SUPABASE_KEY nas variáveis de ambiente para ver o atendimento automático aqui."
+        hint="Defina ROBO_SUPABASE_URL e ROBO_SUPABASE_KEY nas variáveis de ambiente para acompanhar o atendimento aqui."
       />
     );
   }
 
-  const noPeriodo = diario.reduce((a, d) => a + (d.transferidos ?? 0), 0);
-  const responderam = kpis.leads_total - kpis.nao_responderam;
-  const convidados = kpis.convite_pendente + kpis.declinaram + kpis.transferidos;
-
-  const funil: FunnelStage[] = [
-    { key: "leads", label: "Chegaram pela LP", value: kpis.leads_total },
-    {
-      key: "responderam",
-      label: "Responderam",
-      value: responderam,
-      fromPrev: kpis.leads_total ? responderam / kpis.leads_total : 0,
-    },
-    {
-      key: "convidados",
-      label: "Receberam convite",
-      value: convidados,
-      fromPrev: responderam ? convidados / responderam : 0,
-    },
-    {
-      key: "transferidos",
-      label: "Transferidos",
-      value: kpis.transferidos,
-      fromPrev: convidados ? kpis.transferidos / convidados : 0,
-    },
-  ];
-
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4 xl:grid-cols-5">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-5">
         <KpiCard
-          label="Transferidos ao especialista"
-          value={formatInt(noPeriodo)}
-          Icon={Bot}
-          hint="no período"
-          highlight
-          spark={diario.map((d) => d.transferidos)}
+          label="Leads recebidos"
+          value={formatInt(kpis.transferidos)}
+          Icon={Handshake}
+          hint="transferidos pelo robô"
         />
         <KpiCard
-          label="Responderam a saudação"
-          value={formatPercentValue(kpis.taxa_resposta)}
-          Icon={MessageSquare}
-          hint={`${formatInt(responderam)} de ${formatInt(kpis.leads_total)}`}
+          label="Já abordados"
+          value={formatPercentValue(kpis.taxa_abordagem)}
+          Icon={CalendarCheck}
+          hint={`${formatInt(kpis.abordados)} de ${formatInt(kpis.transferidos)}`}
         />
         <KpiCard
-          label="Aceitaram o convite"
-          value={formatPercentValue(kpis.taxa_aceite_convite)}
-          Icon={Gauge}
-          hint="dos que foram convidados"
-        />
-        <KpiCard
-          label="Score médio"
-          value={kpis.score_medio?.toString() ?? "—"}
-          Icon={Gauge}
-          hint={`transferidos: ${kpis.score_medio_transferidos ?? "—"}`}
-        />
-        <KpiCard
-          label="Tempo até transferir"
-          value={horas(kpis.horas_medias_ate_transferir)}
+          label="Tempo até o 1º contato"
+          value={duracao(kpis.minutos_medios_ate_abordagem)}
           Icon={Timer}
-          hint={`${kpis.turnos_medios_ate_transferir ?? "—"} turnos em média`}
+          hint={`pior caso: ${duracao(kpis.pior_tempo_minutos)}`}
+          highlight
+        />
+        <KpiCard
+          label="Reuniões realizadas"
+          value={formatInt(kpis.reunioes_realizadas)}
+          Icon={CalendarCheck}
+          hint={`${formatInt(kpis.reunioes_marcadas)} marcadas`}
+        />
+        <KpiCard
+          label="Negócios fechados"
+          value={formatInt(kpis.negocios_fechados)}
+          Icon={Trophy}
+          highlight
         />
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Do lead ao especialista</CardTitle>
-          <CardDescription>
-            O que aconteceu depois que o lead preencheu a landing page. Cada etapa mostra a
-            conversão da anterior.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <FunnelChart stages={funil} />
-        </CardContent>
-      </Card>
-
-      {pendentes.length > 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Aguardando resposta ao convite ({pendentes.length})</CardTitle>
-            <CardDescription>
-              O robô ofereceu falar com o especialista e o lead não respondeu. São os
-              contatos mais quentes parados — vale um toque manual.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <PendentesTable rows={pendentes} />
+      {kpis.aguardando_abordagem > 0 ? (
+        <Card className="border-[var(--warning)]/40">
+          <CardContent className="flex items-start gap-3 p-5">
+            <AlertCircle className="mt-0.5 size-4 shrink-0 text-[var(--warning-text)]" />
+            <p className="text-sm">
+              <span className="font-medium">
+                {formatInt(kpis.aguardando_abordagem)} lead
+                {kpis.aguardando_abordagem > 1 ? "s" : ""} esperando o primeiro contato.
+              </span>{" "}
+              <span className="text-muted-foreground">
+                São leads que já autorizaram a conversa. Responder rápido é o que mais
+                aumenta o agendamento.
+              </span>
+            </p>
           </CardContent>
         </Card>
       ) : null}
 
       <Card>
         <CardHeader>
-          <CardTitle>Onde cada grupo parou</CardTitle>
+          <CardTitle>Atendimento ({rows.length})</CardTitle>
           <CardDescription>
-            A decisão que o robô registrou no último turno de cada lead. Score baixo com
-            muitos turnos costuma indicar pergunta que não gera sinal.
+            Cada lead que o robô qualificou e passou ao especialista. O tempo até o
+            primeiro contato começa a contar na transferência e para quando &ldquo;Abordado&rdquo;
+            vira Sim.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <MotivosTable rows={motivos} />
+          <ComercialTable rows={rows} canEdit={canEdit} />
         </CardContent>
       </Card>
-
-      {saude ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <ShieldAlert className="size-4 text-muted-foreground" />
-              Saúde do robô
-            </CardTitle>
-            <CardDescription>
-              Respostas que os filtros de conformidade precisaram corrigir antes de enviar,
-              e mensagens que chegaram sem identificação.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-            <div>
-              <p className="text-xs text-muted-foreground">Respostas enviadas</p>
-              <p className="mt-1 text-2xl font-semibold tabular">
-                {formatInt(saude.respostas_robo)}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Corrigidas pelo filtro</p>
-              <p className="mt-1 text-2xl font-semibold tabular">
-                {formatPercentValue(saude.taxa_bloqueio)}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {formatInt(saude.respostas_bloqueadas)} respostas
-              </p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Convite fora de hora</p>
-              <p className="mt-1 text-2xl font-semibold tabular">
-                {formatInt(saude.bloq_convite + saude.convite_removido)}
-              </p>
-              <p className="text-xs text-muted-foreground">removido antes de enviar</p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Sem identificação</p>
-              <p className="mt-1 text-2xl font-semibold tabular">
-                {formatInt(saude.pendencias_identidade)}
-              </p>
-              <p className="text-xs text-muted-foreground">leads a reconciliar</p>
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
     </div>
   );
 }
