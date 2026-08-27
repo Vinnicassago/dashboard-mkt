@@ -1,8 +1,7 @@
 import { Bot, MessageSquare, Timer, Gauge, ShieldAlert } from "lucide-react";
 import { KpiCard } from "@/components/kpi/kpi-card";
 import { FunnelChart } from "@/components/charts/funnel-chart";
-import { DataTable, type Column } from "@/components/ui/data-table";
-import { Badge } from "@/components/ui/badge";
+import { MotivosTable, PendentesTable } from "@/components/robo/robo-tables";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
   Card,
@@ -12,7 +11,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { formatInt, formatPercentValue } from "@/lib/format";
-import { getRoboSnapshot, type RoboMotivo, type RoboPendente } from "@/lib/robo/client";
+import { getRoboSnapshot } from "@/lib/robo/client";
 import type { FunnelStage } from "@/lib/metrics";
 import { getData } from "@/lib/data/store";
 import { activeBrandSlug } from "@/lib/active-brand";
@@ -20,29 +19,10 @@ import { pageRange } from "@/lib/page-range";
 
 export const dynamic = "force-dynamic";
 
-const ETAPA_LABEL: Record<string, string> = {
-  nao_respondeu: "Não respondeu",
-  em_conversa: "Em conversa",
-  convite_pendente: "Convite pendente",
-  declinou: "Declinou",
-  frio: "Frio",
-  transferido: "Transferido",
-};
-
 function horas(n: number | null): string {
   if (n == null) return "—";
   if (n < 1) return `${Math.round(n * 60)} min`;
   return `${n.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} h`;
-}
-
-function quando(iso: string | null): string {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString("pt-BR", {
-    day: "2-digit",
-    month: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 export default async function RoboPage({
@@ -91,76 +71,6 @@ export default async function RoboPage({
     },
   ];
 
-  const colunasMotivo: Column<RoboMotivo>[] = [
-    {
-      key: "etapa",
-      header: "Etapa",
-      render: (r) => (
-        <Badge variant={r.etapa === "transferido" ? "good" : "muted"}>
-          {ETAPA_LABEL[r.etapa] ?? r.etapa}
-        </Badge>
-      ),
-    },
-    { key: "motivo", header: "Decisão do robô", render: (r) => r.motivo },
-    {
-      key: "leads",
-      header: "Leads",
-      align: "right",
-      sortable: true,
-      sortValue: (r) => r.leads,
-      render: (r) => formatInt(r.leads),
-    },
-    {
-      key: "score",
-      header: "Score médio",
-      align: "right",
-      sortable: true,
-      sortValue: (r) => r.score_medio ?? 0,
-      render: (r) => r.score_medio ?? "—",
-    },
-    {
-      key: "turnos",
-      header: "Turnos",
-      align: "right",
-      render: (r) => r.turnos_medios ?? "—",
-    },
-  ];
-
-  const colunasPendente: Column<RoboPendente>[] = [
-    { key: "nome", header: "Lead", render: (r) => r.nome ?? "—" },
-    {
-      key: "telefone",
-      header: "WhatsApp",
-      render: (r) =>
-        r.telefone ? (
-          <a
-            href={`https://wa.me/${r.telefone}`}
-            target="_blank"
-            rel="noreferrer"
-            className="text-primary hover:underline"
-          >
-            {r.telefone}
-          </a>
-        ) : (
-          "—"
-        ),
-    },
-    {
-      key: "score",
-      header: "Score",
-      align: "right",
-      sortable: true,
-      sortValue: (r) => r.score ?? 0,
-      render: (r) => r.score ?? "—",
-    },
-    {
-      key: "ultima",
-      header: "Última mensagem",
-      align: "right",
-      render: (r) => quando(r.ultima_interacao),
-    },
-  ];
-
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4 xl:grid-cols-5">
@@ -202,7 +112,7 @@ export default async function RoboPage({
         <CardHeader>
           <CardTitle>Do lead ao especialista</CardTitle>
           <CardDescription>
-            O que aconteceu depois que o lead preencheu a landing page. Cada etapa é a
+            O que aconteceu depois que o lead preencheu a landing page. Cada etapa mostra a
             conversão da anterior.
           </CardDescription>
         </CardHeader>
@@ -221,12 +131,7 @@ export default async function RoboPage({
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <DataTable
-              columns={colunasPendente}
-              rows={pendentes}
-              rowKey={(r, i) => r.telefone ?? String(i)}
-              initialSortKey="score"
-            />
+            <PendentesTable rows={pendentes} />
           </CardContent>
         </Card>
       ) : null}
@@ -240,13 +145,7 @@ export default async function RoboPage({
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <DataTable
-            columns={colunasMotivo}
-            rows={motivos}
-            rowKey={(r, i) => `${r.etapa}-${i}`}
-            initialSortKey="leads"
-            emptyTitle="Nenhuma conversa ainda"
-          />
+          <MotivosTable rows={motivos} />
         </CardContent>
       </Card>
 
