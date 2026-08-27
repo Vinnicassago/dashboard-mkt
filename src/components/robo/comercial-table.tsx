@@ -15,7 +15,9 @@ export interface ComercialTableRow {
   telefone: string | null;
   email: string | null;
   score: number | null;
+  saudacao_em: string | null;
   transferido_em: string | null;
+  minutos_ate_transferencia: number | null;
   briefing: string | null;
   transcricao: string | null;
   abordado_em: string | null;
@@ -28,13 +30,18 @@ export interface ComercialTableRow {
 
 type CampoDecisao = "reuniao_marcada" | "reuniao_realizada" | "negocio_fechado";
 
-/** 135 → "2 h 15 min" */
+/** 135 → "2 h 15 min"; acima de um dia mostra "2 d 3 h". */
 function duracao(min: number | null): string {
   if (min == null) return "—";
   if (min < 60) return `${min} min`;
   const h = Math.floor(min / 60);
-  const m = min % 60;
-  return m ? `${h} h ${m} min` : `${h} h`;
+  if (h < 24) {
+    const m = min % 60;
+    return m ? `${h} h ${m} min` : `${h} h`;
+  }
+  const d = Math.floor(h / 24);
+  const hr = h % 24;
+  return hr ? `${d} d ${hr} h` : `${d} d`;
 }
 
 function Contato({ row }: { row: ComercialTableRow }) {
@@ -292,6 +299,17 @@ export function ComercialTable({
 
   const columns: Column<ComercialTableRow>[] = [
     {
+      key: "saudacao",
+      header: "Contato robô",
+      sortable: true,
+      sortValue: (r) => r.saudacao_em ?? "",
+      render: (r) => (
+        <span className="whitespace-nowrap text-muted-foreground">
+          {r.saudacao_em ? formatDateTime(r.saudacao_em) : "—"}
+        </span>
+      ),
+    },
+    {
       key: "nome",
       header: "Nome",
       sortable: true,
@@ -303,6 +321,18 @@ export function ComercialTable({
             transferido {r.transferido_em ? formatDateTime(r.transferido_em) : "—"}
           </span>
         </div>
+      ),
+    },
+    {
+      key: "ate_transferencia",
+      header: "Tempo até transferência",
+      align: "right",
+      sortable: true,
+      sortValue: (r) => r.minutos_ate_transferencia ?? Number.MAX_SAFE_INTEGER,
+      render: (r) => (
+        <span className={cn("whitespace-nowrap", r.minutos_ate_transferencia == null && "text-muted-foreground")}>
+          {duracao(r.minutos_ate_transferencia)}
+        </span>
       ),
     },
     { key: "contato", header: "Contato", render: (r) => <Contato row={r} /> },
