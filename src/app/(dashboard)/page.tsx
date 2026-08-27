@@ -41,7 +41,7 @@ import { AiAnalysisCard } from "@/components/kpi/ai-analysis";
 import { isAiConfigured } from "@/lib/ai/config";
 import { periodOf } from "@/lib/ai/briefing";
 import { can } from "@/lib/auth/guard";
-import { RANGE_PRESETS } from "@/lib/range";
+import { rangeLabel } from "@/lib/range";
 import {
   formatCompact,
   formatCurrency,
@@ -123,7 +123,7 @@ export default async function OverviewPage({
     <AiAnalysisCard
       analysis={analysis}
       rangeKey={rangeKey}
-      rangeLabel={RANGE_PRESETS.find((r) => r.key === rangeKey)?.label ?? "o período"}
+      rangeLabel={rangeLabel(rangeKey)}
       currentPeriod={periodOf(range)}
       canWrite={canWrite}
     />
