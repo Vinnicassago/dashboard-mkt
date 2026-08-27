@@ -7,6 +7,7 @@ import {
   FileText,
   Filter,
   Users,
+  Bot,
   Link2,
   Settings,
   type LucideIcon,
@@ -34,6 +35,7 @@ export const NAV: NavItem[] = [
   { label: "Posts", href: "/posts", Icon: FileText },
   { label: "Funil & LP", href: "/funil", Icon: Filter, conversaoOnly: true },
   { label: "Leads", href: "/leads", Icon: Users, conversaoOnly: true },
+  { label: "Robô", href: "/robo", Icon: Bot, conversaoOnly: true },
   { label: "UTMs", href: "/utm", Icon: Link2, conversaoOnly: true },
   { label: "Importar / Config", href: "/config", Icon: Settings },
 ];
