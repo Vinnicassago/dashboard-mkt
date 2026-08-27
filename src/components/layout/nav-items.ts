@@ -8,6 +8,7 @@ import {
   Filter,
   Users,
   Bot,
+  Handshake,
   Link2,
   Settings,
   type LucideIcon,
@@ -36,6 +37,7 @@ export const NAV: NavItem[] = [
   { label: "Funil & LP", href: "/funil", Icon: Filter, conversaoOnly: true },
   { label: "Leads", href: "/leads", Icon: Users, conversaoOnly: true },
   { label: "Robô", href: "/robo", Icon: Bot, conversaoOnly: true },
+  { label: "Atendimento Comercial", href: "/comercial", Icon: Handshake, conversaoOnly: true },
   { label: "UTMs", href: "/utm", Icon: Link2, conversaoOnly: true },
   { label: "Importar / Config", href: "/config", Icon: Settings },
 ];
