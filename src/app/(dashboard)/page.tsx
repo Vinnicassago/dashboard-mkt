@@ -15,6 +15,7 @@ import { aiAnalysisKey } from "@/lib/data/backend";
 import { activeBrandSlug } from "@/lib/active-brand";
 import { brandDef } from "@/lib/brands";
 import { pageRange } from "@/lib/page-range";
+import { getTransferidos } from "@/lib/robo/client";
 import {
   actualForGoal,
   awarenessKpis,
@@ -109,6 +110,10 @@ export default async function OverviewPage({
   const data = await getData(brand.slug);
   const { range, rangeKey } = pageRange(data, (await searchParams).range);
 
+  // Leads que o robô do WhatsApp qualificou e passou ao especialista no período.
+  // Null quando o robô não está configurado — aí o card mantém o valor do store.
+  const transferidos = await getTransferidos(range?.from, range?.to);
+
   // Leitura de IA guardada (Etapa 3). Só é buscada e exibida quando a camada de
   // IA está ligada — sem chave, o card nem existe.
   const aiEnabled = isAiConfigured();
@@ -183,11 +188,11 @@ export default async function OverviewPage({
           hint={hint}
         />
         <KpiCard
-          label="Reuniões agendadas"
-          value={formatInt(k.meetings)}
+          label={transferidos == null ? "Reuniões agendadas" : "Transferidos ao especialista"}
+          value={formatInt(transferidos ?? k.meetings)}
           Icon={CalendarCheck}
-          delta={makeDelta(k.meetings, prev?.meetings, true)}
-          hint={hint}
+          delta={transferidos == null ? makeDelta(k.meetings, prev?.meetings, true) : undefined}
+          hint={transferidos == null ? hint : "leads quentes entregues pelo robô"}
           highlight
         />
         <KpiCard
