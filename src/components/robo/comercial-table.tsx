@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { MessageCircle, Mail, X } from "lucide-react";
+import { MessageCircle, Mail, X, FileText } from "lucide-react";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { Badge } from "@/components/ui/badge";
 import { salvarComercial } from "@/app/(dashboard)/comercial/actions";
@@ -30,6 +30,17 @@ export interface ComercialTableRow {
 
 type CampoDecisao = "reuniao_marcada" | "reuniao_realizada" | "negocio_fechado";
 
+/** 27/08 12:47 — data curta, para a linha não crescer. */
+function quandoCurto(iso: string | null): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 /** 135 → "2 h 15 min"; acima de um dia mostra "2 d 3 h". */
 function duracao(min: number | null): string {
   if (min == null) return "—";
@@ -47,7 +58,7 @@ function duracao(min: number | null): string {
 function Contato({ row }: { row: ComercialTableRow }) {
   if (!row.telefone && !row.email) return <span className="text-muted-foreground">—</span>;
   return (
-    <div className="flex flex-col gap-0.5">
+    <div className="flex flex-col gap-0.5 whitespace-nowrap">
       {row.telefone ? (
         <a
           href={`https://wa.me/${row.telefone}`}
@@ -72,29 +83,28 @@ function Contato({ row }: { row: ComercialTableRow }) {
   );
 }
 
-/** Trecho curto + "ver mais", que abre o texto inteiro numa camada por cima. */
+/** Botão compacto que abre o texto inteiro numa camada por cima. */
 function TextoLongo({
+  rotulo,
   titulo,
   texto,
   onAbrir,
 }: {
+  rotulo: string;
   titulo: string;
   texto: string | null;
   onAbrir: (t: { titulo: string; texto: string }) => void;
 }) {
   if (!texto) return <span className="text-muted-foreground">—</span>;
-  const resumo = texto.replace(/\n+/g, " · ").slice(0, 60);
   return (
-    <div className="max-w-[16rem]">
-      <p className="truncate text-xs text-muted-foreground">{resumo}</p>
-      <button
-        type="button"
-        onClick={() => onAbrir({ titulo, texto })}
-        className="text-xs text-primary hover:underline"
-      >
-        ver mais
-      </button>
-    </div>
+    <button
+      type="button"
+      onClick={() => onAbrir({ titulo, texto })}
+      className="inline-flex items-center gap-1 whitespace-nowrap rounded-md border px-2 py-1 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary"
+    >
+      <FileText className="size-3.5" />
+      {rotulo}
+    </button>
   );
 }
 
@@ -263,7 +273,7 @@ function Observacao({
   }
 
   return (
-    <div className="flex w-[14rem] flex-col gap-1">
+    <div className="flex w-52 flex-col gap-1">
       <textarea
         value={texto}
         rows={2}
@@ -305,7 +315,7 @@ export function ComercialTable({
       sortValue: (r) => r.saudacao_em ?? "",
       render: (r) => (
         <span className="whitespace-nowrap text-muted-foreground">
-          {r.saudacao_em ? formatDateTime(r.saudacao_em) : "—"}
+          {quandoCurto(r.saudacao_em)}
         </span>
       ),
     },
@@ -314,23 +324,19 @@ export function ComercialTable({
       header: "Nome",
       sortable: true,
       sortValue: (r) => r.nome ?? "",
-      render: (r) => (
-        <div className="flex flex-col">
-          <span className="font-medium">{r.nome ?? "—"}</span>
-          <span className="text-[11px] text-muted-foreground">
-            transferido {r.transferido_em ? formatDateTime(r.transferido_em) : "—"}
-          </span>
-        </div>
-      ),
+      render: (r) => <span className="font-medium whitespace-nowrap">{r.nome ?? "—"}</span>,
     },
     {
       key: "ate_transferencia",
-      header: "Tempo até transferência",
+      header: "Até transferir",
       align: "right",
       sortable: true,
       sortValue: (r) => r.minutos_ate_transferencia ?? Number.MAX_SAFE_INTEGER,
       render: (r) => (
-        <span className={cn("whitespace-nowrap", r.minutos_ate_transferencia == null && "text-muted-foreground")}>
+        <span
+          title={r.transferido_em ? `Transferido em ${formatDateTime(r.transferido_em)}` : undefined}
+          className={cn("whitespace-nowrap", r.minutos_ate_transferencia == null && "text-muted-foreground")}
+        >
           {duracao(r.minutos_ate_transferencia)}
         </span>
       ),
@@ -341,6 +347,7 @@ export function ComercialTable({
       header: "Contexto",
       render: (r) => (
         <TextoLongo
+          rotulo="Contexto"
           titulo={`Contexto — ${r.nome ?? "lead"}`}
           texto={r.briefing}
           onAbrir={setModal}
@@ -352,6 +359,7 @@ export function ComercialTable({
       header: "Transcrição",
       render: (r) => (
         <TextoLongo
+          rotulo="Conversa"
           titulo={`Conversa — ${r.nome ?? "lead"}`}
           texto={r.transcricao}
           onAbrir={setModal}
@@ -367,7 +375,7 @@ export function ComercialTable({
     },
     {
       key: "tempo",
-      header: "Tempo até 1º contato",
+      header: "Até 1º contato",
       align: "right",
       sortable: true,
       sortValue: (r) => r.minutos_ate_abordagem ?? Number.MAX_SAFE_INTEGER,
@@ -421,7 +429,7 @@ export function ComercialTable({
     },
     {
       key: "obs",
-      header: "Descrição adicional",
+      header: "Anotações",
       render: (r) => (
         <Observacao sessionId={r.session_id} valor={r.obs_comercial} canEdit={canEdit} />
       ),
