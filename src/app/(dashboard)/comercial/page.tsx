@@ -1,4 +1,4 @@
-import { Handshake, Timer, CalendarCheck, Trophy, AlertCircle } from "lucide-react";
+import { Handshake, Timer, CalendarCheck, Trophy, AlertCircle, Bot } from "lucide-react";
 import { KpiCard } from "@/components/kpi/kpi-card";
 import { ComercialTable } from "@/components/robo/comercial-table";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -15,13 +15,18 @@ import { can } from "@/lib/auth/guard";
 
 export const dynamic = "force-dynamic";
 
-/** 135 → "2 h 15 min" */
+/** 135 → "2 h 15 min"; acima de um dia mostra "2 d 3 h". */
 function duracao(min: number | null): string {
   if (min == null) return "—";
   if (min < 60) return `${min} min`;
   const h = Math.floor(min / 60);
-  const m = min % 60;
-  return m ? `${h} h ${m} min` : `${h} h`;
+  if (h < 24) {
+    const m = min % 60;
+    return m ? `${h} h ${m} min` : `${h} h`;
+  }
+  const d = Math.floor(h / 24);
+  const hr = h % 24;
+  return hr ? `${d} d ${hr} h` : `${d} d`;
 }
 
 export default async function ComercialPage() {
@@ -39,7 +44,7 @@ export default async function ComercialPage() {
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-5">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-6">
         <KpiCard
           label="Leads recebidos"
           value={formatInt(kpis.transferidos)}
@@ -58,6 +63,12 @@ export default async function ComercialPage() {
           Icon={Timer}
           hint={`pior caso: ${duracao(kpis.pior_tempo_minutos)}`}
           highlight
+        />
+        <KpiCard
+          label="Robô até transferir"
+          value={duracao(kpis.minutos_medios_ate_transferencia)}
+          Icon={Bot}
+          hint="da saudação ao aceite"
         />
         <KpiCard
           label="Reuniões realizadas"
