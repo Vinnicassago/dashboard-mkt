@@ -16,8 +16,16 @@ import type {
   IgAccountDaily,
   IgPost,
   Lead,
+  LeadStatus,
 } from "./types";
 import { isAwareness } from "./brands";
+import {
+  LEAD_STATUS_META,
+  LOST_STATUSES,
+  type LossKind,
+  isBookedStatus,
+  isLostStatus,
+} from "./lead-status";
 
 // ---- date helpers ---------------------------------------------------
 
@@ -338,18 +346,48 @@ export function objectiveBreakdown(data: DashboardData, range?: DateRange): Obje
 
 // ---- meetings (from the leads list) --------------------------------
 
-/** Teve reunião marcada (agendou, compareceu ou já virou cliente). */
-export function isBooked(l: Lead): boolean {
-  return l.status === "agendou" || l.status === "compareceu" || l.status === "cliente";
+/**
+ * O FATO: este lead chegou a marcar uma reunião, em algum momento.
+ *
+ * Lê o marco (`bookedAt`), não o status atual. É a diferença entre "onde o lead
+ * está agora" e "o que aconteceu com ele" — e é o que impede que registrar uma
+ * perda apague uma reunião que existiu. O fallback pelo status cobre as linhas
+ * gravadas antes da migração de marcos (0012), para nenhuma reunião sumir
+ * enquanto o backfill não roda.
+ */
+export function everBooked(l: Lead): boolean {
+  return Boolean(l.bookedAt) || isBookedStatus(l.status);
 }
 
-/** Compareceu à reunião (inclui quem virou cliente). */
+/**
+ * A reunião que conta para o CPR — o fato, filtrado pela POLÍTICA.
+ *
+ * Desistência sai do denominador: quem agendou e desistiu antes de fechar não
+ * é uma reunião que a mídia deva levar crédito (ver CLAUDE.md). A diferença em
+ * relação à régua antiga é que isso agora é uma regra explícita aplicada sobre
+ * um fato preservado, e não o efeito colateral de o status ter sido
+ * sobrescrito — quem virou `contato_invalido`, `sem_resposta` ou
+ * `sem_interesse` DEPOIS de ter reunião continua contando, como sempre deveria.
+ * A perda aparece na quebra de `lossBreakdown`, não sumindo do CPR.
+ */
+export function isBooked(l: Lead): boolean {
+  return everBooked(l) && l.status !== "desistencia";
+}
+
+/** Compareceu à reunião (inclui quem virou cliente). Mesma política do `isBooked`. */
 export function isAttended(l: Lead): boolean {
-  return l.status === "compareceu" || l.status === "cliente";
+  const fact =
+    Boolean(l.attendedAt) || l.status === "reuniao_realizada" || l.status === "cliente";
+  return fact && l.status !== "desistencia";
 }
 
 export function isClient(l: Lead): boolean {
-  return l.status === "cliente";
+  return Boolean(l.closedAt) || l.status === "cliente";
+}
+
+/** Encerrado como perda, por qualquer um dos quatro motivos. */
+export function isLost(l: Lead): boolean {
+  return isLostStatus(l.status);
 }
 
 export function countMeetings(leads: Lead[]): number {
@@ -367,6 +405,54 @@ export function countClients(leads: Lead[]): number {
 /** Receita atribuída = soma do valor das cartas dos clientes. */
 export function sumRevenue(leads: Lead[]): number {
   return leads.filter(isClient).reduce((s, l) => s + (l.value ?? 0), 0);
+}
+
+export function countLost(leads: Lead[]): number {
+  return leads.filter(isLost).length;
+}
+
+export interface LossRow {
+  status: LeadStatus;
+  label: string;
+  kind: LossKind;
+  count: number;
+  /** Fatia sobre o total de perdas do período (0–1). */
+  share: number;
+}
+
+/**
+ * Quebra das perdas por motivo — a leitura que separa problema de MÍDIA de
+ * problema de PITCH. Muita perda por `qualidade` (contato inválido, sem
+ * resposta) acusa segmentação/formulário; muita por `decisao` (não tem
+ * interesse, desistência) acusa a oferta. Retorna sempre os quatro motivos,
+ * inclusive os zerados, para a tabela não mudar de tamanho entre períodos.
+ */
+export function lossBreakdown(leads: Lead[]): LossRow[] {
+  const counts = new Map<LeadStatus, number>();
+  for (const l of leads) {
+    if (isLost(l)) counts.set(l.status, (counts.get(l.status) ?? 0) + 1);
+  }
+  const total = [...counts.values()].reduce((s, n) => s + n, 0);
+  return LOST_STATUSES.map((status) => {
+    const count = counts.get(status) ?? 0;
+    return {
+      status,
+      label: LEAD_STATUS_META[status].label,
+      kind: LEAD_STATUS_META[status].lossKind as LossKind,
+      count,
+      share: div(count, total),
+    };
+  }).sort((a, b) => b.count - a.count);
+}
+
+/** Perdas somadas por origem do problema — mídia (`qualidade`) vs oferta (`decisao`). */
+export function lossByKind(leads: Lead[]): Record<LossKind, number> {
+  const out: Record<LossKind, number> = { qualidade: 0, decisao: 0 };
+  for (const l of leads) {
+    const meta = LEAD_STATUS_META[l.status];
+    if (meta.lost && meta.lossKind) out[meta.lossKind] += 1;
+  }
+  return out;
 }
 
 /** custo por reunião agendada (North Star) */
@@ -399,7 +485,7 @@ export function buildFunnel(data: DashboardData, range?: DateRange): FunnelStage
     { key: "cliques", label: "Cliques", value: clicks, fromPrev: div(clicks, impressions) },
     { key: "leads", label: "Leads", value: leadCount, fromPrev: div(leadCount, clicks) },
     { key: "reunioes", label: "Reuniões", value: meetings, fromPrev: div(meetings, leadCount) },
-    { key: "compareceu", label: "Compareceu", value: attended, fromPrev: div(attended, meetings) },
+    { key: "compareceu", label: "Reunião realizada", value: attended, fromPrev: div(attended, meetings) },
     { key: "clientes", label: "Clientes", value: clients, fromPrev: div(clients, attended) },
   ];
   return stages;

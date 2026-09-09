@@ -24,6 +24,7 @@ import { BRANDS } from "@/lib/brands";
 import { can } from "@/lib/auth/guard";
 import { currentActor, newEventId } from "@/lib/auth/actor";
 import { activeBrandSlug } from "@/lib/active-brand";
+import { normalizeLeadStatus } from "@/lib/lead-status";
 import {
   DEFAULT_BRAND,
   type AdDaily,
@@ -31,7 +32,6 @@ import {
   type CtaType,
   type GoalMetric,
   type IgPost,
-  type LeadStatus,
 } from "@/lib/types";
 
 const DENIED: ActionState = { ok: false, message: "Você não tem permissão para esta ação." };
@@ -275,7 +275,7 @@ export async function addLeadAction(
   if (!(await can("leads:write"))) return DENIED;
   const name = String(formData.get("name") ?? "").trim();
   const date = String(formData.get("date") ?? "").trim();
-  const status = (String(formData.get("status") ?? "lead") as LeadStatus) || "lead";
+  const status = normalizeLeadStatus(String(formData.get("status") ?? ""));
   const utmContent = String(formData.get("utmContent") ?? "").trim() || undefined;
   const meetingDate = String(formData.get("meetingAt") ?? "").trim();
   const phone = String(formData.get("phone") ?? "").trim() || undefined;

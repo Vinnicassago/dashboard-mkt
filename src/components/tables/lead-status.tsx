@@ -4,30 +4,27 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { changeLeadStatus } from "@/app/(dashboard)/funil/actions";
+import { LEAD_STATUS_META, LOST_STATUSES, OPEN_STATUSES } from "@/lib/lead-status";
 import type { LeadStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-export const statusMeta: Record<
-  LeadStatus,
-  { label: string; variant: "muted" | "default" | "good" | "critical" }
-> = {
-  lead: { label: "Lead", variant: "muted" },
-  agendou: { label: "Agendou", variant: "default" },
-  compareceu: { label: "Compareceu", variant: "good" },
-  cliente: { label: "Cliente", variant: "good" },
-  perdido: { label: "Perdido", variant: "critical" },
-};
+/**
+ * Rótulo e cor vêm da régua (`lib/lead-status.ts`) — este arquivo só desenha.
+ * Reexportado porque metade da UI já importava daqui.
+ */
+export { LEAD_STATUS_META as statusMeta } from "@/lib/lead-status";
 
-export const statusOrder: Record<LeadStatus, number> = {
-  cliente: 4,
-  compareceu: 3,
-  agendou: 2,
-  lead: 1,
-  perdido: 0,
-};
+export function StatusBadge({ status }: { status: LeadStatus }) {
+  const meta = LEAD_STATUS_META[status];
+  return (
+    <Badge variant={meta.variant} title={meta.hint}>
+      {meta.label}
+    </Badge>
+  );
+}
 
 /**
- * Changing a lead to "agendou" is what reports the meeting back to Meta/GA4,
+ * Changing a lead to "agendado" is what reports the meeting back to Meta/GA4,
  * so the campaign learns to optimise for leads that actually schedule.
  */
 export function StatusSelect({
@@ -46,14 +43,12 @@ export function StatusSelect({
   const router = useRouter();
 
   // Read-only for roles without leads:write (e.g. marketing).
-  if (!canEdit) {
-    return <Badge variant={statusMeta[status].variant}>{statusMeta[status].label}</Badge>;
-  }
+  if (!canEdit) return <StatusBadge status={status} />;
 
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-center gap-2">
-        <Badge variant={statusMeta[status].variant}>{statusMeta[status].label}</Badge>
+        <StatusBadge status={status} />
         <select
           aria-label={`Alterar status de ${name}`}
           value={status}
@@ -80,11 +75,22 @@ export function StatusSelect({
             pending && "opacity-50",
           )}
         >
-          <option value="lead">Lead</option>
-          <option value="agendou">Agendou</option>
-          <option value="compareceu">Compareceu</option>
-          <option value="cliente">Cliente</option>
-          <option value="perdido">Perdido</option>
+          {/* Caminho feliz e motivos de perda separados — são 8 opções, e sem
+              a divisão o comercial erra o clique. */}
+          <optgroup label="Em andamento">
+            {OPEN_STATUSES.map((s) => (
+              <option key={s} value={s} title={LEAD_STATUS_META[s].hint}>
+                {LEAD_STATUS_META[s].label}
+              </option>
+            ))}
+          </optgroup>
+          <optgroup label="Perdido — por quê">
+            {LOST_STATUSES.map((s) => (
+              <option key={s} value={s} title={LEAD_STATUS_META[s].hint}>
+                {LEAD_STATUS_META[s].label}
+              </option>
+            ))}
+          </optgroup>
         </select>
       </div>
       {note ? <span className="text-[11px] text-muted-foreground">{note}</span> : null}

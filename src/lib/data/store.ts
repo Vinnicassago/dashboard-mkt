@@ -15,7 +15,7 @@ import { isPostgresConfigured } from "../db/pg";
 import { localBackend } from "./local-store";
 import { supabaseBackend } from "./supabase-store";
 import { postgresBackend } from "./postgres-store";
-import type { DataBackend, LpDelta, StoredUser } from "./backend";
+import type { DataBackend, LeadStatusPatch, LpDelta, StoredUser } from "./backend";
 import type { Role } from "../auth/roles";
 import type {
   AdDaily,
@@ -71,8 +71,8 @@ export const deleteDraft = (id: string) => backend().deleteDraft(id);
 
 export const addLead = (lead: Lead) => backend().addLead(lead);
 
-export const setLeadStatus = (id: string, status: LeadStatus, meetingAt?: string, value?: number) =>
-  backend().setLeadStatus(id, status, meetingAt, value);
+export const setLeadStatus = (id: string, status: LeadStatus, patch?: LeadStatusPatch) =>
+  backend().setLeadStatus(id, status, patch);
 
 export const deleteLead = (id: string) => backend().deleteLead(id);
 

@@ -16,6 +16,25 @@ import type { Role } from "../auth/roles";
  * The contract every storage backend implements. The app only ever talks to
  * this shape (via `store.ts`), so swapping JSON ⇄ Supabase changes nothing else.
  */
+/**
+ * O que muda num lead junto com o status.
+ *
+ * Os marcos (`bookedAt`/`attendedAt`/`closedAt`) são gravados UMA vez: o backend
+ * preserva o valor que já existir, para que uma transição posterior — inclusive
+ * uma perda — não apague o fato de a reunião ter acontecido. `lostAt` é o
+ * oposto: descreve o estado atual e é limpo quando o lead sai da perda.
+ */
+export interface LeadStatusPatch {
+  meetingAt?: string;
+  value?: number;
+  bookedAt?: string;
+  attendedAt?: string;
+  closedAt?: string;
+  /** `null` limpa a marca (lead voltou ao caminho feliz). */
+  lostAt?: string | null;
+  roboSessionId?: string;
+}
+
 export interface DataBackend {
   readonly name: "local" | "supabase" | "postgres";
 
@@ -38,7 +57,7 @@ export interface DataBackend {
   deleteDraft(id: string): Promise<void>;
 
   addLead(lead: Lead): Promise<void>;
-  setLeadStatus(id: string, status: LeadStatus, meetingAt?: string, value?: number): Promise<void>;
+  setLeadStatus(id: string, status: LeadStatus, patch?: LeadStatusPatch): Promise<void>;
   /** Hard-delete a lead (ex.: entradas de teste) e seus eventos de auditoria. */
   deleteLead(id: string): Promise<void>;
   upsertGoal(goal: Goal): Promise<void>;

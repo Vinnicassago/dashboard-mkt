@@ -244,10 +244,37 @@ duas vezes. Por isso o `event_id` é gerado uma única vez, no cliente.
 
 ### Reunião agendada → sinal de volta
 
-Na tela **Funil & LP**, mude o status do lead para *Agendou*. Isso dispara `Schedule`
+Na tela **Funil & LP**, mude o status do lead para *Agendado*. Isso dispara `Schedule`
 para a CAPI e `schedule` para o GA4, usando os identificadores (`fbc`/`fbp`) que
 guardamos no lead. O `event_id` é estável (`schedule-<leadId>`), então remarcar o
 mesmo lead não conta duas reuniões.
+
+### Status do lead
+
+A régua vive em `src/lib/lead-status.ts` — rótulo, cor, posição no funil e "isto
+encerra o lead?" saem todos de lá. Status novo = uma entrada nessa tabela.
+
+| Status | O que significa |
+| --- | --- |
+| **Novo** | Entrou e ninguém contatou ainda. É o estoque da fila do comercial (SLA de resposta). |
+| **Agendado** | Reunião marcada. É esta transição que dispara `Schedule` para a Meta e `qualify_lead` para o GA4. |
+| **Reunião realizada** | Compareceu. |
+| **Cliente** | Fechou, com o valor da carta registrado. Dispara `Purchase`. |
+| **Contato inválido** | Telefone/e-mail não existe. Perda de **qualidade** — o comercial não teve chance. |
+| **Sem resposta** | Contato válido, nunca retornou. Perda de **qualidade**. |
+| **Não tem interesse** | Falou com o comercial e disse não. Perda de **decisão**. |
+| **Desistência** | Chegou a agendar e caiu antes de fechar. Perda de **decisão**. |
+
+Os quatro últimos encerram o lead. A distinção entre perda de **qualidade**
+(resolve-se na segmentação/criativo/formulário) e de **decisão** (resolve-se na
+oferta e no pitch) é o que o card **"Por que perdemos"**, no Funil, mostra.
+
+Desistência **não** conta como reunião: quem marcou e caiu não gerou reunião, então
+sai do denominador do CPR e aparece como vazamento na quebra de perdas.
+
+Migration: `supabase/migrations/0011_lead_status_reasons.sql`. Ela renomeia
+`agendou`/`compareceu` e joga o antigo `perdido` — que não guardava motivo — em
+*Sem resposta*; a quebra de perdas de períodos anteriores a ela não é diagnóstico.
 
 ### Aba Leads
 

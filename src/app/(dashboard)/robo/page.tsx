@@ -34,7 +34,18 @@ export default async function RoboPage({
   const data = await getData(await activeBrandSlug());
   const { range } = pageRange(data, (await searchParams).range);
 
-  const { kpis, diario, motivos, saude, pendentes } = await getRoboSnapshot(range?.from);
+  const { kpis, diario, motivos, saude, pendentes, falha } = await getRoboSnapshot(range?.from);
+
+  // Falha de leitura NÃO pode virar tela de zeros: num painel que prioriza pela
+  // fila parada, um zero falso esconde exatamente quem precisa de atenção.
+  if (falha?.tipo === "erro") {
+    return (
+      <EmptyState
+        title="Não consegui ler o robô"
+        hint={`As credenciais estão definidas, mas a consulta falhou — os números abaixo seriam zeros falsos, então não são exibidos. Detalhe: ${falha.detalhe}`}
+      />
+    );
+  }
 
   if (!kpis) {
     return (

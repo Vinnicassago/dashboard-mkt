@@ -3,8 +3,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { buildSeedData, buildSeedLeadEvents } from "./seed";
 import { FALLBACK_CAMPAIGN } from "./mappers";
-import type { DataBackend, LpDelta, PublicUser, StoredUser } from "./backend";
+import type { DataBackend, LeadStatusPatch, LpDelta, PublicUser, StoredUser } from "./backend";
 import { toRole } from "../auth/roles";
+import { LOST_STATUSES, normalizeLeadStatus } from "../lead-status";
 import { DEFAULT_BRAND } from "../types";
 import type {
   AdDaily,
@@ -55,6 +56,51 @@ function migrateBrand(data: DashboardData) {
   }
 }
 
+/**
+ * Análogo, no JSON local, da migração de status em `db/schema.ts`: arquivos
+ * gravados com a régua antiga ("agendou"/"compareceu"/"perdido") entram com os
+ * nomes novos. `normalizeLeadStatus` é a mesma função que os backends de banco
+ * usam na leitura, então os dois caminhos concordam.
+ */
+function migrateLeadStatus(file: LocalFile) {
+  for (const l of file.data.leads ?? []) l.status = normalizeLeadStatus(l.status);
+  for (const e of file.leadEvents ?? []) {
+    if (e.fromStatus) e.fromStatus = normalizeLeadStatus(e.fromStatus);
+    if (e.toStatus) e.toStatus = normalizeLeadStatus(e.toStatus);
+  }
+}
+
+/**
+ * Análogo, no JSON local, do backfill de marcos da migração 0012: reconstrói
+ * `bookedAt`/`attendedAt`/`closedAt` a partir de `meetingAt`, do histórico de
+ * eventos e do estágio atual — nesta ordem de confiança. É o que recupera a
+ * reunião de quem foi marcado como perda depois de ter agendado.
+ */
+function migrateLeadMilestones(file: LocalFile) {
+  const earliest = new Map<string, { booked?: string; attended?: string; closed?: string }>();
+  for (const e of file.leadEvents ?? []) {
+    if (!e.toStatus) continue;
+    const acc = earliest.get(e.leadId) ?? {};
+    const keep = (cur: string | undefined) => (!cur || e.createdAt < cur ? e.createdAt : cur);
+    if (e.toStatus === "agendado" || e.toStatus === "reuniao_realizada" || e.toStatus === "cliente")
+      acc.booked = keep(acc.booked);
+    if (e.toStatus === "reuniao_realizada" || e.toStatus === "cliente")
+      acc.attended = keep(acc.attended);
+    if (e.toStatus === "cliente") acc.closed = keep(acc.closed);
+    earliest.set(e.leadId, acc);
+  }
+
+  for (const l of file.data.leads ?? []) {
+    const ev = earliest.get(l.id);
+    const advanced = l.status === "agendado" || l.status === "reuniao_realizada" || l.status === "cliente";
+    const attended = l.status === "reuniao_realizada" || l.status === "cliente";
+    l.bookedAt ??= l.meetingAt ?? ev?.booked ?? (advanced ? l.createdAt : undefined);
+    l.attendedAt ??= ev?.attended ?? (attended ? l.createdAt : undefined);
+    l.closedAt ??= ev?.closed ?? (l.status === "cliente" ? l.createdAt : undefined);
+    l.lostAt = LOST_STATUSES.includes(l.status) ? (l.lostAt ?? l.createdAt) : undefined;
+  }
+}
+
 function persist(file: LocalFile) {
   try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -74,6 +120,8 @@ function load(): LocalFile {
         // Arquivos criados antes da Etapa 1 não têm a chave.
         if (!Array.isArray(parsed.drafts)) parsed.drafts = [];
         migrateBrand(parsed.data);
+        migrateLeadStatus(parsed);
+        migrateLeadMilestones(parsed);
         return parsed;
       }
     }
@@ -225,14 +273,20 @@ export const localBackend: DataBackend = {
     });
   },
 
-  async setLeadStatus(id: string, status: LeadStatus, meetingAt?: string, value?: number) {
+  async setLeadStatus(id: string, status: LeadStatus, patch?: LeadStatusPatch) {
     commit((data) => {
       const lead = data.leads.find((l) => l.id === id);
-      if (lead) {
-        lead.status = status;
-        if (meetingAt !== undefined) lead.meetingAt = meetingAt;
-        if (value !== undefined) lead.value = value;
-      }
+      if (!lead) return;
+      lead.status = status;
+      if (patch?.meetingAt !== undefined) lead.meetingAt = patch.meetingAt;
+      if (patch?.value !== undefined) lead.value = patch.value;
+      if (patch?.roboSessionId !== undefined) lead.roboSessionId = patch.roboSessionId;
+      // Marcos: gravados uma vez, nunca sobrescritos — é o que impede uma perda
+      // registrada depois de apagar a reunião que aconteceu.
+      lead.bookedAt ??= patch?.bookedAt;
+      lead.attendedAt ??= patch?.attendedAt;
+      lead.closedAt ??= patch?.closedAt;
+      if (patch?.lostAt !== undefined) lead.lostAt = patch.lostAt ?? undefined;
     });
   },
 

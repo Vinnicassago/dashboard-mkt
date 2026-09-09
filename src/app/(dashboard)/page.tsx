@@ -1,4 +1,4 @@
-import { DollarSign, CalendarCheck, Target, UserPlus, Sparkles, Users, Radio, Heart, ExternalLink, MessageCircle } from "lucide-react";
+import { DollarSign, CalendarCheck, Handshake, Target, UserPlus, Sparkles, Users, Radio, Heart, ExternalLink, MessageCircle } from "lucide-react";
 import Link from "next/link";
 import { ExampleBanner } from "@/components/example-banner";
 import { KpiCard, type KpiDelta } from "@/components/kpi/kpi-card";
@@ -6,7 +6,6 @@ import { ObjectiveSplitBar } from "@/components/kpi/objective-split";
 import { DataQualityCard } from "@/components/kpi/data-quality";
 import { GoalBar } from "@/components/kpi/goal-bar";
 import { absDelta, pctDelta } from "@/components/kpi/delta";
-import { FunnelChart } from "@/components/charts/funnel-chart";
 import { TimeSeriesChart } from "@/components/charts/time-series-chart";
 import { ChartCard } from "@/components/ui/chart-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,11 +14,15 @@ import { aiAnalysisKey } from "@/lib/data/backend";
 import { activeBrandSlug } from "@/lib/active-brand";
 import { brandDef } from "@/lib/brands";
 import { pageRange } from "@/lib/page-range";
-import { getTransferidos } from "@/lib/robo/client";
+import { getCascataFontes, getComercial, getTransferidos } from "@/lib/robo/client";
+import { montarCascata } from "@/lib/cascata";
+import { Cascata } from "@/components/charts/cascata";
+import { resolveMetaBrands } from "@/lib/meta/config";
+import { assessTrust } from "@/lib/trust";
+import { TrustBand } from "@/components/kpi/trust-band";
 import {
   actualForGoal,
   awarenessKpis,
-  buildFunnel,
   dailySeries,
   dataQualityChecks,
   delta,
@@ -111,7 +114,8 @@ export default async function OverviewPage({
   const { range, rangeKey } = pageRange(data, (await searchParams).range);
 
   // Leads que o robô do WhatsApp qualificou e passou ao especialista no período.
-  // Null quando o robô não está configurado — aí o card mantém o valor do store.
+  // Vem de OUTRO banco (ROBO_SUPABASE_*), então tem card próprio: `falha` diz se
+  // o robô está desligado (card some) ou se a leitura quebrou (card mostra "—").
   const transferidos = await getTransferidos(range?.from, range?.to);
 
   // Leitura de IA guardada (Etapa 3). Só é buscada e exibida quando a camada de
@@ -148,7 +152,36 @@ export default async function OverviewPage({
 
   const k = overviewKpis(data, range);
   const prev = range ? overviewKpis(data, previousRange(range)) : undefined;
-  const funnel = buildFunnel(data, range);
+
+  /**
+   * O que dá (e o que não dá) para afirmar com estes números.
+   *
+   * A comparação com o robô só roda no período "campanha inteira": a view do
+   * robô é vitalícia e sem marca, então confrontá-la com um recorte de 7 dias
+   * acusaria divergência onde só há janelas diferentes.
+   */
+  const trust = assessTrust({
+    data,
+    range,
+    brandRules: await resolveMetaBrands(),
+    kpis: {
+      meetings: k.meetings,
+      leads: k.leads,
+      spendConversao: k.spendConversao,
+      spendTotal: k.spend,
+    },
+    roboReunioes: range ? null : (await getComercial()).kpis?.reunioes_realizadas ?? null,
+  });
+  // A cascata atravessa quatro sistemas, então precisa das fontes do robô —
+  // sem elas ela termina no painel, e o card diz isso em vez de fingir completude.
+  const fontesCascata = await getCascataFontes();
+  const cascata = montarCascata({
+    data,
+    range,
+    robo: fontesCascata.robo,
+    comercial: fontesCascata.comercial,
+    investimentoConversao: k.spendConversao,
+  });
   const series = dailySeries(data, range);
 
   // Orgânico do perfil — o pago compra visita, mas é o orgânico que converte quem chega.
@@ -171,6 +204,7 @@ export default async function OverviewPage({
           delta={makeDelta(k.spend, prev?.spend, true)}
           hint={hint}
           spark={series.map((d) => d.spend)}
+          quarentena={trust.porMetrica.spend}
         />
         <KpiCard
           label="Leads"
@@ -186,15 +220,35 @@ export default async function OverviewPage({
           Icon={Target}
           delta={makeDelta(k.cpl, prev?.cpl, false)}
           hint={hint}
+          quarentena={trust.porMetrica.cpl}
         />
         <KpiCard
-          label={transferidos == null ? "Reuniões agendadas" : "Transferidos ao especialista"}
-          value={formatInt(transferidos ?? k.meetings)}
+          label="Reuniões agendadas"
+          value={formatInt(k.meetings)}
           Icon={CalendarCheck}
-          delta={transferidos == null ? makeDelta(k.meetings, prev?.meetings, true) : undefined}
-          hint={transferidos == null ? hint : "leads quentes entregues pelo robô"}
+          delta={makeDelta(k.meetings, prev?.meetings, true)}
+          hint={hint}
           highlight
         />
+        {/*
+          Transferidos vem do banco do ROBÔ, não do store — é outra métrica, de
+          outra fonte. Antes os dois dividiam um card e trocavam de rótulo em
+          silêncio, o que fazia uma falha de leitura virar a contagem de reuniões
+          do painel sem ninguém perceber. Card próprio, e "—" quando não dá para
+          ler: número nenhum é melhor que o número errado.
+        */}
+        {transferidos.falha?.tipo !== "desligado" ? (
+          <KpiCard
+            label="Transferidos ao especialista"
+            value={transferidos.valor == null ? "—" : formatInt(transferidos.valor)}
+            Icon={Handshake}
+            hint={
+              transferidos.falha
+                ? "sem leitura do robô — ver Robô"
+                : "leads quentes entregues pelo robô"
+            }
+          />
+        ) : null}
         <KpiCard
           label="Custo por reunião"
           value={formatCurrency(k.cpr)}
@@ -202,8 +256,12 @@ export default async function OverviewPage({
           delta={makeDelta(k.cpr, prev?.cpr, false)}
           hint="North Star"
           highlight
+          quarentena={trust.porMetrica.cpr}
         />
       </div>
+
+      {/* O que impede os números acima de sustentarem uma decisão. */}
+      <TrustBand travas={trust.travas} />
 
       {aiCard}
 
@@ -217,19 +275,31 @@ export default async function OverviewPage({
             <ObjectiveSplitBar conversao={k.spendConversao} descoberta={k.spendDescoberta} />
             <p className="text-xs text-muted-foreground">
               CPL e Custo por reunião acima usam só o orçamento de conversão. Com a descoberta
-              incluída (blended): CPL {formatCurrency(k.cplBlended)} · Custo por reunião{" "}
-              {formatCurrency(k.cprBlended)}.
+              incluída (blended): CPL {k.leads > 0 ? formatCurrency(k.cplBlended) : "—"} · Custo
+              por reunião {k.meetings > 0 ? formatCurrency(k.cprBlended) : "—"}.
             </p>
           </CardContent>
         </Card>
       ) : null}
 
-      {/* Funnel */}
+      {/*
+        A cascata substituiu o funil de 6 etapas: aquele ia de cliques direto a
+        leads, não conhecia a landing page nem o WhatsApp, e terminava em três
+        degraus que vinham do painel enquanto o atendimento contava outra coisa.
+      */}
       <ChartCard
-        title="Funil da campanha"
-        description="Impressões → Cliques → Leads → Reuniões, com a conversão entre etapas."
+        title="Onde o dinheiro para"
+        description="Do anúncio à venda, atravessando os quatro sistemas. A junta tracejada marca onde o dado troca de dono."
+        action={
+          <Link
+            href="/jornada"
+            className="text-xs font-medium text-primary underline-offset-4 hover:underline"
+          >
+            Abrir a jornada →
+          </Link>
+        }
       >
-        <FunnelChart stages={funnel} />
+        <Cascata degraus={cascata.degraus} />
       </ChartCard>
 
       {/* Orgânico do perfil — saúde da base que recebe o tráfego pago */}
@@ -326,6 +396,27 @@ export default async function OverviewPage({
             <CardTitle>Metas vs. realizado</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
+            {/*
+              Sem nenhuma meta cadastrada este .map() renderizava um card
+              LITERALMENTE VAZIO — a tela ficava com um título e nada embaixo, o
+              que se lê como bug, não como "falta preencher".
+            */}
+            {data.goals.length === 0 ? (
+              <div className="space-y-2 rounded-lg border border-dashed p-5 text-center">
+                <p className="text-sm font-medium">Nenhuma meta cadastrada</p>
+                <p className="mx-auto max-w-sm text-xs text-muted-foreground">
+                  {k.leads > 0 ? `Sem meta, ${formatCurrency(k.cpl)} por lead é só um número` : "Sem meta, os números acima são só números"}{" "}
+                  — não dá para dizer se estão bons. Cadastrar também liga as duas regras de
+                  alerta que hoje nunca disparam: CPL e custo por reunião acima do alvo.
+                </p>
+                <Link
+                  href="/config"
+                  className="inline-block pt-1 text-xs font-medium text-primary underline-offset-4 hover:underline"
+                >
+                  Cadastrar metas →
+                </Link>
+              </div>
+            ) : null}
             {data.goals.map((goal) => {
               const actual = actualForGoal(goal, data, range);
               if (actual == null) {

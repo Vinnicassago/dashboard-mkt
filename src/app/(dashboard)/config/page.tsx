@@ -24,6 +24,7 @@ import { BRANDS } from "@/lib/brands";
 import { DEFAULT_BRAND } from "@/lib/types";
 import { ADS_CSV_TEMPLATE } from "@/lib/csv";
 import { LEADS_CSV_TEMPLATE } from "@/lib/leads-csv";
+import { LEAD_STATUSES, statusLabel } from "@/lib/lead-status";
 import { integrationStatus, metaBrandConfig } from "@/lib/meta/config";
 import { getLastSync } from "@/lib/meta/sync";
 import { isAuthEnabled } from "@/lib/auth/config";
@@ -128,6 +129,10 @@ export default async function ConfigPage() {
     const m = metaBrandConfig(b.slug);
     return { slug: b.slug, label: b.label, configured: Boolean(m.igUserId && m.igToken) };
   });
+
+  // Vocabulário aceito na coluna Status do CSV de leads — sai da régua, para a
+  // ajuda nunca divergir do que o importador realmente reconhece.
+  const statusList = LEAD_STATUSES.map(statusLabel).join(", ");
 
   const syncHint = (iso: string | null) =>
     iso ? `Última sincronização: ${formatDateTime(iso)}` : "Ainda não sincronizado";
@@ -302,7 +307,13 @@ export default async function ConfigPage() {
             <p className="text-xs text-muted-foreground">
               Colunas reconhecidas: created_at, event_id, Status, nome, whatsapp,
               email, utm_source, utm_campaign, utm_content, fbp, fbc. Status vazio
-              entra como &quot;lead&quot;.
+              entra como &quot;Novo&quot;.
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Na coluna Status vale o nome do estágio — {statusList} — ou como o
+              comercial costuma escrever: &quot;não atende&quot;, &quot;sem retorno&quot;,
+              &quot;não quis&quot;, &quot;desistiu&quot;, &quot;faltou&quot;,
+              &quot;fechado&quot;. O que não for reconhecido entra como &quot;Novo&quot;.
             </p>
           </CardContent>
         </Card>

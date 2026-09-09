@@ -71,7 +71,17 @@ const columns: Column<CreativePerf>[] = [
   { key: "spend", header: "Gasto", align: "right", sortable: true, sortValue: (r) => r.spend, render: (r) => formatCurrency(r.spend) },
   { key: "ctr", header: "CTR", align: "right", sortable: true, sortValue: (r) => r.ctr, render: (r) => formatPercent(r.ctr) },
   { key: "cpc", header: "CPC", align: "right", sortable: true, sortValue: (r) => r.cpc, render: (r) => formatCurrency(r.cpc) },
-  { key: "cpl", header: "CPL", align: "right", sortable: true, sortValue: (r) => r.cpl, render: (r) => formatCurrency(r.cpl) },
+  {
+    key: "cpl",
+    header: "CPL",
+    align: "right",
+    sortable: true,
+    // Sem lead não há CPL. Ordenar por CPL crescente — o gesto natural para achar
+    // o mais barato — colocava no topo justamente os criativos que não geraram
+    // lead nenhum, porque div() devolve 0. Infinity os manda para o fim.
+    sortValue: (r) => (r.leads > 0 ? r.cpl : Number.POSITIVE_INFINITY),
+    render: (r) => (r.leads > 0 ? formatCurrency(r.cpl) : "—"),
+  },
   { key: "leads", header: "Leads", align: "right", sortable: true, sortValue: (r) => r.leads, render: (r) => formatInt(r.leads) },
   { key: "meetings", header: "Reuniões", align: "right", sortable: true, sortValue: (r) => r.meetings, render: (r) => formatInt(r.meetings) },
   {
@@ -82,14 +92,22 @@ const columns: Column<CreativePerf>[] = [
     sortValue: (r) => r.cpr,
     render: (r) => (r.meetings > 0 ? formatCurrency(r.cpr) : "—"),
   },
-  {
-    key: "hook",
-    header: "Gancho (3s)",
-    align: "right",
-    sortable: true,
-    sortValue: (r) => r.hookRate ?? -1,
-    render: (r) => <RateCell value={r.hookRate} color={tone(r.hookRate, 0.18, 0.1)} />,
-  },
+  /*
+   * "Gancho (3s)" está OCULTA de propósito, não esquecida.
+   *
+   * hookRate = videoPlays ÷ impressões. O numerador vem da tabela `creatives`,
+   * que NÃO tem coluna de data e é reescrita a cada sync com a soma da janela
+   * inteira (até 30 dias); o denominador vem filtrado pelo período da tela.
+   * Numerador e denominador de janelas diferentes produzem razão sem teto — é
+   * daí que saíam os 104% e 133% em produção, com semáforo verde por cima.
+   *
+   * E o numerador nem é de 3 segundos: `video_play_actions` conta INÍCIOS de
+   * reprodução, incluindo autoplay e replay do Reels.
+   *
+   * Volta quando video_3s/thru_plays forem persistidos por dia em `ad_daily`
+   * (item C17 do plano) — aí os dois lados da divisão passam a ser do mesmo
+   * período e a taxa vira comparável.
+   */
   {
     key: "hold",
     header: "Retenção",

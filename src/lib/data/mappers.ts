@@ -8,6 +8,7 @@
  */
 
 import { toRole } from "../auth/roles";
+import { normalizeLeadStatus } from "../lead-status";
 import type {
   AdDaily,
   Campaign,
@@ -24,7 +25,6 @@ import type {
   Lead,
   LeadEvent,
   LeadEventAction,
-  LeadStatus,
   LpDaily,
   PostDraft,
 } from "../types";
@@ -261,9 +261,16 @@ export const toLead = (r: Row): Lead => ({
   utmSource: r.utm_source ? s(r.utm_source) : undefined,
   utmCampaign: r.utm_campaign ? s(r.utm_campaign) : undefined,
   utmContent: r.utm_content ? s(r.utm_content) : undefined,
-  status: s(r.status) as LeadStatus,
+  // Linhas gravadas antes da régua nova ("agendou"/"compareceu"/"perdido")
+  // entram normalizadas, mesmo que a migração ainda não tenha rodado.
+  status: normalizeLeadStatus(s(r.status)),
   meetingAt: r.meeting_at ? iso(r.meeting_at) : undefined,
   value: r.value == null ? undefined : n(r.value),
+  bookedAt: r.booked_at ? iso(r.booked_at) : undefined,
+  attendedAt: r.attended_at ? iso(r.attended_at) : undefined,
+  closedAt: r.closed_at ? iso(r.closed_at) : undefined,
+  lostAt: r.lost_at ? iso(r.lost_at) : undefined,
+  roboSessionId: r.robo_session_id ? s(r.robo_session_id) : undefined,
   fbc: r.fbc ? s(r.fbc) : undefined,
   fbp: r.fbp ? s(r.fbp) : undefined,
   gaClientId: r.ga_client_id ? s(r.ga_client_id) : undefined,
@@ -283,6 +290,11 @@ export const fromLead = (l: Lead): Row => ({
   status: l.status,
   meeting_at: l.meetingAt ?? null,
   value: l.value ?? null,
+  booked_at: l.bookedAt ?? null,
+  attended_at: l.attendedAt ?? null,
+  closed_at: l.closedAt ?? null,
+  lost_at: l.lostAt ?? null,
+  robo_session_id: l.roboSessionId ?? null,
   fbc: l.fbc ?? null,
   fbp: l.fbp ?? null,
   ga_client_id: l.gaClientId ?? null,
@@ -401,8 +413,8 @@ export const toEvent = (r: Row): LeadEvent => ({
   leadName: s(r.lead_name),
   actor: s(r.actor),
   action: s(r.action) as LeadEventAction,
-  fromStatus: r.from_status ? (s(r.from_status) as LeadStatus) : undefined,
-  toStatus: r.to_status ? (s(r.to_status) as LeadStatus) : undefined,
+  fromStatus: r.from_status ? normalizeLeadStatus(s(r.from_status)) : undefined,
+  toStatus: r.to_status ? normalizeLeadStatus(s(r.to_status)) : undefined,
   createdAt: iso(r.created_at),
 });
 

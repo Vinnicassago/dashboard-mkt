@@ -18,6 +18,8 @@ import {
   cohortWeekly,
   filterLeads,
   isBooked,
+  lossBreakdown,
+  lossByKind,
   lpKpis,
   overviewKpis,
 } from "@/lib/metrics";
@@ -53,6 +55,16 @@ export default async function FunilPage({
   const leads = filterLeads(data.leads, range);
   const cohorts = cohortWeekly(data, range, new Date().toISOString());
 
+  // Perdas do período, quebradas por motivo e somadas por origem do problema.
+  const lossRows = lossBreakdown(leads).filter((r) => r.count > 0);
+  const byKind = lossByKind(leads);
+  const lossTotal = byKind.qualidade + byKind.decisao;
+  const losses = {
+    rows: lossRows,
+    total: lossTotal,
+    qualidadeShare: lossTotal > 0 ? byKind.qualidade / lossTotal : 0,
+  };
+
   const nameById = new Map(data.creatives.map((c) => [c.adId, c.name]));
 
   // leads by origin (creative) — junta pelo id do anúncio embutido no utm_content
@@ -81,7 +93,7 @@ export default async function FunilPage({
     <div className="space-y-6">
       <ChartCard
         title="Funil da campanha"
-        description="Do anúncio à reunião — a última etapa mostra quem de fato compareceu."
+        description="Do anúncio à reunião — a última etapa mostra quem de fato compareceu à reunião."
       >
         <FunnelChart stages={funnel} />
       </ChartCard>
@@ -90,10 +102,69 @@ export default async function FunilPage({
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
         <KpiCard label="LP → Lead" value={formatPercent(lp.visitToLead)} Icon={UserPlus} hint="leads ÷ visitas" />
         <KpiCard label="Lead → Reunião" value={formatPercent(k.leadToMeeting)} Icon={CalendarCheck} hint="reuniões ÷ leads" />
-        <KpiCard label="Comparecimento" value={formatPercent(k.showRate)} Icon={CheckCircle2} hint="compareceu ÷ agendadas" />
+        <KpiCard label="Comparecimento" value={formatPercent(k.showRate)} Icon={CheckCircle2} hint="reuniões realizadas ÷ agendadas" />
         <KpiCard label="Reunião → Cliente" value={formatPercent(k.meetingToClient)} Icon={Handshake} hint="clientes ÷ reuniões" />
         <KpiCard label="CTR (anúncio)" value={formatPercent(k.ctr)} Icon={MousePointerClick} hint="cliques ÷ impressões" />
       </div>
+
+      {/* Onde o funil vaza — só faz sentido com perda registrada no período */}
+      {losses.total > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Por que perdemos</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <THead>
+                <TR className="hover:bg-transparent">
+                  <TH>Motivo</TH>
+                  <TH>Onde está o problema</TH>
+                  <TH className="text-right">Leads</TH>
+                  <TH className="text-right">% das perdas</TH>
+                </TR>
+              </THead>
+              <TBody>
+                {losses.rows.map((row) => (
+                  <TR key={row.status}>
+                    <TD className="font-medium">{row.label}</TD>
+                    <TD>
+                      <div className="flex items-center gap-2">
+                        <span
+                          aria-hidden
+                          className="h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-foreground/10"
+                        >
+                          <span
+                            className="block h-full rounded-full"
+                            style={{
+                              width: `${Math.round(row.share * 100)}%`,
+                              background:
+                                row.kind === "qualidade" ? "var(--warning)" : "var(--critical)",
+                            }}
+                          />
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          {row.kind === "qualidade" ? "Mídia" : "Oferta / pitch"}
+                        </span>
+                      </div>
+                    </TD>
+                    <TD className="text-right tabular">{formatInt(row.count)}</TD>
+                    <TD className="text-right tabular">{formatPercent(row.share)}</TD>
+                  </TR>
+                ))}
+              </TBody>
+            </Table>
+            <p className="mt-3 text-xs text-muted-foreground">
+              {formatInt(losses.total)} leads encerrados sem reunião ·{" "}
+              <strong className="font-medium text-foreground">
+                {formatPercent(losses.qualidadeShare)}
+              </strong>{" "}
+              por qualidade do lead (contato inválido, sem resposta) — isso se resolve na
+              segmentação e no formulário, não no comercial. O restante chegou a falar com a
+              equipe: é oferta e pitch.
+            </p>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {/* Receita e retorno — só quando há cliente/receita */}
       {k.clients > 0 || k.revenue > 0 ? (

@@ -20,6 +20,7 @@ import {
   updatePostsMetaAction,
   type ActionState,
 } from "@/app/(dashboard)/config/actions";
+import { LEAD_STATUS_META, LOST_STATUSES, OPEN_STATUSES } from "@/lib/lead-status";
 import { BRANDS } from "@/lib/brands";
 import { DEFAULT_BRAND } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -412,11 +413,20 @@ export function LeadForm({ creatives }: { creatives: { adId: string; name: strin
         </Field>
         <Field label="Status">
           <select name="status" className={inputCls} defaultValue="lead">
-            <option value="lead">Lead</option>
-            <option value="agendou">Agendou reunião</option>
-            <option value="compareceu">Compareceu</option>
-            <option value="cliente">Cliente</option>
-            <option value="perdido">Perdido</option>
+            <optgroup label="Em andamento">
+              {OPEN_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {LEAD_STATUS_META[s].label}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label="Perdido — por quê">
+              {LOST_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {LEAD_STATUS_META[s].label}
+                </option>
+              ))}
+            </optgroup>
           </select>
         </Field>
         <Field label="Data da reunião (opcional)">
@@ -554,14 +564,21 @@ export function BrandMatchForm({ current }: { current: Record<string, string> })
             type="text"
             name={`match_${b.slug}`}
             defaultValue={current[b.slug] ?? ""}
-            placeholder="KRONE —"
+            placeholder="[KRN]"
             className={inputCls}
           />
         </Field>
       ))}
       <p className="text-xs text-muted-foreground">
-        Tudo que não casar com nenhuma marca fica com a {DEFAULT_BRAND} (padrão).
-        Dica: prefixe as campanhas da krone no Ads Manager (ex.: <code className="font-mono">KRONE — …</code>) e use o prefixo aqui.
+        Tudo que não casar com nenhuma marca fica com a {DEFAULT_BRAND} (padrão) — e como
+        não existe um balde de &ldquo;não classificado&rdquo;, um erro de atribuição fica
+        indistinguível de um acerto. Confira a lista acima depois de salvar.
+      </p>
+      <p className="text-xs text-muted-foreground">
+        O token é uma <strong>substring</strong> do nome da campanha, não um prefixo. Se as
+        campanhas são marcadas com <code className="font-mono">[KRN]</code>, use{" "}
+        <code className="font-mono">[KRN]</code>: escrever <code className="font-mono">krone</code>{" "}
+        deixaria passar todos os posts impulsionados que só têm a sigla.
       </p>
       <SubmitButton>Salvar regra</SubmitButton>
       <Message state={state} />

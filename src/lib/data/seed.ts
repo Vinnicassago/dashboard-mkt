@@ -24,6 +24,7 @@ import type {
   LpDaily,
 } from "../types";
 import { DEFAULT_BRAND } from "../types";
+import { isBookedStatus } from "../lead-status";
 
 // ---- deterministic PRNG (mulberry32) ------------------------------
 function mulberry32(seed: number) {
@@ -228,15 +229,24 @@ function buildSeedData(): DashboardData {
         status = "cliente";
         value = Math.round(rand(80, 260)) * 1000; // carta de R$80k–260k
       } else if (r < 0.22 + bookBias) {
-        status = "compareceu";
+        status = "reuniao_realizada";
       } else if (r < 0.42 + bookBias) {
-        status = "agendou";
+        status = "agendado";
+      } else if (r < 0.465) {
+        // A faixa de perda (…0,6) é subdividida nos quatro motivos SEM sortear de
+        // novo — um rng() a mais aqui deslocaria todo o resto do dataset.
+        status = "contato_invalido";
+      } else if (r < 0.51) {
+        status = "sem_resposta";
+      } else if (r < 0.555) {
+        status = "sem_interesse";
       } else if (r < 0.6) {
-        status = "perdido";
+        status = "desistencia";
       } else {
         status = "lead";
       }
-      if (status === "agendou" || status === "compareceu" || status === "cliente") {
+      // Desistência também tem data de reunião: chegou a marcar e caiu depois.
+      if (isBookedStatus(status) || status === "desistencia") {
         meetingAt = `${addDays(bucket.date, Math.floor(rand(1, 5)))}T${String(Math.floor(rand(9, 18))).padStart(2, "0")}:00:00`;
       }
 

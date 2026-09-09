@@ -1,7 +1,7 @@
 import "server-only";
 import { supabase } from "../supabase/client";
 import { buildSeedData, buildSeedLeadEvents } from "./seed";
-import type { DataBackend, LpDelta, PublicUser, StoredUser } from "./backend";
+import type { DataBackend, LeadStatusPatch, LpDelta, PublicUser, StoredUser } from "./backend";
 import { toRole } from "../auth/roles";
 import type {
   AdDaily,
@@ -212,11 +212,34 @@ export const supabaseBackend: DataBackend = {
     await touch(false);
   },
 
-  async setLeadStatus(id: string, status: LeadStatus, meetingAt?: string, value?: number) {
-    const patch: Row = { status };
-    if (meetingAt !== undefined) patch.meeting_at = meetingAt;
-    if (value !== undefined) patch.value = value;
-    const { error } = await supabase().from("leads").update(patch).eq("id", id);
+  async setLeadStatus(id: string, status: LeadStatus, patch?: LeadStatusPatch) {
+    const row: Row = { status };
+    if (patch?.meetingAt !== undefined) row.meeting_at = patch.meetingAt;
+    if (patch?.value !== undefined) row.value = patch.value;
+    if (patch?.roboSessionId !== undefined) row.robo_session_id = patch.roboSessionId;
+    if (patch?.lostAt !== undefined) row.lost_at = patch.lostAt;
+
+    // Marcos são gravados uma única vez. O REST do Supabase não tem `coalesce`,
+    // então lemos o que já existe e só preenchemos o que estiver vazio — assim
+    // uma perda registrada depois não apaga a reunião que aconteceu.
+    const wantsStamp =
+      patch?.bookedAt !== undefined ||
+      patch?.attendedAt !== undefined ||
+      patch?.closedAt !== undefined;
+    if (wantsStamp) {
+      const cur = await supabase()
+        .from("leads")
+        .select("booked_at, attended_at, closed_at")
+        .eq("id", id)
+        .maybeSingle();
+      check(cur.error, "read lead milestones");
+      const has = (cur.data ?? {}) as Row;
+      if (patch?.bookedAt !== undefined && !has.booked_at) row.booked_at = patch.bookedAt;
+      if (patch?.attendedAt !== undefined && !has.attended_at) row.attended_at = patch.attendedAt;
+      if (patch?.closedAt !== undefined && !has.closed_at) row.closed_at = patch.closedAt;
+    }
+
+    const { error } = await supabase().from("leads").update(row).eq("id", id);
     check(error, "update lead");
     await touch();
   },

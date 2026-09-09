@@ -4,7 +4,7 @@ import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Download, Mail, MessageCircle, Search, Trash2 } from "lucide-react";
 import { DataTable, type Column } from "@/components/ui/data-table";
-import { statusMeta } from "@/components/tables/lead-status";
+import { LEAD_STATUSES, LEAD_STATUS_META, statusLabel } from "@/lib/lead-status";
 import { deleteLeadAction } from "@/app/(dashboard)/funil/actions";
 import type { LeadStatus } from "@/lib/types";
 import { formatDateTime } from "@/lib/format";
@@ -152,7 +152,7 @@ function buildCsv(rows: LeadDirectoryRow[]): string {
       r.name,
       r.email ?? "",
       r.phone ?? "",
-      statusMeta[r.status].label,
+      statusLabel(r.status),
       r.creativeName,
       formatDateTime(r.createdAt),
       r.meetingAt ? formatDateTime(r.meetingAt) : "",
@@ -164,13 +164,24 @@ function buildCsv(rows: LeadDirectoryRow[]): string {
   return "﻿" + [header.join(";"), ...lines].join("\r\n");
 }
 
-const FILTERS: { key: LeadStatus | "todos"; label: string }[] = [
+/**
+ * "perdidos" agrupa os quatro motivos num filtro só — quem procura um lead
+ * perdido raramente lembra por qual motivo ele saiu. Os motivos individuais
+ * continuam disponíveis logo depois.
+ */
+type StatusFilter = LeadStatus | "todos" | "perdidos";
+
+const FILTERS: { key: StatusFilter; label: string }[] = [
   { key: "todos", label: "Todos" },
-  { key: "lead", label: "Leads" },
-  { key: "agendou", label: "Agendou" },
-  { key: "compareceu", label: "Compareceu" },
-  { key: "cliente", label: "Cliente" },
-  { key: "perdido", label: "Perdido" },
+  ...LEAD_STATUSES.filter((s) => !LEAD_STATUS_META[s].lost).map((s) => ({
+    key: s as StatusFilter,
+    label: LEAD_STATUS_META[s].label,
+  })),
+  { key: "perdidos", label: "Perdidos" },
+  ...LEAD_STATUSES.filter((s) => LEAD_STATUS_META[s].lost).map((s) => ({
+    key: s as StatusFilter,
+    label: LEAD_STATUS_META[s].label,
+  })),
 ];
 
 export function LeadsDirectory({
@@ -181,13 +192,17 @@ export function LeadsDirectory({
   canEdit?: boolean;
 }) {
   const [query, setQuery] = useState("");
-  const [status, setStatus] = useState<LeadStatus | "todos">("todos");
+  const [status, setStatus] = useState<StatusFilter>("todos");
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     const qDigits = q.replace(/\D/g, "");
     return rows.filter((r) => {
-      if (status !== "todos" && r.status !== status) return false;
+      if (status === "perdidos") {
+        if (!LEAD_STATUS_META[r.status].lost) return false;
+      } else if (status !== "todos" && r.status !== status) {
+        return false;
+      }
       if (!q) return true;
       const inText =
         r.name.toLowerCase().includes(q) ||
@@ -229,21 +244,25 @@ export function LeadsDirectory({
         </button>
       </div>
 
-      <div className="flex flex-wrap gap-1">
+      <div className="flex flex-wrap items-center gap-1">
         {FILTERS.map((f) => (
-          <button
-            key={f.key}
-            type="button"
-            onClick={() => setStatus(f.key)}
-            className={cn(
-              "rounded-lg px-3 py-1 text-xs font-medium transition-colors",
-              status === f.key
-                ? "bg-primary text-primary-foreground"
-                : "border text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {f.label}
-          </button>
+          <span key={f.key} className="contents">
+            {/* separa visualmente o funil ativo dos motivos de perda */}
+            {f.key === "perdidos" ? <span aria-hidden className="mx-1 h-4 w-px bg-border" /> : null}
+            <button
+              type="button"
+              onClick={() => setStatus(f.key)}
+              title={f.key !== "todos" && f.key !== "perdidos" ? LEAD_STATUS_META[f.key].hint : undefined}
+              className={cn(
+                "rounded-lg px-3 py-1 text-xs font-medium transition-colors",
+                status === f.key
+                  ? "bg-primary text-primary-foreground"
+                  : "border text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {f.label}
+            </button>
+          </span>
         ))}
       </div>
 

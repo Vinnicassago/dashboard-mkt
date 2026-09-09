@@ -1,7 +1,8 @@
 "use client";
 
 import { DataTable, type Column } from "@/components/ui/data-table";
-import { StatusSelect, statusOrder } from "./lead-status";
+import { StatusSelect } from "./lead-status";
+import { statusRank } from "@/lib/lead-status";
 import type { LeadStatus } from "@/lib/types";
 import { formatDateTime } from "@/lib/format";
 
@@ -43,7 +44,7 @@ function buildColumns(canEdit: boolean): Column<LeadRow>[] {
       key: "status",
       header: "Status",
       sortable: true,
-      sortValue: (r) => statusOrder[r.status],
+      sortValue: (r) => statusRank(r.status),
       render: (r) => (
         <StatusSelect id={r.id} name={r.name} status={r.status} canEdit={canEdit} />
       ),

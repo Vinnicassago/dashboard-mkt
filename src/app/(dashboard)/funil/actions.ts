@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { addLeadEvent, deleteLead, getData, setLeadStatus } from "@/lib/data/store";
 import { isBooked } from "@/lib/metrics";
+import { isBookedStatus, isLostStatus } from "@/lib/lead-status";
 import { can } from "@/lib/auth/guard";
 import { currentActor, newEventId } from "@/lib/auth/actor";
 import { sendCapiEvent } from "@/lib/meta/capi";
@@ -53,10 +54,23 @@ export async function changeLeadStatus(
 
   const prevStatus = lead.status;
   const wasBooked = isBooked(lead);
-  const becomesBooked = status === "agendou" || status === "compareceu" || status === "cliente";
-  const meetingAt = becomesBooked && !lead.meetingAt ? new Date().toISOString() : undefined;
+  const becomesBooked = isBookedStatus(status);
+  const now = new Date().toISOString();
+  const meetingAt = becomesBooked && !lead.meetingAt ? now : undefined;
 
-  await setLeadStatus(leadId, status, meetingAt, value);
+  /**
+   * Carimba os marcos desta transição. O store só grava o que ainda estiver
+   * vazio, então avançar e depois perder o lead preserva o fato — é isso que
+   * mantém a reunião no CPR mesmo quando o comercial registra o desfecho.
+   */
+  await setLeadStatus(leadId, status, {
+    meetingAt,
+    value,
+    bookedAt: becomesBooked ? now : undefined,
+    attendedAt: status === "reuniao_realizada" || status === "cliente" ? now : undefined,
+    closedAt: status === "cliente" ? now : undefined,
+    lostAt: isLostStatus(status) ? now : null,
+  });
 
   // Audit trail: record who changed the status, and from/to what.
   if (prevStatus !== status) {

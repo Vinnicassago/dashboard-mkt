@@ -9,7 +9,7 @@ import { getData } from "@/lib/data/store";
 import { activeBrandSlug } from "@/lib/active-brand";
 import { pageRange } from "@/lib/page-range";
 import { creativePerformance } from "@/lib/metrics";
-import { formatCurrency, formatPercent } from "@/lib/format";
+import { formatCurrency, formatInt, formatPercent } from "@/lib/format";
 
 function short(name: string, max = 24): string {
   return name.length > max ? name.slice(0, max - 1) + "…" : name;
@@ -32,13 +32,27 @@ export default async function CriativosPage({
   const enough = withLeads.filter((c) => c.leads >= MIN_LEADS);
   const bestCpl = [...(enough.length ? enough : withLeads)].sort((a, b) => a.cpl - b.cpl)[0];
   const bestCplLowSample = bestCpl != null && bestCpl.leads < MIN_LEADS;
-  const bestCtr = [...perf].sort((a, b) => b.ctr - a.ctr)[0];
+
+  /**
+   * Piso de volume para o CTR — a mesma proteção que o CPL acima já tinha.
+   *
+   * Sem ele, um criativo com R$ 0,10 de gasto e 1 clique em 7 impressões vence
+   * o ranking com "14,8% de cliques" e vira card-herói. CTR é uma razão: com
+   * denominador minúsculo ela é ruído, não desempenho.
+   */
+  const MIN_IMPRESSOES = 1000;
+  const gastoPeriodo = perf.reduce((s, c) => s + c.spend, 0);
+  const volumeOk = (c: (typeof perf)[number]) =>
+    c.impressions >= MIN_IMPRESSOES || (gastoPeriodo > 0 && c.spend >= gastoPeriodo * 0.01);
+  const comVolume = perf.filter(volumeOk);
+  const bestCtr = [...comVolume].sort((a, b) => b.ctr - a.ctr)[0];
+  const ctrDescartados = perf.length - comVolume.length;
   const fatigued = perf.filter((c) => c.fatigue.level === "fadigado");
 
   const cplBars = [...withLeads]
     .sort((a, b) => a.cpl - b.cpl)
     .map((c) => ({ label: short(c.name), value: c.cpl }));
-  const ctrBars = [...perf]
+  const ctrBars = [...comVolume]
     .sort((a, b) => b.ctr - a.ctr)
     .map((c) => ({ label: short(c.name), value: c.ctr }));
 
@@ -104,8 +118,14 @@ export default async function CriativosPage({
                 <p className="text-xs text-muted-foreground">Maior CTR</p>
                 <p className="font-semibold">{bestCtr.name}</p>
                 <p className="text-sm text-muted-foreground">
-                  {formatPercent(bestCtr.ctr)} de cliques
+                  {formatPercent(bestCtr.ctr)} de cliques · {formatInt(bestCtr.impressions)}{" "}
+                  impressões
                 </p>
+                {ctrDescartados > 0 ? (
+                  <p className="pt-0.5 text-xs text-muted-foreground">
+                    {ctrDescartados} criativo(s) fora do ranking por volume baixo.
+                  </p>
+                ) : null}
               </div>
             </CardContent>
           </Card>
@@ -121,7 +141,10 @@ export default async function CriativosPage({
             <EmptyState title="Ainda sem leads por criativo" />
           )}
         </ChartCard>
-        <ChartCard title="CTR por criativo" description="Cliques no link ÷ impressões.">
+        <ChartCard
+          title="CTR por criativo"
+          description={`Cliques no link ÷ impressões. Só criativos com ${formatInt(MIN_IMPRESSOES)}+ impressões ou 1%+ do gasto — abaixo disso a taxa é ruído.`}
+        >
           <HorizontalBars data={ctrBars} valueFormat="percent" barColor={CHART.series[1]} />
         </ChartCard>
       </div>

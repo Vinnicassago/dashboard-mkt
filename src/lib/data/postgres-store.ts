@@ -2,7 +2,7 @@ import "server-only";
 import type { Pool, PoolClient, QueryResult } from "pg";
 import { ensureSchema, pg } from "../db/pg";
 import { buildSeedData, buildSeedLeadEvents } from "./seed";
-import type { DataBackend, LpDelta, PublicUser, StoredUser } from "./backend";
+import type { DataBackend, LeadStatusPatch, LpDelta, PublicUser, StoredUser } from "./backend";
 import type {
   AdDaily,
   Creative,
@@ -57,7 +57,7 @@ const POST_COLS = ["id", "brand", "published_at", "type", "caption", "permalink"
 const CREATIVE_COLS = ["ad_id", "brand", "name", "format", "thumbnail_url", "video_plays", "thru_plays", "instagram_media_id", "instagram_permalink"];
 const AD_COLS = ["brand", "date", "ad_id", "campaign", "adset", "objective", "spend", "impressions", "reach", "frequency", "clicks", "leads"];
 const LP_COLS = ["brand", "date", "visits", "clicks", "form_submits"];
-const LEAD_COLS = ["id", "brand", "created_at", "name", "email", "phone", "utm_source", "utm_campaign", "utm_content", "status", "meeting_at", "value", "fbc", "fbp", "ga_client_id", "ga_session_id"];
+const LEAD_COLS = ["id", "brand", "created_at", "name", "email", "phone", "utm_source", "utm_campaign", "utm_content", "status", "meeting_at", "value", "booked_at", "attended_at", "closed_at", "lost_at", "robo_session_id", "fbc", "fbp", "ga_client_id", "ga_session_id"];
 const GOAL_COLS = ["brand", "metric", "period", "target", "lower_is_better"];
 const EVENT_COLS = ["id", "lead_id", "lead_name", "actor", "action", "from_status", "to_status", "created_at"];
 const DRAFT_COLS = ["id", "brand", "status", "created_at", "updated_at", "planned_for", "type", "pillar", "hook_text", "hook_spoken", "promise", "script", "caption", "cta_type", "cta_keyword", "duration_sec", "has_burned_captions", "score", "validated_at", "playbook_version", "published_post_id", "notes", "ai_review", "validation_failed"];
@@ -254,17 +254,33 @@ export const postgresBackend: DataBackend = {
     await touch(false);
   },
 
-  async setLeadStatus(id: string, status: LeadStatus, meetingAt?: string, value?: number) {
+  async setLeadStatus(id: string, status: LeadStatus, patch?: LeadStatusPatch) {
     const sets = ["status = $1"];
     const params: unknown[] = [status];
-    if (meetingAt !== undefined) {
-      params.push(meetingAt);
-      sets.push(`meeting_at = $${params.length}`);
-    }
-    if (value !== undefined) {
-      params.push(value);
-      sets.push(`value = $${params.length}`);
-    }
+
+    const set = (col: string, v: unknown) => {
+      params.push(v);
+      sets.push(`${col} = $${params.length}`);
+    };
+    /**
+     * Marco: só grava se ainda estiver vazio. O `coalesce` faz isso no próprio
+     * UPDATE, então o fato sobrevive a qualquer transição posterior (inclusive
+     * uma perda) sem precisar de leitura antes da escrita.
+     */
+    const stamp = (col: string, v?: string) => {
+      if (v === undefined) return;
+      params.push(v);
+      sets.push(`${col} = coalesce(${col}, $${params.length})`);
+    };
+
+    if (patch?.meetingAt !== undefined) set("meeting_at", patch.meetingAt);
+    if (patch?.value !== undefined) set("value", patch.value);
+    if (patch?.roboSessionId !== undefined) set("robo_session_id", patch.roboSessionId);
+    stamp("booked_at", patch?.bookedAt);
+    stamp("attended_at", patch?.attendedAt);
+    stamp("closed_at", patch?.closedAt);
+    if (patch?.lostAt !== undefined) set("lost_at", patch.lostAt);
+
     params.push(id);
     await run(`update leads set ${sets.join(", ")} where id = $${params.length}`, params);
     await touch();

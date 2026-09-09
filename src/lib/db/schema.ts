@@ -274,4 +274,80 @@ begin
     alter table goals add constraint goals_pkey primary key (brand, metric, period);
   end if;
 end $$;
+
+-- Régua nova de status do lead: "perdido" virou QUATRO motivos, e os dois
+-- estágios do meio ganharam nome próprio. Renomeia o que já existe (idempotente:
+-- num banco já migrado nenhuma linha casa e o update não faz nada).
+--
+-- ATENÇÃO ao 'perdido': a régua antiga não registrava o motivo, então não há de
+-- onde tirar um. Essas linhas caem em 'sem_resposta', a leitura que menos afirma
+-- sobre o lead — e por isso a quebra de perdas dos períodos anteriores à
+-- migração não deve ser lida como diagnóstico. Ver lib/lead-status.ts.
+update leads      set status      = 'agendado'          where status      = 'agendou';
+update leads      set status      = 'reuniao_realizada' where status      = 'compareceu';
+update leads      set status      = 'sem_resposta'      where status      = 'perdido';
+update lead_events set from_status = 'agendado'          where from_status = 'agendou';
+update lead_events set from_status = 'reuniao_realizada' where from_status = 'compareceu';
+update lead_events set from_status = 'sem_resposta'      where from_status = 'perdido';
+update lead_events set to_status   = 'agendado'          where to_status   = 'agendou';
+update lead_events set to_status   = 'reuniao_realizada' where to_status   = 'compareceu';
+update lead_events set to_status   = 'sem_resposta'      where to_status   = 'perdido';
+
+-- Marcos do lead: o que ACONTECEU, com data. O status continua sendo o estado
+-- atual (rótulo, cor, fila); a contagem de reuniões passa a ler destas colunas.
+-- Sem isso, marcar um lead como perda apaga a reunião que ele teve — e o custo
+-- por reunião, que é o North Star do painel, vira R$ 0,00.
+alter table leads add column if not exists booked_at timestamptz;
+alter table leads add column if not exists attended_at timestamptz;
+alter table leads add column if not exists closed_at timestamptz;
+alter table leads add column if not exists lost_at timestamptz;
+alter table leads add column if not exists robo_session_id text;
+
+-- Um lead do painel para cada sessão do robô, no máximo.
+create unique index if not exists leads_robo_session_idx
+  on leads (robo_session_id) where robo_session_id is not null;
+
+-- Backfill 1 — a data que o painel já guardava para a reunião.
+update leads set booked_at = meeting_at
+  where meeting_at is not null and booked_at is null;
+
+-- Backfill 2 — O HISTÓRICO. lead_events registra toda transição desde sempre,
+-- e nenhuma métrica jamais leu essa tabela. É dela que saem as reuniões dos
+-- leads que foram marcados como perda depois de terem agendado. Roda depois do
+-- rename acima, então só os nomes novos aparecem aqui.
+update leads l set booked_at = e.first_at from (
+  select lead_id, min(created_at) as first_at from lead_events
+  where to_status in ('agendado', 'reuniao_realizada', 'cliente')
+  group by lead_id
+) e where e.lead_id = l.id and l.booked_at is null;
+
+update leads l set attended_at = e.first_at from (
+  select lead_id, min(created_at) as first_at from lead_events
+  where to_status in ('reuniao_realizada', 'cliente')
+  group by lead_id
+) e where e.lead_id = l.id and l.attended_at is null;
+
+update leads l set closed_at = e.first_at from (
+  select lead_id, min(created_at) as first_at from lead_events
+  where to_status = 'cliente'
+  group by lead_id
+) e where e.lead_id = l.id and l.closed_at is null;
+
+-- Backfill 3 — quem está num estágio avançado AGORA mas não deixou rastro
+-- (importação de CSV, lead criado já agendado). created_at é o melhor palpite
+-- disponível; sem ele o lead sumiria da contagem.
+update leads set booked_at = created_at
+  where booked_at is null and status in ('agendado', 'reuniao_realizada', 'cliente');
+update leads set attended_at = created_at
+  where attended_at is null and status in ('reuniao_realizada', 'cliente');
+update leads set closed_at = created_at
+  where closed_at is null and status = 'cliente';
+
+-- lost_at descreve o estado atual, não um fato permanente: é limpo se o lead
+-- voltar ao caminho feliz.
+update leads set lost_at = coalesce(lost_at, created_at)
+  where status in ('contato_invalido', 'sem_resposta', 'sem_interesse', 'desistencia');
+update leads set lost_at = null
+  where lost_at is not null
+    and status not in ('contato_invalido', 'sem_resposta', 'sem_interesse', 'desistencia');
 `;

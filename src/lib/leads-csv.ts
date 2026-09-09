@@ -1,6 +1,7 @@
 import Papa from "papaparse";
 import type { Lead, LeadStatus } from "./types";
 import { DEFAULT_BRAND } from "./types";
+import { normalizeLeadStatus } from "./lead-status";
 
 /**
  * Importador de leads (backfill). Aceita o CSV exportado do rastreamento da
@@ -61,30 +62,41 @@ function buildHeaderMap(headers: string[]): Partial<Record<Field, string>> {
   return map;
 }
 
-// Mapeia rótulos de status (livres) para o enum interno.
-const STATUS_MAP: Record<string, LeadStatus> = {
-  "": "lead",
-  lead: "lead",
-  novo: "lead",
-  agendou: "agendou",
-  agendado: "agendou",
-  agendada: "agendou",
-  "reuniao agendada": "agendou",
-  compareceu: "compareceu",
-  realizada: "compareceu",
-  realizado: "compareceu",
-  cliente: "cliente",
+// Como o comercial DIGITA o status na planilha. O nome interno, o rótulo exibido
+// e a régua antiga já são resolvidos por `normalizeLeadStatus` — aqui ficam só
+// as variações que nenhuma das duas formas cobre, para as tabelas não drifitarem.
+const STATUS_ALIASES: Record<string, LeadStatus> = {
+  "sem contato": "lead",
+  agendada: "agendado",
+  marcada: "agendado",
+  "reuniao agendada": "agendado",
+  realizada: "reuniao_realizada",
+  realizado: "reuniao_realizada",
+  "reuniao feita": "reuniao_realizada",
   fechado: "cliente",
   vendido: "cliente",
   ganho: "cliente",
-  perdido: "perdido",
-  perdida: "perdido",
-  desqualificado: "perdido",
-  "nao qualificado": "perdido",
+  "telefone invalido": "contato_invalido",
+  "numero invalido": "contato_invalido",
+  "contato errado": "contato_invalido",
+  "nao existe": "contato_invalido",
+  "nao atende": "sem_resposta",
+  "nao respondeu": "sem_resposta",
+  "sem retorno": "sem_resposta",
+  sumiu: "sem_resposta",
+  "nao quis": "sem_interesse",
+  recusou: "sem_interesse",
+  desqualificado: "sem_interesse",
+  "nao qualificado": "sem_interesse",
+  desistiu: "desistencia",
+  cancelou: "desistencia",
+  "no show": "desistencia",
+  faltou: "desistencia",
 };
 
 function toStatus(raw?: string): LeadStatus {
-  return STATUS_MAP[norm(raw ?? "")] ?? "lead";
+  const key = norm(raw ?? "");
+  return STATUS_ALIASES[key] ?? normalizeLeadStatus(key);
 }
 
 /** Mesmo esquema de id do /api/track, para deduplicar com os leads ao vivo. */
@@ -148,9 +160,14 @@ export function parseLeadsCsv(text: string): LeadsParseResult {
   return { leads, matchedColumns: map, skipped };
 }
 
-/** Modelo pronto para preencher, no formato do rastreamento da landing page. */
+/**
+ * Modelo pronto para preencher, no formato do rastreamento da landing page.
+ * Status em branco = lead novo; os demais aceitam o nome do status ou os
+ * apelidos de `STATUS_ALIASES` ("não atende", "desistiu", "fechado"…).
+ */
 export const LEADS_CSV_TEMPLATE = [
   "created_at,event_id,Status,nome,whatsapp,email,utm_source,utm_campaign,utm_content,fbp,fbc",
   "2026-07-27T21:53:40-03:00,lead_d9de70b9-e60a-4ce5,,Fabio,31997598013,fabio@gmail.com,metaads,CP - Leads - Brunno quevedo,video brunno 2 diagnostico|12025253786,,",
-  "2026-07-28T00:02:32-03:00,lead_4d50c064-7d47-4c25,agendou,Beatriz,72727383838,beatriz@gmail.com,ig,,link_in_bio,,",
+  "2026-07-28T00:02:32-03:00,lead_4d50c064-7d47-4c25,agendado,Beatriz,72727383838,beatriz@gmail.com,ig,,link_in_bio,,",
+  "2026-07-28T09:15:07-03:00,lead_8b31af02-1c99-40aa,não atende,Rogério,11988887777,rogerio@gmail.com,metaads,CP - Leads - Brunno quevedo,video brunno 2 diagnostico|12025253786,,",
 ].join("\n");

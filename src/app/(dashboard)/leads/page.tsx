@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Clock } from "lucide-react";
 import { LeadsDirectory, type LeadDirectoryRow } from "@/components/leads/leads-directory";
 import { LeadActivity } from "@/components/leads/lead-activity";
@@ -43,11 +44,20 @@ export default async function LeadsPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Clock className="size-4 text-primary" />
-              Fila do comercial ({queue.open.length})
+              Leads sem desfecho registrado ({queue.open.length})
             </CardTitle>
+            {/*
+              Renomeado: "fila do comercial" agora é a página /fila, que junta
+              estes leads com quem está parado no robô e com o especialista. Duas
+              telas com o mesmo nome e contagens diferentes era parte do problema.
+            */}
             <CardDescription>
-              Leads ainda sem contato, do mais antigo ao mais novo. Responder rápido é o
-              que mais aumenta o agendamento — e derruba o custo por reunião sem gastar mais.
+              Entraram e ninguém marcou nenhum desfecho — este é o estoque bruto, do mais
+              antigo ao mais novo.{" "}
+              <Link href="/fila" className="text-primary underline-offset-4 hover:underline">
+                A fila de contato completa
+              </Link>{" "}
+              ordena estes junto com quem está esperando o robô e o especialista.
             </CardDescription>
           </CardHeader>
           <CardContent>

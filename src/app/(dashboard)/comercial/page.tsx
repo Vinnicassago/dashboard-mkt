@@ -30,8 +30,19 @@ function duracao(min: number | null): string {
 }
 
 export default async function ComercialPage() {
-  const { rows, kpis } = await getComercial();
+  const { rows, kpis, falha } = await getComercial();
   const canEdit = await can("leads:write");
+
+  // Uma leitura que falhou renderizaria "0 leads recebidos · 0 reuniões" — e a
+  // fila de quem está esperando contato sumiria da tela sem nenhum aviso.
+  if (falha?.tipo === "erro") {
+    return (
+      <EmptyState
+        title="Não consegui ler o atendimento"
+        hint={`As credenciais do robô estão definidas, mas a consulta falhou. Nada é exibido para não passar zeros por números reais. Detalhe: ${falha.detalhe}`}
+      />
+    );
+  }
 
   if (!kpis) {
     return (

@@ -319,7 +319,20 @@ export interface LpDaily {
 
 // ------------------------- Leads & meetings -------------------------
 
-export type LeadStatus = "lead" | "agendou" | "compareceu" | "cliente" | "perdido";
+/**
+ * Estágio do lead. `lead` é a entrada (chegou, ninguém contatou ainda); os
+ * quatro motivos de perda encerram o lead — o que muda entre eles é a decisão
+ * que provocam. Rótulo, cor e agrupamento ficam em `lib/lead-status.ts`.
+ */
+export type LeadStatus =
+  | "lead"
+  | "agendado"
+  | "reuniao_realizada"
+  | "cliente"
+  | "contato_invalido"
+  | "sem_resposta"
+  | "sem_interesse"
+  | "desistencia";
 
 export interface Lead {
   id: string;
@@ -336,6 +349,31 @@ export interface Lead {
   meetingAt?: string; // full ISO datetime when scheduled
   /** Valor da carta/contrato (BRL), preenchido quando o lead vira cliente. */
   value?: number;
+
+  /**
+   * MARCOS — o que aconteceu com o lead, com data. Diferente de `status`, que é
+   * um estado mutável e só sabe onde o lead está AGORA.
+   *
+   * É a separação que faz o CPR parar de mentir: quem agendou e depois virou
+   * perda mantém `bookedAt`, então a reunião não desaparece da história quando
+   * o comercial registra o desfecho. O `status` continua sendo a fonte do
+   * rótulo, da cor e da fila; a CONTAGEM de reuniões passa a ler daqui.
+   *
+   * `bookedAt`/`attendedAt`/`closedAt` são gravados uma única vez e nunca
+   * sobrescritos. `lostAt` acompanha o estado atual: é limpo se o lead voltar
+   * para o caminho feliz.
+   */
+  bookedAt?: string;
+  attendedAt?: string;
+  closedAt?: string;
+  lostAt?: string;
+
+  /**
+   * Sessão correspondente no banco do robô de WhatsApp. Gravado no primeiro
+   * pareamento por telefone, para o casamento não precisar ser refeito (nem
+   * depender de o telefone continuar batendo).
+   */
+  roboSessionId?: string;
   /**
    * Pseudonymous identifiers captured on the landing page. Kept so a later
    * server-side event (Schedule) can still be matched to the same person.

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import {
   DollarSign,
   Eye,
@@ -128,7 +129,7 @@ export default async function TrafegoPage({
         />
         <KpiCard
           label="CPL"
-          value={formatCurrency(obj.conversao.cpl)}
+          value={obj.conversao.leads > 0 ? formatCurrency(obj.conversao.cpl) : "—"}
           Icon={Target}
           hint={obj.hasDiscovery ? "só conversão" : undefined}
           delta={prevObj ? pctDelta(obj.conversao.cpl, prevObj.conversao.cpl, { lowerIsBetter: true }) : undefined}
@@ -162,9 +163,19 @@ export default async function TrafegoPage({
               </div>
               <Stat label="Investimento" value={formatCurrency0(obj.conversao.spend)} />
               <Stat label="Leads" value={formatInt(obj.conversao.leads)} />
-              <Stat label="CPL" value={formatCurrency(obj.conversao.cpl)} highlight />
+              {/* Sem denominador o custo é DESCONHECIDO, não zero — e "R$ 0,00"
+                  ao lado de "Reuniões 0" lê-se como custo excelente. */}
+              <Stat
+                label="CPL"
+                value={obj.conversao.leads > 0 ? formatCurrency(obj.conversao.cpl) : "—"}
+                highlight
+              />
               <Stat label="Reuniões" value={formatInt(obj.conversao.meetings)} />
-              <Stat label="Custo por reunião" value={formatCurrency(obj.conversao.cpr)} highlight />
+              <Stat
+                label="Custo por reunião"
+                value={obj.conversao.meetings > 0 ? formatCurrency(obj.conversao.cpr) : "—"}
+                highlight
+              />
             </div>
 
             {/* Descoberta */}
@@ -214,18 +225,39 @@ export default async function TrafegoPage({
         <CardContent className="space-y-3">
           <div className="flex flex-wrap items-baseline justify-between gap-2 text-sm">
             <span className="tabular text-2xl font-semibold">{formatCurrency0(spentAllTime)}</span>
-            <span className="text-muted-foreground">
-              de {formatCurrency0(budget)} · {formatPercent(pacing, 0)} consumido
-            </span>
+            {/*
+              Orçamento zero não é "consumi 0%" — é campo em branco. Mostrar
+              "de R$ 0 · 0% consumido" com a barra vazia dava a entender que o
+              painel mediu alguma coisa.
+            */}
+            {budget > 0 ? (
+              <span className="text-muted-foreground">
+                de {formatCurrency0(budget)} · {formatPercent(pacing, 0)} consumido
+              </span>
+            ) : (
+              <Link
+                href="/config"
+                className="text-xs font-medium text-primary underline-offset-4 hover:underline"
+              >
+                Cadastrar o orçamento para ver o ritmo →
+              </Link>
+            )}
           </div>
-          <div className="h-2.5 w-full overflow-hidden rounded-full bg-foreground/[0.07]">
-            <div className="h-full rounded-full bg-primary" style={{ width: `${pacing * 100}%` }} />
-          </div>
+          {budget > 0 ? (
+            <div className="h-2.5 w-full overflow-hidden rounded-full bg-foreground/[0.07]">
+              <div
+                className="h-full rounded-full bg-primary"
+                style={{ width: `${pacing * 100}%` }}
+              />
+            </div>
+          ) : null}
           <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-muted-foreground">
             <span>CPM {formatCurrency(k.cpm)}</span>
             <span>CPC {formatCurrency(k.cpc)}</span>
             <span>Frequência {formatDecimal(k.frequency, 2)}</span>
-            <span>Budget diário {formatCurrency0(data.campaign.dailyBudget ?? 0)}</span>
+            {(data.campaign.dailyBudget ?? 0) > 0 ? (
+              <span>Budget diário {formatCurrency0(data.campaign.dailyBudget!)}</span>
+            ) : null}
           </div>
           {pace.status !== "unknown" && pace.projectedSpend != null ? (
             <p
