@@ -35,26 +35,80 @@ import {
  * (nowIso) e devolve uma lista ordenada por severidade. É o núcleo da bússola.
  */
 
-export type Severity = "alta" | "media" | "baixa";
+/**
+ * `agora` existe acima de `alta` por um motivo concreto: sem ela, um SLA
+ * estourado em 24× empatava com "criativo fadigando", e o motor propunha
+ * otimizar a mídia — que está barata — enquanto pessoas já pagas esperavam
+ * dias por um telefonema. Reserve `agora` para o que já custou dinheiro e
+ * ainda dá para recuperar sem gastar mais.
+ */
+export type Severity = "agora" | "alta" | "media" | "baixa";
 
 export interface Recommendation {
   id: string;
   severity: Severity;
   title: string; // a AÇÃO (verbo)
   detail: string; // porquê + número
+  /** Para onde a ação leva. Sem destino, "ação" é só texto. */
+  href?: string;
+  /** Quem executa: marketing, comercial ou o robô. */
+  dono?: "MKT" | "COM" | "BOT";
+  /** Mídia já paga presa atrás desta ação — desempata a ordem. */
+  midiaParada?: number;
 }
 
-const ORDER: Record<Severity, number> = { alta: 0, media: 1, baixa: 2 };
+const ORDER: Record<Severity, number> = { agora: -1, alta: 0, media: 1, baixa: 2 };
+
+/**
+ * Pessoas paradas no funil, vindas da Fila. É o insumo que faltava: até aqui
+ * `buildRecommendations` só recebia o store do painel — nenhuma linha sobre
+ * robô, fila ou atendimento — e por isso era estruturalmente incapaz de
+ * sugerir "ligue para quem está esperando".
+ */
+export interface FilaParaRecs {
+  /** Uma entrada por junta com gente parada. */
+  grupos: {
+    etapa: string;
+    label: string;
+    pessoas: number;
+    /** Mídia já paga por essas pessoas. */
+    midiaParada: number;
+    slaHoras: number;
+    dono: "MKT" | "COM" | "BOT";
+  }[];
+}
 
 export function buildRecommendations(
   data: DashboardData,
   range: DateRange | undefined,
   nowIso: string,
+  fila?: FilaParaRecs,
 ): Recommendation[] {
   // Marca de awareness (só seguidores): ações de crescimento, não de CPR/CPL.
   if (isAwareness(data.campaign.brand)) return buildAwarenessRecommendations(data, range, nowIso);
 
   const recs: Recommendation[] = [];
+
+  /*
+   * 0. GENTE PARADA — antes de qualquer coisa de mídia.
+   *
+   * Estas pessoas já foram pagas: destravá-las não custa verba nova e é a única
+   * alavanca da tela que muda o custo por reunião esta semana. Enquanto elas
+   * existirem, nenhuma otimização de criativo é a ação número 1.
+   */
+  for (const g of (fila?.grupos ?? []).sort((a, b) => b.midiaParada - a.midiaParada)) {
+    if (g.pessoas <= 0) continue;
+    recs.push({
+      id: `fila-${g.etapa}`,
+      severity: "agora",
+      dono: g.dono,
+      href: "/fila",
+      midiaParada: g.midiaParada,
+      title: `Falar com ${g.pessoas} ${g.pessoas > 1 ? "pessoas paradas" : "pessoa parada"} em "${g.label}"`,
+      detail: `${formatCurrency0(g.midiaParada)} de mídia já paga esperando um contato. O prazo desta etapa é ${g.slaHoras}h. Não custa verba nova.`,
+    });
+  }
+
   const k = overviewKpis(data, range);
   const creatives = creativePerformance(data, range);
   const convAdsets = adsetPerformance(data, range).filter((a) => a.bucket === "conversao");
@@ -138,7 +192,13 @@ export function buildRecommendations(
   }
 
   recs.push(...buildOrganicContentRecommendations(data, range, nowIso));
-  return recs.sort((a, b) => ORDER[a.severity] - ORDER[b.severity]).slice(0, 6);
+  // Dentro da mesma severidade, mais dinheiro parado vem primeiro.
+  return recs
+    .sort(
+      (a, b) =>
+        ORDER[a.severity] - ORDER[b.severity] || (b.midiaParada ?? 0) - (a.midiaParada ?? 0),
+    )
+    .slice(0, 6);
 }
 
 /**
@@ -360,5 +420,11 @@ function buildAwarenessRecommendations(
   }
 
   recs.push(...buildOrganicContentRecommendations(data, range, nowIso));
-  return recs.sort((a, b) => ORDER[a.severity] - ORDER[b.severity]).slice(0, 6);
+  // Dentro da mesma severidade, mais dinheiro parado vem primeiro.
+  return recs
+    .sort(
+      (a, b) =>
+        ORDER[a.severity] - ORDER[b.severity] || (b.midiaParada ?? 0) - (a.midiaParada ?? 0),
+    )
+    .slice(0, 6);
 }

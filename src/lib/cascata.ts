@@ -72,6 +72,42 @@ export interface Degrau {
   nota?: string;
 }
 
+/**
+ * Versão curta da cascata, para a Visão Geral.
+ *
+ * Onze degraus com selo de fonte, custo unitário e nota de rodapé é peça de
+ * consulta: o gestor lê os três primeiros e desiste antes de chegar no degrau
+ * onde está o problema. Aqui ficam a âncora, os degraus onde há gente parada e
+ * o fim do funil — as taxas são RECALCULADAS entre os que sobraram, senão o
+ * percentual apontaria para um degrau que não está mais na tela.
+ *
+ * A versão completa continua em /jornada.
+ */
+export function resumirCascata(degraus: Degrau[]): Degrau[] {
+  const manter = degraus.filter(
+    (d, i) =>
+      i === 0 ||
+      d.ehAncora ||
+      (d.parados ?? 0) > 0 ||
+      i === degraus.length - 1 ||
+      d.valor === null,
+  );
+
+  return manter.map((d, i) => {
+    if (i === 0) return { ...d, daAnterior: undefined, perda: undefined };
+    const ant = manter[i - 1];
+    const podeCalcular = d.valor != null && ant.valor != null && ant.valor > 0;
+    return {
+      ...d,
+      // Sem trocaDeSistema no resumo: com degraus omitidos, a junta deixaria de
+      // marcar uma fronteira real e viraria enfeite.
+      trocaDeSistema: false,
+      daAnterior: podeCalcular ? d.valor! / ant.valor! : undefined,
+      perda: podeCalcular ? Math.max(0, ant.valor! - d.valor!) : undefined,
+    };
+  });
+}
+
 /** Coisa que parece perda e não é — metade da resposta a "para onde olhar". */
 export interface NaoAgir {
   titulo: string;

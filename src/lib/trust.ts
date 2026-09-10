@@ -115,14 +115,19 @@ function diasSemDado(data: DashboardData, range?: DateRange): { faltando: number
  * configurada" existe em separado. Sem balde de "não classificado", um erro de
  * atribuição é indistinguível de um acerto (meta/config.ts:111-131).
  */
-function gastoDeOutraMarca(input: TrustInput): { valor: number; tokens: string[] } {
+function gastoDeOutraMarca(input: TrustInput): {
+  valor: number;
+  tokens: string[];
+  /** Havia regra declarada, mas nenhuma campanha casou com ela. */
+  regraInerte: boolean;
+} {
   const minha = input.data.campaign.brand;
   const outros = input.brandRules
     .filter((b) => b.slug !== minha)
     .flatMap((b) => b.campaignMatch)
     .map((t) => t.trim().toLowerCase())
     .filter((t) => t && !/^\d+$/.test(t));
-  if (outros.length === 0) return { valor: 0, tokens: [] };
+  if (outros.length === 0) return { valor: 0, tokens: [], regraInerte: false };
 
   const casados = new Set<string>();
   let valor = 0;
@@ -134,7 +139,45 @@ function gastoDeOutraMarca(input: TrustInput): { valor: number; tokens: string[]
       casados.add(hit);
     }
   }
-  return { valor, tokens: [...casados] };
+  return { valor, tokens: [...casados], regraInerte: valor === 0 };
+}
+
+/**
+ * Prefixos entre colchetes que aparecem nos nomes de campanha e que NENHUMA
+ * regra de marca reivindica.
+ *
+ * Existe porque "regra configurada" não é o mesmo que "regra funcionando". O
+ * match é substring literal, então um token quase-certo (`krn -` em vez de
+ * `[KRN]`) casa com zero campanhas e o painel fica calado — o gasto da outra
+ * marca continua inflando este denominador sem nenhum aviso.
+ *
+ * Este check não depende do que foi digitado: olha o DADO. Se metade das
+ * campanhas se identifica com `[KRN]` e nada as reivindica, isso aparece.
+ */
+function prefixosOrfaos(input: TrustInput): { prefixo: string; valor: number }[] {
+  const minha = input.data.campaign.brand;
+  const tokens = input.brandRules
+    .flatMap((b) => (b.slug === minha ? [] : b.campaignMatch))
+    .map((t) => t.trim().toLowerCase())
+    .filter(Boolean);
+
+  const porPrefixo = new Map<string, number>();
+  for (const row of input.data.adDaily) {
+    const nome = row.campaign ?? "";
+    const m = /^\s*\[([^\]]{1,12})\]/.exec(nome);
+    if (!m) continue;
+    const prefixo = `[${m[1].trim()}]`;
+    // Já reivindicado por alguma regra? Então não é órfão.
+    if (tokens.some((t) => nome.toLowerCase().includes(t))) continue;
+    porPrefixo.set(prefixo, (porPrefixo.get(prefixo) ?? 0) + row.spend);
+  }
+
+  /*
+   * O prefixo desta marca é o mais gasto — descartá-lo evita acusar as próprias
+   * campanhas ([BRN]) de serem de outra marca.
+   */
+  const ordenado = [...porPrefixo.entries()].sort((a, b) => b[1] - a[1]);
+  return ordenado.slice(1).map(([prefixo, valor]) => ({ prefixo, valor }));
 }
 
 // ---------------------------------------------------------------- veredito
@@ -175,6 +218,25 @@ export function assessTrust(input: TrustInput): TrustReport {
     });
   }
 
+  /*
+   * 2a. Amostra insuficiente. Uma reunião não faz um custo por reunião: o
+   * número existe, é aritmeticamente correto e não sustenta decisão nenhuma —
+   * a próxima reunião o corta pela metade. A cascata já escreve "n=1 — não é
+   * uma taxa" no degrau; sem esta trava o KPI do topo exibia o mesmo valor com
+   * cara de medição estável.
+   */
+  const MIN_REUNIOES = 3;
+  if (kpis.meetings > 0 && kpis.meetings < MIN_REUNIOES) {
+    travas.push({
+      id: "cpr-amostra",
+      nivel: "quarentena",
+      titulo: `Só ${kpis.meetings} reunião(ões) no período`,
+      detalhe: `Com menos de ${MIN_REUNIOES} reuniões, o custo por reunião oscila demais para orientar verba — a próxima reunião muda o número pela metade. Ele volta a ser exibido quando houver amostra.`,
+      afeta: ["cpr"],
+      cta: { label: "Ver a fila de contato", href: "/fila" },
+    });
+  }
+
   // 2b. Mesmo raciocínio um degrau acima: sem lead, CPL não é R$ 0,00.
   if (kpis.leads === 0 && kpis.spendConversao > 0) {
     travas.push({
@@ -190,24 +252,41 @@ export function assessTrust(input: TrustInput): TrustReport {
 
   // 3. Gasto de outra marca dentro deste denominador — infla tudo que divide
   //    por investimento. O real é MENOR que o exibido, daí "teto".
+  const AFETA_CUSTO: MetricKey[] = [
+    "spend",
+    "cpl",
+    "cplBlended",
+    "split",
+    "cpm",
+    "costPerFollower",
+    "cpr",
+  ];
+  const multimarca = input.brandRules.length > 1 && kpis.spendTotal > 0;
+
   const contaminacao = gastoDeOutraMarca(input);
-  if (contaminacao.valor > 0 && kpis.spendTotal > 0) {
-    const pct = contaminacao.valor / kpis.spendTotal;
-    if (pct > 0.05) {
-      travas.push({
-        id: "marca-contaminada",
-        nivel: "teto",
-        titulo: `R$ ${Math.round(contaminacao.valor)} de outra marca neste total`,
-        detalhe: `${Math.round(pct * 100)}% do investimento vem de campanhas que casam com "${contaminacao.tokens.join('", "')}". Investimento, split por objetivo, CPL e custo por seguidor estão inflados — o valor real é menor.`,
-        afeta: ["spend", "cpl", "cplBlended", "split", "cpm", "costPerFollower", "cpr"],
-        cta: { label: "Reclassificar marcas", href: "/config" },
-      });
-    }
-  } else if (input.brandRules.length > 1 && kpis.spendTotal > 0) {
-    // Nenhuma outra marca declarou token: tudo cai no catch-all sem aviso.
+  const pctContaminado = kpis.spendTotal > 0 ? contaminacao.valor / kpis.spendTotal : 0;
+
+  if (pctContaminado > 0.05) {
+    travas.push({
+      id: "marca-contaminada",
+      nivel: "teto",
+      titulo: `R$ ${Math.round(contaminacao.valor)} de outra marca neste total`,
+      detalhe: `${Math.round(pctContaminado * 100)}% do investimento vem de campanhas que casam com "${contaminacao.tokens.join('", "')}". Investimento, split por objetivo, CPL e custo por seguidor estão inflados — o valor real é menor.`,
+      afeta: AFETA_CUSTO,
+      cta: { label: "Reclassificar marcas", href: "/config" },
+    });
+  }
+
+  /*
+   * As três formas de a separação de marcas falhar em silêncio. São checadas
+   * de forma INDEPENDENTE de propósito: aninhá-las fazia o caso do meio —
+   * regra preenchida que não casa com nada — não disparar alarme nenhum.
+   */
+  if (multimarca) {
     const semRegra = input.brandRules
       .filter((b) => b.slug !== data.campaign.brand)
       .every((b) => b.campaignMatch.length === 0);
+
     if (semRegra) {
       travas.push({
         id: "marca-sem-regra",
@@ -215,8 +294,32 @@ export function assessTrust(input: TrustInput): TrustReport {
         titulo: "A separação de marcas nunca foi configurada",
         detalhe:
           "Há mais de uma marca no mesmo ad account e nenhuma regra que diga quais campanhas são de qual. Sem ela, tudo que não casa cai nesta marca por padrão — e um erro de atribuição fica indistinguível de um acerto.",
-        afeta: ["spend", "cpl", "cplBlended", "split", "cpm", "costPerFollower", "cpr"],
+        afeta: AFETA_CUSTO,
         cta: { label: "Definir a regra", href: "/config" },
+      });
+    } else if (contaminacao.regraInerte) {
+      travas.push({
+        id: "marca-regra-inerte",
+        nivel: "teto",
+        titulo: "A regra de separação de marcas não está pegando nada",
+        detalhe:
+          "Existe uma regra salva, mas ela não casou com NENHUMA campanha do período. O match é uma substring literal do nome — um token quase certo pega zero. Enquanto isso, tudo continua caindo nesta marca.",
+        afeta: AFETA_CUSTO,
+        cta: { label: "Conferir a regra", href: "/config" },
+      });
+    }
+
+    // Independente da regra: campanhas que se identificam com um prefixo que
+    // ninguém reivindica são a evidência mais direta de atribuição errada.
+    for (const orfao of prefixosOrfaos(input)) {
+      if (orfao.valor / kpis.spendTotal <= 0.05) continue;
+      travas.push({
+        id: `marca-prefixo-${orfao.prefixo}`,
+        nivel: "teto",
+        titulo: `R$ ${Math.round(orfao.valor)} em campanhas ${orfao.prefixo} estão nesta marca`,
+        detalhe: `${Math.round((orfao.valor / kpis.spendTotal) * 100)}% do investimento vem de campanhas marcadas ${orfao.prefixo} no Ads Manager, e nenhuma regra as reivindica. Use ${orfao.prefixo} como token da outra marca e reclassifique.`,
+        afeta: AFETA_CUSTO,
+        cta: { label: "Corrigir a atribuição", href: "/config" },
       });
     }
   }
@@ -242,7 +345,7 @@ export function assessTrust(input: TrustInput): TrustReport {
       nivel: "config",
       titulo: "Nenhuma meta cadastrada",
       detalhe:
-        'Sem meta, "R$ 26,42 por lead" é só um número — não dá para dizer se está bom. E as duas regras de severidade alta do motor de recomendação ("CPL acima da meta" e "custo por reunião acima da meta") nunca disparam: ele está rodando a meia força.',
+        "Sem meta, nenhum custo desta tela dá para julgar — só comparar com a semana passada. E as duas regras de severidade alta do motor de recomendação (CPL e custo por reunião acima do alvo) nunca disparam: ele está rodando a meia força.",
       afeta: [],
       cta: { label: "Cadastrar metas", href: "/config" },
     });

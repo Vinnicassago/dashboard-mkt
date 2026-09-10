@@ -1,8 +1,7 @@
-import { DollarSign, CalendarCheck, Handshake, Target, UserPlus, Sparkles, Users, Radio, Heart, ExternalLink, MessageCircle } from "lucide-react";
+import { DollarSign, UserPlus, Sparkles, Users, Radio } from "lucide-react";
 import Link from "next/link";
 import { ExampleBanner } from "@/components/example-banner";
-import { KpiCard, type KpiDelta } from "@/components/kpi/kpi-card";
-import { ObjectiveSplitBar } from "@/components/kpi/objective-split";
+import { KpiCard } from "@/components/kpi/kpi-card";
 import { DataQualityCard } from "@/components/kpi/data-quality";
 import { GoalBar } from "@/components/kpi/goal-bar";
 import { absDelta, pctDelta } from "@/components/kpi/delta";
@@ -14,22 +13,20 @@ import { aiAnalysisKey } from "@/lib/data/backend";
 import { activeBrandSlug } from "@/lib/active-brand";
 import { brandDef } from "@/lib/brands";
 import { pageRange } from "@/lib/page-range";
-import { getCascataFontes, getComercial, getTransferidos } from "@/lib/robo/client";
-import { montarCascata } from "@/lib/cascata";
+import { getCascataFontes, getComercial } from "@/lib/robo/client";
+import { montarCascata, resumirCascata } from "@/lib/cascata";
+import { contarParados, montarFarol } from "@/lib/farol";
+import { FarolCard } from "@/components/kpi/farol-card";
 import { Cascata } from "@/components/charts/cascata";
 import { resolveMetaBrands } from "@/lib/meta/config";
 import { assessTrust } from "@/lib/trust";
 import { TrustBand } from "@/components/kpi/trust-band";
 import {
-  actualForGoal,
   awarenessKpis,
-  dailySeries,
   dataQualityChecks,
-  delta,
   followerSeries,
   goalProgress,
   igAccountTotals,
-  igEngagementSeries,
   overviewKpis,
   previousRange,
   type DataWarning,
@@ -50,59 +47,9 @@ import {
   formatCurrency,
   formatCurrency0,
   formatCurrencyOrDash,
-  formatDecimal,
   formatInt,
-  formatPercent,
-  formatPercentValue,
 } from "@/lib/format";
-import type { GoalMetric } from "@/lib/types";
 import { CHART } from "@/components/charts/colors";
-
-function makeDelta(
-  cur: number,
-  prev: number | undefined,
-  higherIsGood: boolean,
-): KpiDelta | undefined {
-  if (prev === undefined) return undefined;
-  const d = delta(cur, prev);
-  if (d.direction === "flat") return { text: "estável", direction: "flat", intent: "neutral" };
-  const isGood = (d.direction === "up") === higherIsGood;
-  return {
-    text: formatPercent(Math.abs(d.pct), 0),
-    direction: d.direction,
-    intent: isGood ? "good" : "bad",
-  };
-}
-
-const GOAL_LABEL: Record<GoalMetric, string> = {
-  leads: "Leads",
-  meetings: "Reuniões",
-  cpl: "CPL",
-  cpr: "Custo por reunião",
-  spend: "Investimento",
-  followers: "Seguidores",
-  retencao_reels: "Retenção de reels",
-  alcance_base: "Alcance sobre a base",
-  saves_1k: "Salvos / 1k views",
-  comentarios_post: "Coment. / post",
-  compartilhamentos_post: "Compart. / post",
-  posts_semana: "Posts / semana",
-  conversas_dm: "Conversas de DM",
-};
-
-function goalValueText(metric: GoalMetric, v: number): string {
-  if (metric === "cpl" || metric === "cpr" || metric === "spend") return formatCurrency0(v);
-  // metas percentuais guardam VALOR percentual (40 = 40%)
-  if (metric === "retencao_reels" || metric === "alcance_base") return formatPercentValue(v, 0);
-  if (
-    metric === "saves_1k" ||
-    metric === "comentarios_post" ||
-    metric === "compartilhamentos_post" ||
-    metric === "posts_semana"
-  )
-    return formatDecimal(v, 1);
-  return formatInt(v);
-}
 
 export default async function OverviewPage({
   searchParams,
@@ -112,11 +59,6 @@ export default async function OverviewPage({
   const brand = brandDef(await activeBrandSlug());
   const data = await getData(brand.slug);
   const { range, rangeKey } = pageRange(data, (await searchParams).range);
-
-  // Leads que o robô do WhatsApp qualificou e passou ao especialista no período.
-  // Vem de OUTRO banco (ROBO_SUPABASE_*), então tem card próprio: `falha` diz se
-  // o robô está desligado (card some) ou se a leitura quebrou (card mostra "—").
-  const transferidos = await getTransferidos(range?.from, range?.to);
 
   // Leitura de IA guardada (Etapa 3). Só é buscada e exibida quando a camada de
   // IA está ligada — sem chave, o card nem existe.
@@ -134,7 +76,6 @@ export default async function OverviewPage({
   ) : null;
 
   const insights = buildInsights(data, range);
-  const recs = buildRecommendations(data, range, new Date().toISOString());
   const hint = range ? "vs. período anterior" : "no período";
 
   const lastSync = await getLastSync();
@@ -146,12 +87,19 @@ export default async function OverviewPage({
   // Marca de awareness (krone.capital): visão de crescimento de perfil, não de funil.
   if (brand.type === "awareness") {
     return (
-      <AwarenessOverview data={data} range={range} recs={recs} insights={insights} warnings={warnings} hint={hint} aiCard={aiCard} />
+      <AwarenessOverview
+        data={data}
+        range={range}
+        recs={buildRecommendations(data, range, new Date().toISOString())}
+        insights={insights}
+        warnings={warnings}
+        hint={hint}
+        aiCard={aiCard}
+      />
     );
   }
 
   const k = overviewKpis(data, range);
-  const prev = range ? overviewKpis(data, previousRange(range)) : undefined;
 
   /**
    * O que dá (e o que não dá) para afirmar com estes números.
@@ -182,289 +130,160 @@ export default async function OverviewPage({
     comercial: fontesCascata.comercial,
     investimentoConversao: k.spendConversao,
   });
-  const series = dailySeries(data, range);
-
-  // Orgânico do perfil — o pago compra visita, mas é o orgânico que converte quem chega.
   const ig = igAccountTotals(data.igAccountDaily, range);
-  const igPrev = range ? igAccountTotals(data.igAccountDaily, previousRange(range)) : undefined;
-  const igDaily = igEngagementSeries(data.igAccountDaily, range);
-  const hasOrganic = ig.days > 0;
+
+  /*
+   * O FAROL e as AÇÕES vêm primeiro, e o resto existe para sustentá-los.
+   *
+   * Antes esta página abria com seis KPIs do mesmo tamanho e terminava, dez
+   * blocos abaixo, no único card que diz o que fazer. Além da ordem invertida,
+   * ela repetia: "7 dias sem dados" aparecia cinco vezes, o custo por reunião
+   * duas vezes com valores 2,4x diferentes, e "Transferidos: 6" duplicava um
+   * degrau da cascata lendo outra view do banco.
+   */
+  const { parados, midiaParada } = contarParados(cascata.degraus);
+
+  // As juntas com gente parada viram a ação nº 1 — o motor de recomendação não
+  // enxergava robô nem fila, então nunca propunha falar com quem já foi pago.
+  const SLA_POR_DEGRAU: Record<string, { sla: number; dono: "MKT" | "COM" | "BOT" }> = {
+    convite: { sla: 24, dono: "BOT" },
+    transferidos: { sla: 2, dono: "COM" },
+  };
+  const recs = buildRecommendations(data, range, new Date().toISOString(), {
+    grupos: cascata.degraus
+      .filter((d) => d.parados)
+      .map((d) => ({
+        etapa: d.key,
+        label: d.label,
+        pessoas: d.parados!,
+        midiaParada: d.parados! * (d.custoUnitario ?? 0),
+        slaHoras: SLA_POR_DEGRAU[d.key]?.sla ?? 24,
+        dono: SLA_POR_DEGRAU[d.key]?.dono ?? "COM",
+      })),
+  });
+
+  const farol = montarFarol({
+    degraus: cascata.degraus,
+    trust,
+    kpis: { cpr: k.cpr, cpl: k.cpl, leads: k.leads, meetings: k.meetings },
+    metaCpr: data.goals.find((g) => g.metric === "cpr")?.target,
+    parados,
+    midiaParada,
+    fontesOk: fontesCascata.falha == null,
+  });
+
+  // A faixa "antes de decidir" fica só com o que desqualifica um número.
+  // Campo em branco não é ressalva sobre a campanha — vira link no rodapé.
+  const travasDeNumero = trust.travas.filter(
+    (t) => t.nivel === "quarentena" || t.nivel === "teto",
+  );
+  const pendencias = trust.travas.filter((t) => t.nivel === "config");
+  const temPiso = trust.travas.some((t) => t.nivel === "piso");
 
   return (
     <div className="space-y-6">
       {data.isSeed ? <ExampleBanner /> : null}
-      <DataQualityCard warnings={warnings} />
 
-      {/* Hero KPIs */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4 xl:grid-cols-5">
-        <KpiCard
-          label="Investimento"
-          value={formatCurrency0(k.spend)}
-          Icon={DollarSign}
-          delta={makeDelta(k.spend, prev?.spend, true)}
-          hint={hint}
-          spark={series.map((d) => d.spend)}
-          quarentena={trust.porMetrica.spend}
-        />
-        <KpiCard
-          label="Leads"
-          value={formatInt(k.leads)}
-          Icon={UserPlus}
-          delta={makeDelta(k.leads, prev?.leads, true)}
-          hint={hint}
-          spark={series.map((d) => d.leads)}
-        />
-        <KpiCard
-          label={k.hasDiscovery ? "CPL · conversão" : "CPL"}
-          value={formatCurrency(k.cpl)}
-          Icon={Target}
-          delta={makeDelta(k.cpl, prev?.cpl, false)}
-          hint={hint}
-          quarentena={trust.porMetrica.cpl}
-        />
-        <KpiCard
-          label="Reuniões agendadas"
-          value={formatInt(k.meetings)}
-          Icon={CalendarCheck}
-          delta={makeDelta(k.meetings, prev?.meetings, true)}
-          hint={hint}
-          highlight
-        />
-        {/*
-          Transferidos vem do banco do ROBÔ, não do store — é outra métrica, de
-          outra fonte. Antes os dois dividiam um card e trocavam de rótulo em
-          silêncio, o que fazia uma falha de leitura virar a contagem de reuniões
-          do painel sem ninguém perceber. Card próprio, e "—" quando não dá para
-          ler: número nenhum é melhor que o número errado.
-        */}
-        {transferidos.falha?.tipo !== "desligado" ? (
-          <KpiCard
-            label="Transferidos ao especialista"
-            value={transferidos.valor == null ? "—" : formatInt(transferidos.valor)}
-            Icon={Handshake}
-            hint={
-              transferidos.falha
-                ? "sem leitura do robô — ver Robô"
-                : "leads quentes entregues pelo robô"
-            }
-          />
-        ) : null}
-        <KpiCard
-          label="Custo por reunião"
-          value={formatCurrency(k.cpr)}
-          Icon={Sparkles}
-          delta={makeDelta(k.cpr, prev?.cpr, false)}
-          hint="North Star"
-          highlight
-          quarentena={trust.porMetrica.cpr}
-        />
-      </div>
+      <FarolCard farol={farol} />
 
-      {/* O que impede os números acima de sustentarem uma decisão. */}
-      <TrustBand travas={trust.travas} />
-
-      {aiCard}
-
-      {/* Orçamento por objetivo — só aparece quando há gasto de descoberta */}
-      {k.hasDiscovery ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Orçamento por objetivo</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <ObjectiveSplitBar conversao={k.spendConversao} descoberta={k.spendDescoberta} />
-            <p className="text-xs text-muted-foreground">
-              CPL e Custo por reunião acima usam só o orçamento de conversão. Com a descoberta
-              incluída (blended): CPL {k.leads > 0 ? formatCurrency(k.cplBlended) : "—"} · Custo
-              por reunião {k.meetings > 0 ? formatCurrency(k.cprBlended) : "—"}.
-            </p>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {/*
-        A cascata substituiu o funil de 6 etapas: aquele ia de cliques direto a
-        leads, não conhecia a landing page nem o WhatsApp, e terminava em três
-        degraus que vinham do painel enquanto o atendimento contava outra coisa.
-      */}
-      <ChartCard
-        title="Onde o dinheiro para"
-        description="Do anúncio à venda, atravessando os quatro sistemas. A junta tracejada marca onde o dado troca de dono."
-        action={
-          <Link
-            href="/jornada"
-            className="text-xs font-medium text-primary underline-offset-4 hover:underline"
-          >
-            Abrir a jornada →
-          </Link>
-        }
-      >
-        <Cascata degraus={cascata.degraus} />
-      </ChartCard>
-
-      {/* Orgânico do perfil — saúde da base que recebe o tráfego pago */}
-      {hasOrganic ? (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-base font-semibold tracking-tight">
-              Orgânico — {brand.handle}
-            </h2>
-            <Link
-              href="/instagram"
-              className="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-primary"
-            >
-              ver Instagram <ExternalLink className="size-3.5" />
-            </Link>
-          </div>
-          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4 xl:grid-cols-5">
-            <KpiCard
-              label="Alcance orgânico"
-              value={formatCompact(ig.reach)}
-              Icon={Radio}
-              delta={igPrev ? pctDelta(ig.reach, igPrev.reach) : undefined}
-              hint={hint}
-              spark={igDaily.map((d) => d.reach)}
-            />
-            <KpiCard
-              label="Novos seguidores"
-              value={`${ig.netNew >= 0 ? "+" : ""}${formatInt(ig.netNew)}`}
-              Icon={Users}
-              delta={igPrev ? pctDelta(ig.netNew, igPrev.netNew) : undefined}
-              hint={hint}
-            />
-            <KpiCard
-              label="Aquecimento da base"
-              value={formatPercent(ig.engagementOnBase)}
-              Icon={Heart}
-              hint="interações/dia ÷ seguidores"
-              delta={igPrev ? pctDelta(ig.engagementOnBase, igPrev.engagementOnBase) : undefined}
-              spark={igDaily.map((d) => d.warmth)}
-            />
-            <KpiCard
-              label="Conversas de DM"
-              value={ig.hasDmData ? formatInt(ig.dmConversations) : "—"}
-              Icon={MessageCircle}
-              hint={ig.hasDmData ? "registro manual" : "registre no Config"}
-              delta={
-                igPrev && ig.hasDmData && igPrev.hasDmData
-                  ? pctDelta(ig.dmConversations, igPrev.dmConversations)
-                  : undefined
-              }
-            />
-            <KpiCard
-              label="Cliques no link da bio"
-              value={formatInt(ig.profileLinkTaps)}
-              Icon={ExternalLink}
-              delta={igPrev ? pctDelta(ig.profileLinkTaps, igPrev.profileLinkTaps) : undefined}
-              hint={`CTR da bio ${formatPercent(ig.linkTapRate)}`}
-            />
-          </div>
-        </div>
-      ) : null}
-
-      {/* Time series */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <ChartCard title="Investimento por dia" description="Ritmo de gasto (pacing).">
-          <TimeSeriesChart
-            data={series}
-            series={[{ key: "spend", label: "Investimento", color: CHART.series[0] }]}
-            yFormat="currency0"
-            valueFormat="currency"
-          />
-        </ChartCard>
-        <ChartCard title="Leads por dia" description="Cadastros gerados por dia.">
-          <TimeSeriesChart
-            data={series}
-            series={[{ key: "leads", label: "Leads", color: CHART.series[2] }]}
-            yFormat="int"
-          />
-        </ChartCard>
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        <ChartCard title="CPL por dia" description="Custo por lead ao longo do tempo.">
-          <TimeSeriesChart
-            data={series}
-            series={[{ key: "cpl", label: "CPL", color: CHART.series[1], kind: "line" }]}
-            yFormat="currency0"
-            valueFormat="currency"
-          />
-        </ChartCard>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Metas vs. realizado</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {/*
-              Sem nenhuma meta cadastrada este .map() renderizava um card
-              LITERALMENTE VAZIO — a tela ficava com um título e nada embaixo, o
-              que se lê como bug, não como "falta preencher".
-            */}
-            {data.goals.length === 0 ? (
-              <div className="space-y-2 rounded-lg border border-dashed p-5 text-center">
-                <p className="text-sm font-medium">Nenhuma meta cadastrada</p>
-                <p className="mx-auto max-w-sm text-xs text-muted-foreground">
-                  {k.leads > 0 ? `Sem meta, ${formatCurrency(k.cpl)} por lead é só um número` : "Sem meta, os números acima são só números"}{" "}
-                  — não dá para dizer se estão bons. Cadastrar também liga as duas regras de
-                  alerta que hoje nunca disparam: CPL e custo por reunião acima do alvo.
-                </p>
-                <Link
-                  href="/config"
-                  className="inline-block pt-1 text-xs font-medium text-primary underline-offset-4 hover:underline"
-                >
-                  Cadastrar metas →
-                </Link>
-              </div>
-            ) : null}
-            {data.goals.map((goal) => {
-              const actual = actualForGoal(goal, data, range);
-              if (actual == null) {
-                // Sem dado para medir (ex.: retenção sem duração preenchida) —
-                // um GoalBar em 0 leria como "0% da meta", que é outra coisa.
-                return (
-                  <div
-                    key={`${goal.metric}-${goal.period}`}
-                    className="flex items-baseline justify-between gap-3 text-sm"
-                  >
-                    <span className="font-medium text-muted-foreground">
-                      {GOAL_LABEL[goal.metric]}
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      sem dado — registre no Config · meta{" "}
-                      {goalValueText(goal.metric, goal.target)}
-                    </span>
-                  </div>
-                );
-              }
-              const gp = goalProgress(goal, actual);
-              return (
-                <GoalBar
-                  key={`${goal.metric}-${goal.period}`}
-                  label={GOAL_LABEL[goal.metric]}
-                  valueText={goalValueText(goal.metric, actual)}
-                  targetText={goalValueText(goal.metric, goal.target)}
-                  pct={gp.pct}
-                  onTrack={gp.onTrack}
-                />
-              );
-            })}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Próximas ações */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Sparkles className="size-4 text-primary" />
-            Próximas ações
+            O que fazer esta semana
           </CardTitle>
         </CardHeader>
         <CardContent>
           <RecommendationsCard recs={recs} fallback={insights} />
         </CardContent>
       </Card>
+
+      {/* Placar, não bússola: três números numa tira, sem card por número. */}
+      <Card>
+        <CardContent className="space-y-2 p-5">
+          <div className="flex flex-wrap gap-x-10 gap-y-3">
+            <div>
+              <p className="text-xs text-muted-foreground">Investimento</p>
+              <p className="tabular text-xl font-semibold">
+                {temPiso ? <span className="text-muted-foreground">≥ </span> : null}
+                {formatCurrency0(k.spend)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Leads</p>
+              <p className="tabular text-xl font-semibold">
+                {formatInt(k.leads)}
+                <span className="ml-2 text-sm font-normal text-muted-foreground">
+                  {k.leads > 0 ? `a ${temPiso ? "≥ " : ""}${formatCurrency(k.cpl)}` : ""}
+                </span>
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Reuniões</p>
+              <p className="tabular text-xl font-semibold">
+                {formatInt(k.meetings)}
+                <span className="ml-2 text-sm font-normal text-muted-foreground">
+                  {trust.porMetrica.cpr
+                    ? trust.porMetrica.cpr.motivo.toLowerCase()
+                    : `a ${formatCurrency(k.cpr)}`}
+                </span>
+              </p>
+            </div>
+          </div>
+
+          {temPiso ? (
+            <p className="text-xs text-muted-foreground">
+              Os valores com ≥ são piso — faltam dias de gasto no período.{" "}
+              <Link href="/config" className="text-primary underline-offset-4 hover:underline">
+                Sincronizar
+              </Link>
+            </p>
+          ) : null}
+          {k.hasDiscovery ? (
+            <p className="text-xs text-muted-foreground">
+              CPL e custo por reunião usam só os {formatCurrency0(k.spendConversao)} de conversão,
+              de {formatCurrency0(k.spend)} no total.{" "}
+              <Link href="/trafego" className="text-primary underline-offset-4 hover:underline">
+                ver o split
+              </Link>
+            </p>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      <ChartCard
+        title="Onde o dinheiro para"
+        description="Os degraus onde há gente parada, e o fim do funil."
+        action={
+          <Link
+            href="/jornada"
+            className="text-xs font-medium text-primary underline-offset-4 hover:underline"
+          >
+            Cascata completa →
+          </Link>
+        }
+      >
+        <Cascata degraus={resumirCascata(cascata.degraus)} />
+      </ChartCard>
+
+      <TrustBand travas={travasDeNumero} />
+
+      {aiCard}
+
+      <p className="flex flex-wrap gap-x-5 gap-y-1 border-t pt-4 text-xs text-muted-foreground">
+        <Link href="/instagram" className="hover:text-foreground">
+          Orgânico: {formatCompact(ig.reach)} de alcance, +{formatInt(ig.followersEnd - ig.followersStart)} seguidores →
+        </Link>
+        <Link href="/trafego" className="hover:text-foreground">
+          Séries por dia e por conjunto →
+        </Link>
+        {pendencias.length > 0 ? (
+          <Link href="/config" className="hover:text-foreground">
+            {pendencias.length} configuração(ões) pendente(s):{" "}
+            {pendencias.map((p) => p.titulo.toLowerCase()).join(", ")} →
+          </Link>
+        ) : null}
+      </p>
     </div>
   );
 }

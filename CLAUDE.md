@@ -57,6 +57,14 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   **mais a política** (desistência sai do CPR). Toda regra de "esta reunião conta?"
   mora em `isBooked`, nunca na ordem dos status. `lostAt` é a exceção: descreve o
   estado atual e é limpo se o lead voltar ao caminho feliz.
+- **Farol** (`src/lib/farol.ts`): o primeiro bloco da Visão Geral e o ÚNICO com destaque
+  — hierarquia é escassez. O número é escolhido, não fixo: gente parada no funil vence
+  qualquer custo (já foi paga, dá para recuperar, não exige verba nova); sem ninguém
+  parado, cai no CPR, e se o CPR estiver em quarentena, no degrau mais fundo da cascata
+  com amostra ≥3, dizendo que desceu. Se a leitura do robô falhar, o farol diz "não sei"
+  — nunca "no ritmo", que seria a mentira mais cara da tela. A home tem 5 blocos: farol,
+  ações, tira de 3 números, cascata resumida, rodapé de links. Bloco novo na home = tirar
+  um.
 - **Cascata** (`src/lib/cascata.ts`): o funil ponta a ponta atravessando os quatro
   sistemas (Meta → LP → painel → robô → atendimento). Regras: **duas âncoras** (acima
   de Leads mede sobre impressões; de Leads para baixo, Leads = 100%) — com uma só,
