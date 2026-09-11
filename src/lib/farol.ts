@@ -225,7 +225,7 @@ export function contarParados(degraus: Degrau[]): { parados: number; midiaParada
   for (const d of degraus) {
     if (!d.parados) continue;
     parados += d.parados;
-    midiaParada += d.parados * (d.custoUnitario ?? 0);
+    midiaParada += d.midiaParada ?? 0;
   }
   return { parados, midiaParada };
 }

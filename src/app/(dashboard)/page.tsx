@@ -16,6 +16,7 @@ import { pageRange } from "@/lib/page-range";
 import { getCascataFontes, getComercial } from "@/lib/robo/client";
 import { montarCascata, resumirCascata } from "@/lib/cascata";
 import { contarParados, montarFarol } from "@/lib/farol";
+import { FILA_ETAPAS } from "@/lib/fila";
 import { FarolCard } from "@/components/kpi/farol-card";
 import { Cascata } from "@/components/charts/cascata";
 import { resolveMetaBrands } from "@/lib/meta/config";
@@ -145,21 +146,22 @@ export default async function OverviewPage({
 
   // As juntas com gente parada viram a ação nº 1 — o motor de recomendação não
   // enxergava robô nem fila, então nunca propunha falar com quem já foi pago.
-  const SLA_POR_DEGRAU: Record<string, { sla: number; dono: "MKT" | "COM" | "BOT" }> = {
-    convite: { sla: 24, dono: "BOT" },
-    transferidos: { sla: 2, dono: "COM" },
-  };
+  // Rótulo, prazo e dono vêm de FILA_ETAPAS. A primeira versão tinha um mapa
+  // de prazos por degrau aqui mesmo — e mostrou 24h para quem tem 2h.
   const recs = buildRecommendations(data, range, new Date().toISOString(), {
     grupos: cascata.degraus
-      .filter((d) => d.parados)
-      .map((d) => ({
-        etapa: d.key,
-        label: d.label,
-        pessoas: d.parados!,
-        midiaParada: d.parados! * (d.custoUnitario ?? 0),
-        slaHoras: SLA_POR_DEGRAU[d.key]?.sla ?? 24,
-        dono: SLA_POR_DEGRAU[d.key]?.dono ?? "COM",
-      })),
+      .filter((d) => d.parados && d.etapaFila)
+      .map((d) => {
+        const meta = FILA_ETAPAS[d.etapaFila!];
+        return {
+          etapa: d.etapaFila!,
+          label: meta.label,
+          pessoas: d.parados!,
+          midiaParada: d.midiaParada ?? 0,
+          slaHoras: meta.slaHoras,
+          dono: meta.dono,
+        };
+      }),
   });
 
   const farol = montarFarol({

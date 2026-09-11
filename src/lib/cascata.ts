@@ -29,6 +29,7 @@
 import { filterAds, filterLeads, countMeetings, countAttended, countClients } from "./metrics";
 import type { DateRange } from "./metrics";
 import type { DashboardData } from "./types";
+import type { FilaEtapa } from "./fila";
 
 // ---------------------------------------------------------------- vocabulário
 
@@ -66,8 +67,17 @@ export interface Degrau {
   perda?: number;
   /** De quem é a ação nesta junta. */
   dono?: Dono;
-  /** Quantos estão parados AQUI agora — o que dá para recuperar. */
+  /** Quantos estão parados na junta que leva a este degrau — o que dá para recuperar. */
   parados?: number;
+  /**
+   * Mídia já paga por essas pessoas, ao custo do degrau onde elas ESTÃO — não
+   * do que ainda não alcançaram. Quem espera o 1º contato já foi transferido:
+   * custou o preço de um transferido, não o de um abordado. A primeira versão
+   * usava o custo do destino e inflou o número do farol em 4,6×.
+   */
+  midiaParada?: number;
+  /** Etapa da Fila correspondente — fonte única de rótulo, prazo e dono. */
+  etapaFila?: FilaEtapa;
   /** Ressalva colada ao degrau. */
   nota?: string;
 }
@@ -256,6 +266,8 @@ export function montarCascata(input: CascataInput): CascataResult {
         perda: Math.max(0, anterior - valor),
         dono,
         parados: parados && parados > 0 ? parados : undefined,
+        midiaParada: parados && parados > 0 ? parados * (custo(anterior) ?? 0) : undefined,
+        etapaFila: key === "transferidos" && parados && parados > 0 ? "convite-pendente" : undefined,
       });
       anterior = valor;
     }
@@ -276,6 +288,11 @@ export function montarCascata(input: CascataInput): CascataResult {
       perda: Math.max(0, anteriorCom - comercial.abordados),
       dono: "COM",
       parados: comercial.aguardandoAbordagem > 0 ? comercial.aguardandoAbordagem : undefined,
+      midiaParada:
+        comercial.aguardandoAbordagem > 0
+          ? comercial.aguardandoAbordagem * (custo(anteriorCom) ?? 0)
+          : undefined,
+      etapaFila: comercial.aguardandoAbordagem > 0 ? "aguardando-contato" : undefined,
       nota: comercial.abordados <= 1 ? "n=1 — não é uma taxa" : undefined,
     });
 

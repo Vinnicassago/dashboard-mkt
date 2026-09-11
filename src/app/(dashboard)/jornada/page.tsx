@@ -7,6 +7,7 @@ import { activeBrandSlug } from "@/lib/active-brand";
 import { pageRange } from "@/lib/page-range";
 import { getCascataFontes } from "@/lib/robo/client";
 import { montarCascata } from "@/lib/cascata";
+import { FILA_ETAPAS } from "@/lib/fila";
 import { objectiveBreakdown } from "@/lib/metrics";
 import { formatCurrency0, formatInt } from "@/lib/format";
 
@@ -45,7 +46,7 @@ export default async function JornadaPage({
   // O degrau com mais gente parada agora — o que dá para recuperar sem gastar.
   const paradoMaisCaro = [...cascata.degraus]
     .filter((d) => d.parados)
-    .sort((a, b) => (b.custoUnitario ?? 0) * (b.parados ?? 0) - (a.custoUnitario ?? 0) * (a.parados ?? 0))[0];
+    .sort((a, b) => (b.midiaParada ?? 0) - (a.midiaParada ?? 0))[0];
 
   return (
     <div className="space-y-6">
@@ -76,10 +77,13 @@ export default async function JornadaPage({
             <AlertTriangle className="mt-0.5 size-4 shrink-0 text-[var(--danger-text)]" />
             <div className="space-y-1">
               <p className="text-sm font-medium">
-                {formatInt(paradoMaisCaro.parados!)} pessoa(s) paradas em “{paradoMaisCaro.label}”
+                {formatInt(paradoMaisCaro.parados!)} pessoa(s) ·{" "}
+                {paradoMaisCaro.etapaFila
+                  ? FILA_ETAPAS[paradoMaisCaro.etapaFila].label.toLowerCase()
+                  : paradoMaisCaro.label}
               </p>
               <p className="text-xs text-muted-foreground">
-                A mídia já pagou {formatCurrency0((paradoMaisCaro.custoUnitario ?? 0) * (paradoMaisCaro.parados ?? 0))}{" "}
+                A mídia já pagou {formatCurrency0(paradoMaisCaro.midiaParada ?? 0)}{" "}
                 para trazer essas pessoas até aqui. Elas não custam nada a mais para avançar —
                 só um contato.{" "}
                 <Link href="/fila" className="text-primary underline-offset-4 hover:underline">
