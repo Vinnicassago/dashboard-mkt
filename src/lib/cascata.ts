@@ -106,7 +106,9 @@ export function resumirCascata(degraus: Degrau[]): Degrau[] {
   return manter.map((d, i) => {
     if (i === 0) return { ...d, daAnterior: undefined, perda: undefined };
     const ant = manter[i - 1];
-    const podeCalcular = d.valor != null && ant.valor != null && ant.valor > 0;
+    // Ao cruzar uma âncora a unidade muda (impressões → pessoas): uma "perda"
+    // de 380 mil entre impressões e leads não é gente perdida, é troca de base.
+    const podeCalcular = !d.ehAncora && d.valor != null && ant.valor != null && ant.valor > 0;
     return {
       ...d,
       // Sem trocaDeSistema no resumo: com degraus omitidos, a junta deixaria de

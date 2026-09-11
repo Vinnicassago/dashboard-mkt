@@ -230,7 +230,7 @@ export function assessTrust(input: TrustInput): TrustReport {
     travas.push({
       id: "cpr-amostra",
       nivel: "quarentena",
-      titulo: `Só ${kpis.meetings} reunião(ões) no período`,
+      titulo: `Só ${kpis.meetings} ${kpis.meetings === 1 ? "reunião" : "reuniões"} no período`,
       detalhe: `Com menos de ${MIN_REUNIOES} reuniões, o custo por reunião oscila demais para orientar verba — a próxima reunião muda o número pela metade. Ele volta a ser exibido quando houver amostra.`,
       afeta: ["cpr"],
       cta: { label: "Ver a fila de contato", href: "/fila" },
@@ -283,6 +283,10 @@ export function assessTrust(input: TrustInput): TrustReport {
    * regra preenchida que não casa com nada — não disparar alarme nenhum.
    */
   if (multimarca) {
+    const orfaos = prefixosOrfaos(input).filter((o) => o.valor / kpis.spendTotal > 0.05);
+    const tokensDeclarados = input.brandRules
+      .filter((b) => b.slug !== data.campaign.brand)
+      .flatMap((b) => b.campaignMatch);
     const semRegra = input.brandRules
       .filter((b) => b.slug !== data.campaign.brand)
       .every((b) => b.campaignMatch.length === 0);
@@ -297,7 +301,9 @@ export function assessTrust(input: TrustInput): TrustReport {
         afeta: AFETA_CUSTO,
         cta: { label: "Definir a regra", href: "/config" },
       });
-    } else if (contaminacao.regraInerte) {
+    } else if (contaminacao.regraInerte && orfaos.length === 0) {
+      // Com prefixo órfão detectado, a regra inerte vira parte daquele cartão —
+      // dois cartões para a mesma falha era a redundância que a home combate.
       travas.push({
         id: "marca-regra-inerte",
         nivel: "teto",
@@ -311,13 +317,17 @@ export function assessTrust(input: TrustInput): TrustReport {
 
     // Independente da regra: campanhas que se identificam com um prefixo que
     // ninguém reivindica são a evidência mais direta de atribuição errada.
-    for (const orfao of prefixosOrfaos(input)) {
-      if (orfao.valor / kpis.spendTotal <= 0.05) continue;
+    for (const orfao of orfaos) {
       travas.push({
         id: `marca-prefixo-${orfao.prefixo}`,
         nivel: "teto",
         titulo: `R$ ${Math.round(orfao.valor)} em campanhas ${orfao.prefixo} estão nesta marca`,
-        detalhe: `${Math.round((orfao.valor / kpis.spendTotal) * 100)}% do investimento vem de campanhas marcadas ${orfao.prefixo} no Ads Manager, e nenhuma regra as reivindica. Use ${orfao.prefixo} como token da outra marca e reclassifique.`,
+        detalhe:
+          `${Math.round((orfao.valor / kpis.spendTotal) * 100)}% do investimento vem de campanhas marcadas ${orfao.prefixo} no Ads Manager, e nenhuma regra as reivindica.` +
+          (contaminacao.regraInerte && tokensDeclarados.length
+            ? ` A regra salva hoje ("${tokensDeclarados.join('", "')}") não casa com nenhuma campanha.`
+            : "") +
+          ` Use ${orfao.prefixo} como token da outra marca e reclassifique.`,
         afeta: AFETA_CUSTO,
         cta: { label: "Corrigir a atribuição", href: "/config" },
       });

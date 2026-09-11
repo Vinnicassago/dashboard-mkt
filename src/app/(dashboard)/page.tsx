@@ -195,8 +195,21 @@ export default async function OverviewPage({
             O que fazer esta semana
           </CardTitle>
         </CardHeader>
-        <CardContent>
-          <RecommendationsCard recs={recs} fallback={insights} />
+        <CardContent className="space-y-3">
+          {/* Teto de 3 na home: seis ações do mesmo tamanho voltariam a ser
+              empate. O resto fica recolhido — não some, só não disputa. */}
+          <RecommendationsCard recs={recs.slice(0, 3)} fallback={insights} />
+          {recs.length > 3 ? (
+            <details>
+              <summary className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">
+                +{recs.length - 3} {recs.length - 3 === 1 ? "otimização" : "otimizações"} de mídia e
+                conteúdo
+              </summary>
+              <div className="pt-3">
+                <RecommendationsCard recs={recs.slice(3)} />
+              </div>
+            </details>
+          ) : null}
         </CardContent>
       </Card>
 
