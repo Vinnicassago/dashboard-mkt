@@ -77,7 +77,8 @@ export default async function JornadaPage({
             <AlertTriangle className="mt-0.5 size-4 shrink-0 text-[var(--danger-text)]" />
             <div className="space-y-1">
               <p className="text-sm font-medium">
-                {formatInt(paradoMaisCaro.parados!)} pessoa(s) ·{" "}
+                {formatInt(paradoMaisCaro.parados!)}{" "}
+                {paradoMaisCaro.parados === 1 ? "pessoa" : "pessoas"} ·{" "}
                 {paradoMaisCaro.etapaFila
                   ? FILA_ETAPAS[paradoMaisCaro.etapaFila].label.toLowerCase()
                   : paradoMaisCaro.label}

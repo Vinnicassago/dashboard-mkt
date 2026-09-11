@@ -139,7 +139,7 @@ export function montarFarol(input: FarolInput): Farol {
       base: input.midiaParada > 0 ? `${brl(input.midiaParada)} de mídia já paga` : undefined,
       piso: false,
       veredito: partes.join(". ") + ".",
-      acao: { label: `Abrir a fila (${input.parados})`, href: "/fila" },
+      acao: { label: `Abrir a fila (${input.parados})`, href: "/fila?etapa=quentes" },
     };
   }
 

@@ -30,6 +30,7 @@ import { filterAds, filterLeads, countMeetings, countAttended, countClients } fr
 import type { DateRange } from "./metrics";
 import type { DashboardData } from "./types";
 import type { FilaEtapa } from "./fila";
+import { formatDecimal, formatInt } from "./format";
 
 // ---------------------------------------------------------------- vocabulário
 
@@ -368,7 +369,7 @@ export function montarCascata(input: CascataInput): CascataResult {
   if (cliquesBrutos > 0 && visitas > 0 && cliquesBrutos > visitas * 1.5) {
     const descoberta = ads.filter((r) => r.objective && /ENGAGEMENT|AWARENESS|REACH|VIDEO/i.test(r.objective));
     naoAgir.push({
-      titulo: `${Math.round(cliquesBrutos - visitas).toLocaleString("pt-BR")} “cliques” que não viraram visita`,
+      titulo: `${formatInt(cliquesBrutos - visitas)} “cliques” que não viraram visita`,
       detalhe:
         `A maior perda aparente do funil é artefato de medição, não gente perdida. Nos ${descoberta.length > 0 ? "conjuntos de descoberta" : "posts impulsionados"} — sem link para clicar — o painel conta curtida, comentário e toque no perfil como clique. Por isso “cliques” não é degrau desta cascata.`,
     });
@@ -376,7 +377,7 @@ export function montarCascata(input: CascataInput): CascataResult {
 
   if (visitas > 0 && envios > 0 && visitas > envios) {
     naoAgir.push({
-      titulo: `${(visitas - envios).toLocaleString("pt-BR")} visitas que não preencheram`,
+      titulo: `${formatInt(visitas - envios)} visitas que não preencheram`,
       detalhe:
         "A maior perda percentual, e a menos recuperável: são visitantes anônimos que já foram embora. Melhorar a landing page muda o tráfego futuro — não traz nenhum destes de volta.",
     });
@@ -384,8 +385,8 @@ export function montarCascata(input: CascataInput): CascataResult {
 
   if (ctaCliques > visitas && visitas > 0) {
     naoAgir.push({
-      titulo: `${ctaCliques.toLocaleString("pt-BR")} cliques no CTA contra ${visitas.toLocaleString("pt-BR")} visitas`,
-      detalhe: `Não é dado corrompido: são ${(ctaCliques / visitas).toFixed(2)} eventos por visita. Um contador de evento ao lado de um contador de sessão — não é etapa e não tem taxa.`,
+      titulo: `${formatInt(ctaCliques)} cliques no CTA contra ${formatInt(visitas)} visitas`,
+      detalhe: `Não é dado corrompido: são ${formatDecimal(ctaCliques / visitas, 2)} eventos por visita. Um contador de evento ao lado de um contador de sessão — não é etapa e não tem taxa.`,
     });
   }
 

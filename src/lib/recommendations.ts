@@ -102,7 +102,7 @@ export function buildRecommendations(
       id: `fila-${g.etapa}`,
       severity: "agora",
       dono: g.dono,
-      href: "/fila",
+      href: `/fila?etapa=${g.etapa}`,
       midiaParada: g.midiaParada,
       title: `Falar com ${g.pessoas} ${g.pessoas > 1 ? "pessoas" : "pessoa"} · ${g.label.toLowerCase()}`,
       detail: `${formatCurrency0(g.midiaParada)} de mídia já paga esperando um contato. O prazo desta etapa é ${g.slaHoras}h. Não custa verba nova.`,

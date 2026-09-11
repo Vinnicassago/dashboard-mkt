@@ -6,7 +6,13 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { getData } from "@/lib/data/store";
 import { activeBrandSlug } from "@/lib/active-brand";
 import { getComercial, getRoboLeads } from "@/lib/robo/client";
-import { montarFila, FILA_ETAPAS, formatEspera, type FilaEtapa } from "@/lib/fila";
+import {
+  montarFila,
+  FILA_ETAPAS,
+  formatEspera,
+  type FilaEtapa,
+  type FiltroFila,
+} from "@/lib/fila";
 import { can } from "@/lib/auth/guard";
 import { formatInt } from "@/lib/format";
 
@@ -20,7 +26,19 @@ export const dynamic = "force-dynamic";
  * está esperando" é uma pergunta sobre AGORA, e filtrar por 7 dias esconderia
  * justamente os mais antigos, que são os mais urgentes.
  */
-export default async function FilaPage() {
+/** Filtro vindo do link (farol, ações). Valor desconhecido cai em "todos". */
+function filtroDaUrl(etapa?: string): FiltroFila {
+  if (etapa === "quentes" || etapa === "todos") return etapa;
+  if (etapa && etapa in FILA_ETAPAS) return etapa as FilaEtapa;
+  return "todos";
+}
+
+export default async function FilaPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ etapa?: string }>;
+}) {
+  const { etapa } = await searchParams;
   const brand = await activeBrandSlug();
   const data = await getData(brand);
   const canEdit = await can("leads:write");
@@ -125,7 +143,7 @@ export default async function FilaPage() {
             })}
           </div>
 
-          <FilaList itens={fila.itens} canEdit={canEdit} />
+          <FilaList itens={fila.itens} canEdit={canEdit} filtroInicial={filtroDaUrl(etapa)} />
         </>
       )}
     </div>

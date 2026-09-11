@@ -5,7 +5,14 @@ import { useRouter } from "next/navigation";
 import { Clock, MessageCircle, Check, ChevronDown, Mail } from "lucide-react";
 import { salvarComercial } from "@/app/(dashboard)/comercial/actions";
 import { changeLeadStatus } from "@/app/(dashboard)/funil/actions";
-import { FILA_ETAPAS, formatEspera, type FilaEtapa, type FilaItem } from "@/lib/fila";
+import {
+  ETAPAS_QUENTES,
+  FILA_ETAPAS,
+  formatEspera,
+  type FilaEtapa,
+  type FilaItem,
+  type FiltroFila,
+} from "@/lib/fila";
 import { LEAD_STATUS_META, LOST_STATUSES, statusLabel } from "@/lib/lead-status";
 import type { LeadStatus } from "@/lib/types";
 import { Card, CardContent } from "@/components/ui/card";
@@ -164,16 +171,26 @@ function FilaCard({
   );
 }
 
-export function FilaList({ itens, canEdit }: { itens: FilaItem[]; canEdit: boolean }) {
+export function FilaList({
+  itens,
+  canEdit,
+  filtroInicial = "todos",
+}: {
+  itens: FilaItem[];
+  canEdit: boolean;
+  /** Vem do link que trouxe até aqui (farol, ações da semana). */
+  filtroInicial?: FiltroFila;
+}) {
   const router = useRouter();
   const [resolvidos, setResolvidos] = useState<string[]>([]);
-  const [filtro, setFiltro] = useState<FilaEtapa | "todos">("todos");
+  const [filtro, setFiltro] = useState<FiltroFila>(filtroInicial);
+
+  const noFiltro = (i: FilaItem, f: FiltroFila) =>
+    f === "todos" || (f === "quentes" ? ETAPAS_QUENTES.includes(i.etapa) : i.etapa === f);
 
   const visiveis = useMemo(
-    () =>
-      itens.filter(
-        (i) => !resolvidos.includes(i.id) && (filtro === "todos" || i.etapa === filtro),
-      ),
+    () => itens.filter((i) => !resolvidos.includes(i.id) && noFiltro(i, filtro)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [itens, resolvidos, filtro],
   );
 
@@ -184,7 +201,9 @@ export function FilaList({ itens, canEdit }: { itens: FilaItem[]; canEdit: boole
     router.refresh();
   }
 
-  const abas: { key: FilaEtapa | "todos"; label: string }[] = [
+  // "Esperando contato agora" usa as MESMAS palavras e o MESMO número do farol.
+  const abas: { key: FiltroFila; label: string }[] = [
+    { key: "quentes", label: `Esperando contato agora (${itens.filter((i) => noFiltro(i, "quentes")).length})` },
     { key: "todos", label: `Todos (${itens.length})` },
     ...(Object.keys(FILA_ETAPAS) as FilaEtapa[]).map((e) => ({
       key: e,

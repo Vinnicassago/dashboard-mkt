@@ -31,6 +31,18 @@ import type { Lead } from "./types";
 export type FilaEtapa = "aguardando-contato" | "convite-pendente" | "sem-status";
 export type FilaDono = "COM" | "BOT";
 
+/**
+ * Filtros da página. "quentes" = quem a mídia já pagou para levar até o robô
+ * ou o especialista — exatamente as pessoas que o farol conta.
+ *
+ * Existe porque o farol dizia "Abrir a fila (9)" e a página abria em "Pessoas
+ * na fila: 37" (os 9 mais 28 leads antigos sem desfecho no painel). Clicar num
+ * número e chegar em outro é a definição de dado desconexo: o link do farol
+ * abre neste filtro para o número clicado ser o número visto.
+ */
+export type FiltroFila = FilaEtapa | "todos" | "quentes";
+export const ETAPAS_QUENTES: FilaEtapa[] = ["aguardando-contato", "convite-pendente"];
+
 export interface EtapaMeta {
   label: string;
   /** Prazo em horas a partir do qual o item está atrasado. */
