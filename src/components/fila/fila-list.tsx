@@ -190,7 +190,6 @@ export function FilaList({
 
   const visiveis = useMemo(
     () => itens.filter((i) => !resolvidos.includes(i.id) && noFiltro(i, filtro)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [itens, resolvidos, filtro],
   );
 
