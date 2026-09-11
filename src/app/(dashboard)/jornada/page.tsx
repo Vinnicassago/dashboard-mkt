@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { AlertTriangle, EyeOff, ShieldAlert } from "lucide-react";
 import { Cascata } from "@/components/charts/cascata";
 import { MotivosTable } from "@/components/robo/robo-tables";
@@ -8,8 +7,9 @@ import { getData } from "@/lib/data/store";
 import { activeBrandSlug } from "@/lib/active-brand";
 import { pageRange } from "@/lib/page-range";
 import { getCascataFontes, getRoboSnapshot } from "@/lib/robo/client";
-import { montarCascata } from "@/lib/cascata";
-import { FILA_ETAPAS } from "@/lib/fila";
+import { maiorVazamento, montarCascata } from "@/lib/cascata";
+import { DONO_LABEL } from "@/lib/dono";
+import { LEAD_STATUS_META } from "@/lib/lead-status";
 import {
   cohortWeekly,
   filterLeads,
@@ -48,6 +48,9 @@ function horas(n: number | null): string {
  * como funil único, e das outras só o que ela não diz: POR QUE as pessoas saem
  * (motivo de perda, onde a conversa com o robô parou), se as semanas recentes
  * ainda estão maturando, e o que volta em receita no fim.
+ *
+ * A página abre com a resposta escrita — o maior vazamento depois do lead —, não
+ * com o método nem com o alerta de gente parada, que já mora no farol e na Fila.
  */
 export default async function JornadaPage({
   searchParams,
@@ -72,29 +75,58 @@ export default async function JornadaPage({
   const parcial = fontes.falha?.tipo === "erro";
   const semRobo = fontes.falha?.tipo === "desligado";
 
-  // O degrau com mais gente parada agora — o que dá para recuperar sem gastar.
-  const paradoMaisCaro = [...cascata.degraus]
-    .filter((d) => d.parados)
-    .sort((a, b) => (b.midiaParada ?? 0) - (a.midiaParada ?? 0))[0];
+  const vazamento = maiorVazamento(cascata.degraus);
+  const donoVazamento = vazamento?.degrau.dono
+    ? vazamento.degrau.dono === "BOT"
+      ? "robô (o roteiro é do marketing)"
+      : DONO_LABEL[vazamento.degrau.dono]
+    : null;
 
-  // Perdas do período, pelo motivo registrado e somadas pela origem do problema.
+  // Perdas do período, pelo motivo registrado.
   const leads = filterLeads(data.leads, range);
   const lossRows = lossBreakdown(leads).filter((r) => r.count > 0);
   const byKind = lossByKind(leads);
   const lossTotal = byKind.qualidade + byKind.decisao;
-  const qualidadeShare = lossTotal > 0 ? byKind.qualidade / lossTotal : 0;
+  const origem = (row: (typeof lossRows)[number]) =>
+    LEAD_STATUS_META[row.status].origemDaPerda ?? "—";
+  const leituras = lossRows
+    .filter((r) => LEAD_STATUS_META[r.status].leituraDaPerda)
+    .map((r) => `“${r.label}” ${LEAD_STATUS_META[r.status].leituraDaPerda}.`);
 
   const cohorts = cohortWeekly(data, range, new Date().toISOString());
 
   return (
     <div className="space-y-6">
-      <p className="max-w-3xl text-sm text-muted-foreground">
-        Cada degrau vem de um sistema diferente — Meta, landing page, painel, robô e
-        atendimento. A junta <span className="font-medium text-foreground">tracejada</span> marca
-        onde o dado troca de dono, que é onde os números costumam parar de bater. Percentuais
-        têm duas âncoras: acima de Leads medem sobre as impressões; de Leads para baixo,
-        Leads é 100%.
-      </p>
+      <div className="max-w-3xl space-y-2">
+        <p className="text-base leading-relaxed">
+          {vazamento ? (
+            <>
+              <span className="font-semibold">Maior vazamento depois do lead:</span>{" "}
+              {formatInt(vazamento.pessoas)} de {formatInt(vazamento.anterior.valor ?? 0)}{" "}
+              {vazamento.frase}
+              {donoVazamento ? ` · dono: ${donoVazamento}` : ""}.{" "}
+              {vazamento.degrau.fonte === "robo" && robo.kpis ? (
+                <a href="#robo" className="text-primary underline-offset-4 hover:underline">
+                  Ver onde a conversa parou ↓
+                </a>
+              ) : null}
+            </>
+          ) : (
+            "Nenhuma perda depois do lead tem amostra suficiente para ser apontada como vazamento."
+          )}
+        </p>
+        <details className="text-sm text-muted-foreground">
+          <summary className="cursor-pointer select-none">Como ler esta cascata</summary>
+          <p className="mt-2 leading-relaxed">
+            Cada degrau vem de um sistema diferente — Meta, landing page, painel, robô e
+            atendimento. A junta <span className="font-medium text-foreground">tracejada</span>{" "}
+            marca onde o dado troca de dono, que é onde os números costumam parar de bater.
+            Percentuais têm duas âncoras: acima de Leads medem sobre as impressões; de Leads
+            para baixo, Leads é 100%. Abaixo de 3 pessoas não há taxa nem custo por unidade:
+            um número desses não é medida.
+          </p>
+        </details>
+      </div>
 
       {parcial ? (
         <Card className="border-[var(--warning)]/40">
@@ -109,39 +141,6 @@ export default async function JornadaPage({
         </Card>
       ) : null}
 
-      {paradoMaisCaro ? (
-        <Card className="border-[var(--danger)]/40">
-          <CardContent className="flex items-start gap-3 p-4">
-            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-[var(--danger-text)]" />
-            <div className="space-y-1">
-              <p className="text-sm font-medium">
-                {formatInt(paradoMaisCaro.parados!)}{" "}
-                {paradoMaisCaro.parados === 1 ? "pessoa" : "pessoas"} ·{" "}
-                {paradoMaisCaro.etapaFila
-                  ? FILA_ETAPAS[paradoMaisCaro.etapaFila].label.toLowerCase()
-                  : paradoMaisCaro.label}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                A mídia já pagou {formatCurrency0(paradoMaisCaro.midiaParada ?? 0)}{" "}
-                para trazer essas pessoas até aqui. Elas não custam nada a mais para avançar —
-                só um contato.{" "}
-                {/* O link abre a fila no recorte deste degrau: o número daqui é o de lá. */}
-                <Link
-                  href={
-                    paradoMaisCaro.etapaFila
-                      ? `/fila?etapa=${paradoMaisCaro.etapaFila}`
-                      : "/fila"
-                  }
-                  className="text-primary underline-offset-4 hover:underline"
-                >
-                  Abrir a fila
-                </Link>
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
-
       <Card>
         <CardHeader>
           <CardTitle>Do anúncio à venda</CardTitle>
@@ -151,7 +150,11 @@ export default async function JornadaPage({
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Cascata degraus={cascata.degraus} />
+          <Cascata
+            degraus={cascata.degraus}
+            vazamentoKey={vazamento?.degrau.key}
+            tomVazamento="perigo"
+          />
 
           {semRobo ? (
             <p className="mt-4 border-t pt-4 text-xs text-muted-foreground">
@@ -208,63 +211,73 @@ export default async function JornadaPage({
               Leads encerrados sem reunião no período, pelo motivo registrado.
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            <Table>
-              <THead>
-                <TR className="hover:bg-transparent">
-                  <TH>Motivo</TH>
-                  <TH>Onde está o problema</TH>
-                  <TH className="text-right">Leads</TH>
-                  <TH className="text-right">% das perdas</TH>
-                </TR>
-              </THead>
-              <TBody>
-                {lossRows.map((row) => (
-                  <TR key={row.status}>
-                    <TD className="font-medium">{row.label}</TD>
-                    <TD>
-                      <div className="flex items-center gap-2">
-                        <span
-                          aria-hidden
-                          className="h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-foreground/10"
-                        >
-                          <span
-                            className="block h-full rounded-full"
-                            style={{
-                              width: `${Math.round(row.share * 100)}%`,
-                              background:
-                                row.kind === "qualidade" ? "var(--warning)" : "var(--critical)",
-                            }}
-                          />
-                        </span>
-                        <span className="text-xs text-muted-foreground">
-                          {row.kind === "qualidade" ? "Mídia" : "Oferta / pitch"}
-                        </span>
-                      </div>
-                    </TD>
-                    <TD className="text-right tabular">{formatInt(row.count)}</TD>
-                    <TD className="text-right tabular">{formatPercent(row.share)}</TD>
+          <CardContent className="space-y-3">
+            {/* Uma tabela de uma linha é uma frase com moldura. */}
+            {lossRows.length === 1 ? (
+              <p className="text-sm">
+                <span className="font-medium">
+                  {formatInt(lossRows[0].count)}{" "}
+                  {lossRows[0].count === 1 ? "lead encerrado" : "leads encerrados"} como “
+                  {lossRows[0].label}”.
+                </span>{" "}
+                <span className="text-muted-foreground">
+                  Onde está o problema: {origem(lossRows[0]).toLowerCase()}.
+                </span>
+              </p>
+            ) : (
+              <Table>
+                <THead>
+                  <TR className="hover:bg-transparent">
+                    <TH>Motivo</TH>
+                    <TH>Onde está o problema</TH>
+                    <TH className="text-right">Leads</TH>
+                    <TH className="text-right">% das perdas</TH>
                   </TR>
-                ))}
-              </TBody>
-            </Table>
-            <p className="mt-3 text-xs text-muted-foreground">
-              {formatInt(lossTotal)} {lossTotal === 1 ? "lead encerrado" : "leads encerrados"} sem
-              reunião ·{" "}
-              <strong className="font-medium text-foreground">
-                {formatPercent(qualidadeShare)}
-              </strong>{" "}
-              por qualidade do lead (contato inválido, sem resposta) — isso se resolve na
-              segmentação e no formulário, não no comercial. O restante chegou a falar com a
-              equipe: é oferta e pitch.
-            </p>
+                </THead>
+                <TBody>
+                  {lossRows.map((row) => (
+                    <TR key={row.status}>
+                      <TD className="font-medium">{row.label}</TD>
+                      <TD>
+                        <div className="flex items-center gap-2">
+                          <span
+                            aria-hidden
+                            className="h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-foreground/10"
+                          >
+                            <span
+                              className="block h-full rounded-full"
+                              style={{
+                                width: `${Math.round(row.share * 100)}%`,
+                                background:
+                                  row.kind === "qualidade" ? "var(--warning)" : "var(--critical)",
+                              }}
+                            />
+                          </span>
+                          <span className="text-xs text-muted-foreground">{origem(row)}</span>
+                        </div>
+                      </TD>
+                      <TD className="text-right tabular">{formatInt(row.count)}</TD>
+                      <TD className="text-right tabular">{formatPercent(row.share)}</TD>
+                    </TR>
+                  ))}
+                </TBody>
+              </Table>
+            )}
+            {leituras.length > 0 || byKind.decisao > 0 ? (
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                {leituras.join(" ")}
+                {byKind.decisao > 0
+                  ? ` ${formatInt(byKind.decisao)} ${byKind.decisao === 1 ? "chegou" : "chegaram"} a falar com a equipe e ${byKind.decisao === 1 ? "recusou" : "recusaram"}: aí o problema é oferta e pitch.`
+                  : ""}
+              </p>
+            ) : null}
           </CardContent>
         </Card>
       ) : null}
 
       {/* Dentro do robô — o que a cascata não diz: por que a conversa parou */}
       {robo.kpis ? (
-        <Card>
+        <Card id="robo" className="scroll-mt-24">
           <CardHeader>
             <CardTitle>Dentro do robô: onde cada conversa parou</CardTitle>
             <CardDescription>

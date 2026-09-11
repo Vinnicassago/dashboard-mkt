@@ -124,10 +124,12 @@ export function montarFarol(input: FarolInput): Farol {
         `${input.parados > 1 ? "estão paradas" : "está parada"} esperando contato` +
         (input.midiaParada > 0 ? `, e a mídia já pagou ${brl(input.midiaParada)} por elas` : ""),
     );
+    // Com menos de 3 reuniões o custo por reunião está em quarentena em toda a
+    // tela — o farol, o bloco mais lido, não pode ser a exceção que imprime o valor.
     if (kpis.meetings > 0 && kpis.meetings < MIN_AMOSTRA) {
       partes.push(
-        `Custo por reunião ${piso ? "≥ " : ""}${brl(kpis.cpr)} é ${kpis.meetings} reunião só — ` +
-          "ele cai atendendo essas pessoas, não trocando o anúncio",
+        `Com ${kpis.meetings} ${kpis.meetings === 1 ? "reunião" : "reuniões"}, o custo por reunião ainda não é medida — ` +
+          "ele só cai atendendo essas pessoas, não trocando o anúncio",
       );
     }
     return {

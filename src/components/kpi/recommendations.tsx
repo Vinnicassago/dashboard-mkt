@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Recommendation, Severity } from "@/lib/recommendations";
+import { DONO_LABEL } from "@/lib/dono";
 
 /** Lista priorizada de ações. Cor por severidade. Server component. */
 const TONE: Record<Severity, string> = {
@@ -14,7 +15,6 @@ const SEV_LABEL: Record<Severity, string> = {
   media: "Otimizar",
   baixa: "Oportunidade",
 };
-const DONO_LABEL = { MKT: "marketing", COM: "comercial", BOT: "robô" } as const;
 
 export function RecommendationsCard({
   recs,

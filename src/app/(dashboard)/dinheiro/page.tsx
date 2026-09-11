@@ -19,8 +19,12 @@ import {
   dailySeries,
   filterAds,
   objectiveBreakdown,
+  overviewKpis,
+  rotuloCriativo,
   OBJECTIVE_LABEL,
 } from "@/lib/metrics";
+import { resolveMetaBrands } from "@/lib/meta/config";
+import { assessTrust, MIN_REUNIOES } from "@/lib/trust";
 import {
   formatCurrency,
   formatCurrency0,
@@ -87,6 +91,24 @@ export default async function DinheiroPage({
   const byAdset = adsetPerformance(data, range);
   const obj = objectiveBreakdown(data, range);
   const perf = creativePerformance(data, range);
+  const rotulo = (c: (typeof perf)[number]) => rotuloCriativo(c, perf);
+
+  // A mesma avaliação de confiança da home. Com menos de 3 reuniões o custo por
+  // reunião está em quarentena — e é aqui, onde se decide verba, que ele mais
+  // engana: "cj1 · CPR R$ 728" é uma reunião, não um custo.
+  const kc = overviewKpis(data, range);
+  const trust = assessTrust({
+    data,
+    range,
+    brandRules: await resolveMetaBrands(),
+    kpis: {
+      meetings: kc.meetings,
+      leads: kc.leads,
+      spendConversao: kc.spendConversao,
+      spendTotal: kc.spend,
+    },
+  });
+  const cprQuarentena = trust.porMetrica.cpr?.nivel === "quarentena";
 
   // Metas para pintar de vermelho quem passou do teto.
   const goalCpl = data.goals.find((g) => g.metric === "cpl")?.target;
@@ -114,12 +136,15 @@ export default async function DinheiroPage({
   return (
     <div className="space-y-6">
       {/* 1. A decisão de verba: por conjunto */}
-      <Card>
+      <Card id="conjuntos" className="scroll-mt-24">
         <CardHeader>
           <CardTitle>Por conjunto de anúncios</CardTitle>
           <CardDescription>
             Onde a verba vira reunião. Custo por lead e por reunião só nos conjuntos de
             conversão — descoberta não gera lead, então fica com &ldquo;—&rdquo;.
+            {cprQuarentena
+              ? ` O custo por reunião também fica em “—” até ${MIN_REUNIOES} reuniões (hoje ${kc.meetings}): com menos, a próxima reunião muda o número pela metade.`
+              : null}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -140,7 +165,8 @@ export default async function DinheiroPage({
               {byAdset.map((g) => {
                 const isConv = g.bucket === "conversao";
                 const cplOver = isConv && goalCpl != null && g.leads > 0 && g.cpl > goalCpl;
-                const cprOver = isConv && goalCpr != null && g.meetings > 0 && g.cpr > goalCpr;
+                const cprOver =
+                  isConv && !cprQuarentena && goalCpr != null && g.meetings > 0 && g.cpr > goalCpr;
                 return (
                   <TR key={g.adset}>
                     <TD className="font-medium">{g.adset}</TD>
@@ -161,7 +187,7 @@ export default async function DinheiroPage({
                     </TD>
                     <TD className="text-right tabular">{isConv ? formatInt(g.meetings) : "—"}</TD>
                     <TD className={`text-right tabular ${overCls(cprOver)}`}>
-                      {isConv && g.meetings > 0 ? formatCurrency(g.cpr) : "—"}
+                      {isConv && g.meetings > 0 && !cprQuarentena ? formatCurrency(g.cpr) : "—"}
                     </TD>
                   </TR>
                 );
@@ -212,7 +238,7 @@ export default async function DinheiroPage({
                       ? "1 criativo fadigando:"
                       : `${fatigued.length} criativos fadigando:`}
                   </span>{" "}
-                  {fatigued.map((c) => c.name).join(", ")}. Renove a arte antes que o custo
+                  {fatigued.map(rotulo).join(", ")}. Renove a arte antes que o custo
                   dispare — a fadiga infla o CPL e, na cascata, o custo por reunião.
                 </p>
               </div>
@@ -227,7 +253,7 @@ export default async function DinheiroPage({
                     </div>
                     <div>
                       <p className="text-xs text-muted-foreground">Melhor CPL</p>
-                      <p className="font-semibold">{bestCpl.name}</p>
+                      <p className="font-semibold">{rotulo(bestCpl)}</p>
                       <p className="text-sm text-muted-foreground">
                         {formatCurrency(bestCpl.cpl)} por lead · {formatInt(bestCpl.leads)}{" "}
                         {bestCpl.leads === 1 ? "lead" : "leads"} · {formatInt(bestCpl.meetings)}{" "}
@@ -251,7 +277,7 @@ export default async function DinheiroPage({
                     </div>
                     <div>
                       <p className="text-xs text-muted-foreground">Maior CTR</p>
-                      <p className="font-semibold">{bestCtr.name}</p>
+                      <p className="font-semibold">{rotulo(bestCtr)}</p>
                       <p className="text-sm text-muted-foreground">
                         {formatPercent(bestCtr.ctr)} de cliques · {formatInt(bestCtr.impressions)}{" "}
                         impressões
@@ -274,7 +300,7 @@ export default async function DinheiroPage({
                 <CardTitle>Todos os criativos</CardTitle>
               </CardHeader>
               <CardContent>
-                <CreativesTable rows={perf} />
+                <CreativesTable rows={perf} cprEmQuarentena={cprQuarentena} />
               </CardContent>
             </Card>
           </>
@@ -386,9 +412,18 @@ export default async function DinheiroPage({
               <Stat label="Reuniões" value={formatInt(obj.conversao.meetings)} />
               <Stat
                 label="Custo por reunião"
-                value={obj.conversao.meetings > 0 ? formatCurrency(obj.conversao.cpr) : "—"}
-                highlight
+                value={
+                  obj.conversao.meetings > 0 && !cprQuarentena
+                    ? formatCurrency(obj.conversao.cpr)
+                    : "—"
+                }
+                highlight={!cprQuarentena}
               />
+              {cprQuarentena ? (
+                <p className="text-xs text-muted-foreground">
+                  Volta com {MIN_REUNIOES} reuniões (hoje {kc.meetings}).
+                </p>
+              ) : null}
             </div>
 
             <div className="space-y-2 rounded-lg border p-4">

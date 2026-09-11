@@ -13,11 +13,20 @@ import {
   inRange,
   postingCadence,
   previousRange,
+  rotuloCriativo,
   type DateRange,
 } from "./metrics";
+import { MIN_REUNIOES } from "./trust";
 import { isAwareness } from "./brands";
 // A régua editorial mora no playbook (o guia como código) — nunca hardcode aqui.
-import { DM_MAX_SHARE, PILARES_PROIBIDOS, REEL, ROTINA_DIARIA, WEEKLY_MIX } from "./content/playbook";
+import {
+  DM_MAX_SHARE,
+  PILARES_PROIBIDOS,
+  REEL,
+  ROTINA_DIARIA,
+  WEEKLY_MIX,
+  hasPlaybook,
+} from "./content/playbook";
 import { presenceRoutine } from "./content/outcomes";
 import {
   formatCompact,
@@ -115,24 +124,38 @@ export function buildRecommendations(
   const goalCpl = data.goals.find((g) => g.metric === "cpl")?.target;
   const goalCpr = data.goals.find((g) => g.metric === "cpr")?.target;
 
-  // 1. Criativos fadigando (alta) — o maior ralo de verba.
+  // 1. Criativos fadigando — um verbo por regra. "Renove ou pause" com o CPL
+  //    abaixo da média oferecia dois gestos opostos para um anúncio que ainda traz
+  //    lead barato; e o nome sozinho não dizia QUAL anúncio (há dois "Carrossel -").
   const fatigued = creatives
     .filter((c) => c.fatigue.level === "fadigado" && c.spend > 0)
     .sort((a, b) => b.spend - a.spend);
   for (const c of fatigued.slice(0, 2)) {
+    const rotulo = rotuloCriativo(c, creatives);
+    const caro = c.leads >= 5 && k.cpl > 0 && c.cpl >= k.cpl * 1.5;
+    const cpl = c.leads > 0 ? `CPL ${formatCurrency(c.cpl)}` : "nenhum lead no período";
     recs.push({
       id: `fatigue-${c.adId}`,
-      severity: "alta",
-      title: `Renove ou pause "${c.name}"`,
-      detail: `Fadigando (${c.fatigue.reason}). CPL ${formatCurrency(c.cpl)}${c.meetings ? ` · CPR ${formatCurrency(c.cpr)}` : ""}. Suba uma variação nova antes do custo disparar.`,
+      severity: caro ? "alta" : "media",
+      dono: "MKT",
+      href: "/dinheiro#criativos",
+      title: caro ? `Pause "${rotulo}"` : `Renove a arte de "${rotulo}"`,
+      detail: caro
+        ? `${cpl} em ${formatInt(c.leads)} leads — ${formatDecimal(c.cpl / k.cpl, 1)}× a média da conta (${formatCurrency(k.cpl)}) — e fadigando (${c.fatigue.reason}). Pause no Ads Manager e suba uma variação.`
+        : `Fadigando (${c.fatigue.reason}). ${cpl}${k.cpl > 0 && c.leads > 0 ? `, ${c.cpl <= k.cpl ? "ainda abaixo" : "acima"} da média da conta (${formatCurrency(k.cpl)})` : ""}. Suba uma variação nova no mesmo conjunto antes que o custo dispare.`,
     });
   }
 
-  // 2. CPR/CPL acima da meta (alta).
-  if (goalCpr && k.meetings > 0 && k.cpr > goalCpr) {
+  // 2. CPR/CPL acima da meta (alta). Com menos de MIN_REUNIOES o custo por
+  //    reunião está em quarentena: julgar por ele mandaria pausar conjuntos por
+  //    causa de uma reunião — o motor não pode decidir com o que a tela esconde.
+  const cprConfiavel = k.meetings >= MIN_REUNIOES;
+  if (goalCpr && cprConfiavel && k.cpr > goalCpr) {
     recs.push({
       id: "cpr-over",
       severity: "alta",
+      dono: "MKT",
+      href: "/dinheiro#conjuntos",
       title: "Custo por reunião acima da meta",
       detail: `CPR ${formatCurrency(k.cpr)} vs meta ${formatCurrency0(goalCpr)}. Pause os conjuntos de pior CPR e concentre no que agenda barato.`,
     });
@@ -140,13 +163,15 @@ export function buildRecommendations(
     recs.push({
       id: "cpl-over",
       severity: "alta",
+      dono: "MKT",
+      href: "/dinheiro#criativos",
       title: "CPL acima da meta",
       detail: `CPL ${formatCurrency(k.cpl)} vs meta ${formatCurrency0(goalCpl)}. Corte os criativos mais caros e realoque para os vencedores.`,
     });
   }
 
   // 3. Realocar budget entre conjuntos por CPR (média).
-  const withCpr = convAdsets.filter((a) => a.meetings > 0 && a.spend > 0);
+  const withCpr = cprConfiavel ? convAdsets.filter((a) => a.meetings > 0 && a.spend > 0) : [];
   if (withCpr.length >= 2) {
     const best = withCpr.reduce((m, a) => (a.cpr < m.cpr ? a : m));
     const worst = withCpr.reduce((m, a) => (a.cpr > m.cpr ? a : m));
@@ -154,6 +179,8 @@ export function buildRecommendations(
       recs.push({
         id: "realloc",
         severity: "media",
+        dono: "MKT",
+        href: "/dinheiro#conjuntos",
         title: `Realoque budget para "${best.adset}"`,
         detail: `"${worst.adset}" tem CPR ${formatCurrency(worst.cpr)} (${(worst.cpr / best.cpr).toFixed(1)}× o de "${best.adset}", ${formatCurrency(best.cpr)}). Mova aos poucos — 10–20% a cada 2–3 dias, para não resetar o aprendizado.`,
       });
@@ -162,13 +189,15 @@ export function buildRecommendations(
 
   // 4. Escalar o vencedor por CPR, com amostra mínima e sem estar fadigado (média).
   const winner = creatives
-    .filter((c) => c.meetings >= 2 && c.spend > 0 && c.fatigue.level !== "fadigado")
+    .filter((c) => cprConfiavel && c.meetings >= 2 && c.spend > 0 && c.fatigue.level !== "fadigado")
     .sort((a, b) => a.cpr - b.cpr)[0];
   if (winner) {
     recs.push({
       id: `scale-${winner.adId}`,
       severity: "media",
-      title: `Escale "${winner.name}"`,
+      dono: "MKT",
+      href: "/dinheiro#criativos",
+      title: `Escale "${rotuloCriativo(winner, creatives)}"`,
       detail: `Melhor CPR ${formatCurrency(winner.cpr)} com ${winner.meetings} reuniões e ${formatInt(winner.leads)} leads. Aumente o budget 10–20% e observe 48–72h.`,
     });
   }
@@ -179,6 +208,8 @@ export function buildRecommendations(
     recs.push({
       id: "pace-over",
       severity: "media",
+      dono: "MKT",
+      href: "/dinheiro",
       title: "Ritmo de gasto acima do orçamento",
       detail: `No ritmo atual, gasto projetado ${formatCurrency0(pacing.projectedSpend)} vs orçamento ${formatCurrency0(pacing.budget)}. Reduza o budget diário para não estourar antes do fim.`,
     });
@@ -186,6 +217,8 @@ export function buildRecommendations(
     recs.push({
       id: "pace-sub",
       severity: "baixa",
+      dono: "MKT",
+      href: "/dinheiro",
       title: "Sobrando orçamento no ritmo atual",
       detail: `Gasto projetado ${formatCurrency0(pacing.projectedSpend)} de ${formatCurrency0(pacing.budget)}. Há espaço para escalar os vencedores sem estourar.`,
     });
@@ -256,7 +289,7 @@ function buildOrganicContentRecommendations(
           id: "retention-drop",
           severity: "media",
           title: "Tempo assistido dos reels caindo",
-          detail: `Tempo médio assistido caiu vs o período anterior. Preencha a duração dos reels no Config para acompanhar a retenção % real (meta: 40%).`,
+          detail: `Tempo médio assistido caiu vs o período anterior. Preencha a duração dos reels em Ajustes para acompanhar a retenção % real (meta: 40%).`,
         });
       }
     }
@@ -353,15 +386,35 @@ function buildOrganicContentRecommendations(
   );
   const vanitySpend = vanityAds.reduce((s, r) => s + r.spend, 0);
   if (vanitySpend > 0) {
+    // Nomeia o conjunto: "a campanha de descoberta" não diz qual mudar no Ads Manager.
+    const conjuntos = [...new Set(vanityAds.map((r) => r.adset || r.campaign).filter(Boolean))];
     recs.push({
       id: "vanity-objective",
       severity: "media",
-      title: "Mude o objetivo da campanha de descoberta",
+      title:
+        conjuntos.length === 1
+          ? `Mude o objetivo de "${conjuntos[0]}"`
+          : `Mude o objetivo de ${conjuntos.length} conjuntos de descoberta`,
       detail: `${formatCurrency0(vanitySpend)} rodando otimizado para views/alcance amplo — isso compra visualização de quem nunca vai engajar. Prefira engajamento com público restrito (interesse + região + renda) ou mensagens.`,
     });
   }
 
-  return recs;
+  // Toda ação de conteúdo e de verba de descoberta é do marketing e leva ao
+  // lugar onde se age: ação sem dono e sem destino é só texto.
+  const producao = hasPlaybook(data.campaign.brand) ? "/conteudo/producao" : "/conteudo/posts";
+  const DESTINO: Record<string, string> = {
+    "no-recent-post": producao,
+    "same-day-pileup": producao,
+    "grade-composicao": producao,
+    "dias-sem-story": producao,
+    "pillar-frase": producao,
+    "vanity-objective": "/dinheiro#conjuntos",
+  };
+  return recs.map((r) => ({
+    ...r,
+    dono: r.dono ?? "MKT",
+    href: r.href ?? DESTINO[r.id] ?? "/conteudo/posts",
+  }));
 }
 
 /**

@@ -38,6 +38,13 @@ export type MetricKey =
  *   `piso`       — o real é IGUAL OU MAIOR (falta dado que só soma). Prefixe "≥".
  *   `teto`       — o real é IGUAL OU MENOR (há dado a mais no cálculo). Prefixe "≤".
  */
+/**
+ * Abaixo disto o custo por reunião não é medida: a próxima reunião muda o número
+ * pela metade. Régua ÚNICA da quarentena — o motor de ações, a IA, o Dinheiro e a
+ * cascata leem daqui para não imprimir nem decidir com uma reunião só.
+ */
+export const MIN_REUNIOES = 3;
+
 export type NivelConfianca = "quarentena" | "piso" | "teto";
 
 export interface Quarentena {
@@ -225,7 +232,6 @@ export function assessTrust(input: TrustInput): TrustReport {
    * uma taxa" no degrau; sem esta trava o KPI do topo exibia o mesmo valor com
    * cara de medição estável.
    */
-  const MIN_REUNIOES = 3;
   if (kpis.meetings > 0 && kpis.meetings < MIN_REUNIOES) {
     travas.push({
       id: "cpr-amostra",

@@ -89,7 +89,8 @@ const columns: Column<CreativePerf>[] = [
     header: "Custo/reunião",
     align: "right",
     sortable: true,
-    sortValue: (r) => r.cpr,
+    // Mesmo motivo do CPL: sem reunião o custo é desconhecido, não zero.
+    sortValue: (r) => (r.meetings > 0 ? r.cpr : Number.POSITIVE_INFINITY),
     render: (r) => (r.meetings > 0 ? formatCurrency(r.cpr) : "—"),
   },
   /*
@@ -133,10 +134,21 @@ const columns: Column<CreativePerf>[] = [
   },
 ];
 
-export function CreativesTable({ rows }: { rows: CreativePerf[] }) {
+export function CreativesTable({
+  rows,
+  cprEmQuarentena = false,
+}: {
+  rows: CreativePerf[];
+  /** Com menos de 3 reuniões na campanha, o custo por reunião vira "—" na tabela toda. */
+  cprEmQuarentena?: boolean;
+}) {
+  // Em quarentena, um criativo com 1 reunião não tem custo por reunião — tem sorte.
+  const cols = cprEmQuarentena
+    ? columns.map((c) => (c.key === "cpr" ? { ...c, sortable: false, render: () => "—" } : c))
+    : columns;
   return (
     <DataTable
-      columns={columns}
+      columns={cols}
       rows={rows}
       initialSortKey="spend"
       initialSortDir="desc"

@@ -684,6 +684,26 @@ export interface CreativePerf {
   holdRate?: number; // thruPlays / 3s plays (retenção: segura quem começou a ver?)
 }
 
+/**
+ * Nome que identifica UM anúncio.
+ *
+ * O Ads Manager aceita dois anúncios com o mesmo nome em conjuntos diferentes — a
+ * campanha tem dois "Carrossel -", um fadigando e outro com o melhor CPL. Uma
+ * ação que diz só o nome pode levar a pausar o anúncio errado. Quando o nome se
+ * repete, o conjunto entra no rótulo; se ainda colidir, o fim do id do anúncio.
+ */
+export function rotuloCriativo(
+  c: Pick<CreativePerf, "adId" | "name" | "adset">,
+  todos: Pick<CreativePerf, "adId" | "name" | "adset">[],
+): string {
+  const homonimos = todos.filter((o) => o.name === c.name && o.adId !== c.adId);
+  if (homonimos.length === 0) return c.name;
+  const conjunto = c.adset.length > 32 ? `${c.adset.slice(0, 31)}…` : c.adset;
+  return homonimos.some((o) => o.adset === c.adset)
+    ? `${c.name} · ${conjunto} · ${c.adId.slice(-4)}`
+    : `${c.name} · ${conjunto}`;
+}
+
 export function creativePerformance(
   data: DashboardData,
   range?: DateRange,

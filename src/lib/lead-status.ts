@@ -28,6 +28,15 @@ export interface LeadStatusMeta {
   /** Encerra o lead (nenhum motivo de perda volta para a fila do comercial). */
   lost: boolean;
   lossKind?: LossKind;
+  /**
+   * Onde o problema provavelmente está, como a quebra de perdas deve dizer. Não é
+   * o mesmo que `lossKind`: "Sem resposta" conta como qualidade no CPL, mas
+   * sozinho não diz se a pessoa parou no número errado, no robô ou na demora do
+   * contato — escrever "Mídia" ali empurrava o time para a segmentação sem prova.
+   */
+  origemDaPerda?: string;
+  /** Como ler esta perda antes de agir, quando o motivo sozinho engana. */
+  leituraDaPerda?: string;
   /** Explicação curta, exibida na quebra de perdas e como title do seletor. */
   hint: string;
 }
@@ -67,6 +76,7 @@ export const LEAD_STATUS_META: Record<LeadStatus, LeadStatusMeta> = {
     order: 0,
     lost: true,
     lossKind: "qualidade",
+    origemDaPerda: "Formulário / mídia",
     hint: "Telefone ou e-mail não existe. Lead que a mídia nunca deveria ter cobrado.",
   },
   sem_resposta: {
@@ -75,6 +85,9 @@ export const LEAD_STATUS_META: Record<LeadStatus, LeadStatusMeta> = {
     order: 1,
     lost: true,
     lossKind: "qualidade",
+    origemDaPerda: "Não dá para dizer",
+    leituraDaPerda:
+      "não diz onde a pessoa parou: pode ser número errado, a 1ª mensagem do robô sem retorno ou demora no 1º contato. Cruze com “Dentro do robô”, abaixo, antes de mexer na segmentação",
     hint: "Contato válido, mas nunca retornou as tentativas.",
   },
   sem_interesse: {
@@ -83,6 +96,7 @@ export const LEAD_STATUS_META: Record<LeadStatus, LeadStatusMeta> = {
     order: 2,
     lost: true,
     lossKind: "decisao",
+    origemDaPerda: "Oferta / pitch",
     hint: "Falou com o comercial e disse que não quer.",
   },
   desistencia: {
@@ -91,6 +105,7 @@ export const LEAD_STATUS_META: Record<LeadStatus, LeadStatusMeta> = {
     order: 3,
     lost: true,
     lossKind: "decisao",
+    origemDaPerda: "Oferta / pitch",
     hint: "Avançou (chegou a agendar) e desistiu antes de fechar.",
   },
 };

@@ -30,12 +30,21 @@ import { filterAds, filterLeads, countMeetings, countAttended, countClients } fr
 import type { DateRange } from "./metrics";
 import type { DashboardData } from "./types";
 import type { FilaEtapa } from "./fila";
+import type { Dono } from "./dono";
+import { MIN_REUNIOES } from "./trust";
 import { formatDecimal, formatInt } from "./format";
 
 // ---------------------------------------------------------------- vocabulário
 
 export type Fonte = "meta" | "lp" | "crm" | "robo" | "comercial";
-export type Dono = "MKT" | "BOT" | "COM";
+export type { Dono };
+
+/**
+ * Abaixo disto um número não sustenta taxa nem custo: "1 de 1" imprime "100,0%" e
+ * "R$ 1.925,56 cada" com cara de medição. É a mesma régua da quarentena do custo
+ * por reunião.
+ */
+export const AMOSTRA_MINIMA = MIN_REUNIOES;
 
 export const FONTE_META: Record<Fonte, { label: string; sistema: string }> = {
   meta: { label: "Meta Ads", sistema: "Meta" },
@@ -83,24 +92,78 @@ export interface Degrau {
   nota?: string;
 }
 
+/** Onde o funil mais perde gente depois do lead — a resposta a "onde vaza". */
+export interface Vazamento {
+  degrau: Degrau;
+  anterior: Degrau;
+  /** Perdidas na junta, sem contar quem está parado nela (esses voltam pela Fila). */
+  pessoas: number;
+  frase: string;
+}
+
+/** O que a perda quer dizer em cada junta, na língua de quem age. */
+const FRASE_PERDA: Record<string, string> = {
+  conversas: "não receberam a 1ª mensagem do robô",
+  responderam: "não responderam à 1ª mensagem do robô",
+  convite: "responderam, mas não chegaram ao convite",
+  transferidos: "não aceitaram o convite para falar com o especialista",
+  abordados: "não foram abordados pelo especialista",
+  reuniao: "foram abordados e não chegaram à reunião",
+  negocio: "fizeram reunião e não fecharam",
+  reunioes: "não agendaram reunião",
+  compareceu: "agendaram e não compareceram",
+  clientes: "fizeram reunião e não fecharam",
+};
+
 /**
- * Versão curta da cascata, para a Visão Geral.
+ * A maior perda em PESSOAS depois do lead, descontando quem está parado na junta
+ * (esses são fila, não vazamento). Com toda junta abaixo de 50% pintada de
+ * vermelho, a Jornada acendia quatro alarmes do mesmo tamanho — dois deles
+ * artefatos de medição — e não respondia à própria pergunta. Função pura.
+ */
+export function maiorVazamento(degraus: Degrau[]): Vazamento | null {
+  const inicio = degraus.findIndex((d) => d.key === "leads");
+  let maior: Vazamento | null = null;
+  for (let i = Math.max(1, inicio + 1); i < degraus.length; i++) {
+    const d = degraus[i];
+    const ant = degraus[i - 1];
+    if (d.ehAncora || d.valor == null || ant.valor == null || ant.valor < AMOSTRA_MINIMA) continue;
+    const pessoas = Math.max(0, ant.valor - d.valor) - (d.parados ?? 0);
+    if (pessoas <= 0 || (maior && pessoas <= maior.pessoas)) continue;
+    maior = {
+      degrau: d,
+      anterior: ant,
+      pessoas,
+      frase: FRASE_PERDA[d.key] ?? `não chegaram a “${d.label.toLowerCase()}”`,
+    };
+  }
+  return maior;
+}
+
+/**
+ * Versão curta da cascata, para a home.
  *
- * Onze degraus com selo de fonte, custo unitário e nota de rodapé é peça de
- * consulta: o gestor lê os três primeiros e desiste antes de chegar no degrau
- * onde está o problema. Aqui ficam a âncora, os degraus onde há gente parada e
- * o fim do funil — as taxas são RECALCULADAS entre os que sobraram, senão o
- * percentual apontaria para um degrau que não está mais na tela.
+ * Onze degraus com selo de fonte, custo unitário e nota é peça de consulta. Aqui
+ * ficam, de Leads para baixo: os degraus com gente parada, o maior vazamento (e o
+ * degrau de onde ele parte, para a perda sair com o número certo) e o fim do
+ * funil. Começa em Leads porque acima dele a unidade é impressão: o maior número
+ * do bloco era o menos acionável. As taxas são RECALCULADAS entre os que sobraram,
+ * senão o percentual apontaria para um degrau que não está mais na tela.
  *
  * A versão completa continua em /jornada.
  */
 export function resumirCascata(degraus: Degrau[]): Degrau[] {
-  const manter = degraus.filter(
+  const base = degraus.slice(Math.max(0, degraus.findIndex((d) => d.key === "leads")));
+  const vazamento = maiorVazamento(base);
+  const iv = vazamento ? base.indexOf(vazamento.degrau) : -1;
+  const manter = base.filter(
     (d, i) =>
       i === 0 ||
       d.ehAncora ||
       (d.parados ?? 0) > 0 ||
-      i === degraus.length - 1 ||
+      i === iv ||
+      i === iv - 1 ||
+      i === base.length - 1 ||
       d.valor === null,
   );
 
@@ -109,7 +172,9 @@ export function resumirCascata(degraus: Degrau[]): Degrau[] {
     const ant = manter[i - 1];
     // Ao cruzar uma âncora a unidade muda (impressões → pessoas): uma "perda"
     // de 380 mil entre impressões e leads não é gente perdida, é troca de base.
-    const podeCalcular = !d.ehAncora && d.valor != null && ant.valor != null && ant.valor > 0;
+    // E abaixo da amostra mínima a taxa não é taxa.
+    const podeCalcular =
+      !d.ehAncora && d.valor != null && ant.valor != null && ant.valor >= AMOSTRA_MINIMA;
     return {
       ...d,
       // Sem trocaDeSistema no resumo: com degraus omitidos, a junta deixaria de
@@ -194,8 +259,11 @@ export function montarCascata(input: CascataInput): CascataResult {
   const degraus: Degrau[] = [];
   const push = (d: Degrau) => degraus.push(d);
 
-  /** Custo por unidade que chegou até aqui. */
-  const custo = (v: number | null) => (v && v > 0 ? verba / v : undefined);
+  /**
+   * Custo por unidade que chegou até aqui — só com amostra: com 1 pessoa,
+   * "R$ 1.925,56 cada" é a verba inteira, não um custo.
+   */
+  const custo = (v: number | null) => (v && v >= AMOSTRA_MINIMA ? verba / v : undefined);
 
   // ---- topo: âncora nas impressões -------------------------------------
   push({
@@ -250,8 +318,10 @@ export function montarCascata(input: CascataInput): CascataResult {
   // ---- robô ------------------------------------------------------------
   if (robo) {
     const seq: [string, string, number, Dono, number | undefined][] = [
-      ["conversas", "Conversas no WhatsApp", robo.conversas, "MKT", undefined],
-      ["responderam", "Responderam", robo.responderam, "BOT", undefined],
+      // Quem inicia é o robô: chamar de "conversa" contava como interação quem
+      // nunca respondeu — e escondia que a queda está na primeira mensagem.
+      ["conversas", "Robô mandou a 1ª mensagem", robo.conversas, "MKT", undefined],
+      ["responderam", "Responderam à 1ª mensagem", robo.responderam, "BOT", undefined],
       ["convite", "Receberam convite", robo.convidados, "BOT", undefined],
       ["transferidos", "Transferidos ao especialista", robo.transferidos, "BOT", robo.convitePendente],
     ];
@@ -361,6 +431,15 @@ export function montarCascata(input: CascataInput): CascataResult {
       daAncora: div(clientesPainel, leadCount),
       dono: "COM",
     });
+  }
+
+  // Taxa entre números pequenos não é taxa: "1 de 1" imprime "100,0%" e parece
+  // medição. Abaixo da amostra mínima a junta mostra só o dono.
+  for (let i = 1; i < degraus.length; i++) {
+    const ant = degraus[i - 1];
+    if (!degraus[i].ehAncora && ant.valor != null && ant.valor < AMOSTRA_MINIMA) {
+      degraus[i] = { ...degraus[i], daAnterior: undefined };
+    }
   }
 
   // ---- o que parece perda e não é --------------------------------------

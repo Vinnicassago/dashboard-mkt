@@ -70,8 +70,10 @@ export const FILA_ETAPAS: Record<FilaEtapa, EtapaMeta> = {
   "convite-pendente": {
     label: "Convite sem resposta",
     slaHoras: 24,
-    dono: "BOT",
-    hint: "O robô ofereceu falar com o especialista e o lead não respondeu.",
+    // O convite é do robô; retomar quem não respondeu é contato humano. Com dono
+    // "robô", a ação mais urgente da home tinha verbo de gente e ninguém cobrado.
+    dono: "COM",
+    hint: "O robô ofereceu falar com o especialista e o lead não respondeu — retome pelo WhatsApp.",
     profundidade: 2,
   },
   "sem-status": {

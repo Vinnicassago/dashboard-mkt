@@ -34,6 +34,8 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   admin). Toda mutação chama `can(cap)` de `auth/guard.ts` (modo aberto sem
   `AUTH_SECRET` = tudo liberado). Enforçar SEMPRE no server, não só na UI.
 - **KPIs:** somente em `src/lib/metrics.ts`, funções **puras** (sem I/O). Reutilize-as.
+  Criativo citado em ação, alerta ou IA passa por `rotuloCriativo()` — dois anúncios
+  podem ter o mesmo nome ("Carrossel -"), e o nome sozinho manda pausar o errado.
 - **Confiança** (`src/lib/trust.ts`): `div()` devolve 0 quando o denominador é 0, então
   "nenhuma reunião" e "reunião de graça" imprimem o mesmo pixel. `assessTrust()` (pura)
   diz o que o número sustenta: `quarentena` (não exiba — vira "—"), `piso` (o real é
@@ -41,7 +43,9 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   denominador zero** — guarde com `x > 0 ? formatCurrency(...) : "—"` ou passe
   `quarentena` ao `KpiCard`, que também some com delta e sparkline. NÃO troque `div()`
   para `number | null`: 75 call sites e null vazaria para o Recharts. Trava nova =
-  entrada em `assessTrust`, não um `if` na página.
+  entrada em `assessTrust`, não um `if` na página. `MIN_REUNIOES` (trust.ts) é a régua
+  ÚNICA da quarentena do custo por reunião: motor de ações, IA, Dinheiro e cascata leem
+  dali — nenhuma tela imprime nem decide por CPR abaixo dela.
 - **Status do lead** (`src/lib/lead-status.ts`): fonte ÚNICA de rótulo, cor, posição
   no funil e "isto encerra o lead?". UI, métricas, CSV e seed leem dali — nunca
   repita a lista de status nem hardcode um `<option>`. Os quatro motivos de perda
@@ -72,7 +76,10 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   todo degrau e junta tracejada onde o dado troca de sistema; **cliques NÃO é degrau**
   (`inline_link_clicks || clicks` soma duas definições incompatíveis); quando duas
   fontes discordam do mesmo fato, `valor: null` e a divergência vira nota — nunca
-  escolha um lado em silêncio. Sem robô, cai no funil do painel e diz isso.
+  escolha um lado em silêncio. `maiorVazamento()` (maior perda em pessoas depois do
+  lead, sem contar quem está parado) é a resposta da Jornada e a ÚNICA junta com cor;
+  abaixo de `AMOSTRA_MINIMA` a cascata não imprime taxa nem custo unitário. Sem robô,
+  cai no funil do painel e diz isso.
 - **Fila de contato** (`src/lib/fila.ts`): funde as três filas que vivem em bancos
   diferentes (leads sem desfecho, convite pendente no robô, transferido sem 1º contato)
   numa lista só. Fonte ÚNICA dos SLAs por etapa em `FILA_ETAPAS` — nunca hardcode um
@@ -80,7 +87,8 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   6h num SLA de 2h é mais urgente que 3 dias num de 48h. Dedupe por telefone via
   `src/lib/phone.ts` (fonte única do pareamento, usada também pela ponte do Comercial) —
   a mesma pessoa costuma estar em duas filas, e vence a etapa mais funda. Etapa nova =
-  entrada em `FILA_ETAPAS` + um ramo em `montarFila`.
+  entrada em `FILA_ETAPAS` + um ramo em `montarFila`. Rótulo de dono (marketing, robô,
+  comercial) vem de `src/lib/dono.ts`.
 - **Navegação** (`components/layout/nav-items.ts`): 7 páginas nomeadas pela PERGUNTA
   que respondem (Hoje, Dinheiro, Jornada, Fila, Pessoas, Conteúdo, Ajustes), não pela
   fonte do dado — eram 14, uma por sistema, e a mesma pessoa aparecia contada em três

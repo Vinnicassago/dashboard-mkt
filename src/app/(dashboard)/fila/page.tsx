@@ -15,6 +15,7 @@ import {
 } from "@/lib/fila";
 import { can } from "@/lib/auth/guard";
 import { formatInt } from "@/lib/format";
+import { DONO_LABEL } from "@/lib/dono";
 
 export const dynamic = "force-dynamic";
 
@@ -135,7 +136,7 @@ export default async function FilaPage({
                       ) : (
                         "todos no prazo"
                       )}{" "}
-                      · dono {meta.dono}
+                      · dono: {DONO_LABEL[meta.dono]}
                     </p>
                   </CardContent>
                 </Card>

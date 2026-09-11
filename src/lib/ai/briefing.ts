@@ -30,7 +30,9 @@ import {
   previousRange,
   type DataWarning,
   type DateRange,
+  rotuloCriativo,
 } from "../metrics";
+import { MIN_REUNIOES } from "../trust";
 import { buildRecommendations } from "../recommendations";
 import { BENCHMARK, ROTINA_DIARIA, WEEKLY_MIX } from "../content/playbook";
 import { buildOutcomeReport, presenceRoutine } from "../content/outcomes";
@@ -296,7 +298,11 @@ export function buildBriefing(
   const obj = objectiveBreakdown(data, range);
   const pacing = campaignPacing(data, opts.nowIso);
   const criativos = creativePerformance(data, range);
-  const comCpr = criativos.filter((c) => c.meetings > 0);
+  // Com menos de MIN_REUNIOES o custo por reunião está em quarentena na tela: a
+  // IA recebe null e o motivo, nunca o valor — senão argumenta com um número que
+  // o painel esconde.
+  const cprConfiavel = k.meetings >= MIN_REUNIOES;
+  const comCpr = cprConfiavel ? criativos.filter((c) => c.meetings > 0) : [];
 
   return {
     ...base,
@@ -310,13 +316,16 @@ export function buildBriefing(
       cpl: r2(k.cpl),
       cplAnterior: kPrev ? r2(kPrev.cpl) : null,
       reunioes: k.meetings,
-      cpr: r2(k.cpr),
-      cprAnterior: kPrev ? r2(kPrev.cpr) : null,
+      cpr: cprConfiavel ? r2(k.cpr) : null,
+      cprEmQuarentena: cprConfiavel
+        ? null
+        : `só ${k.meetings} ${k.meetings === 1 ? "reunião" : "reuniões"} no período — com menos de ${MIN_REUNIOES}, o custo por reunião não é exibido nem usado para decidir`,
+      cprAnterior: kPrev && kPrev.meetings >= MIN_REUNIOES ? r2(kPrev.cpr) : null,
       compareceram: k.attended,
       taxaComparecimentoPct: pct(k.showRate),
       // Derivadas óbvias, entregues prontas: o modelo tende a calculá-las
       // sozinho para argumentar, e proibir é mais frágil do que dar o número.
-      custoPorComparecimento: k.attended > 0 ? r2(k.spendConversao / k.attended) : null,
+      custoPorComparecimento: k.attended >= MIN_REUNIOES ? r2(k.spendConversao / k.attended) : null,
       custoPorCliente: k.clients > 0 ? r2(k.spendConversao / k.clients) : null,
       leadParaReuniaoPct: pct(k.leadToMeeting),
       clientes: k.clients,
@@ -337,18 +346,18 @@ export function buildBriefing(
         melhorPorCpr: comCpr.length
           ? (() => {
               const c = comCpr.reduce((m, x) => (x.cpr < m.cpr ? x : m));
-              return { nome: c.name, cpr: r2(c.cpr), reunioes: c.meetings, gasto: money(c.spend) };
+              return { nome: rotuloCriativo(c, criativos), cpr: r2(c.cpr), reunioes: c.meetings, gasto: money(c.spend) };
             })()
           : null,
         piorPorCpr: comCpr.length > 1
           ? (() => {
               const c = comCpr.reduce((m, x) => (x.cpr > m.cpr ? x : m));
-              return { nome: c.name, cpr: r2(c.cpr), reunioes: c.meetings, gasto: money(c.spend) };
+              return { nome: rotuloCriativo(c, criativos), cpr: r2(c.cpr), reunioes: c.meetings, gasto: money(c.spend) };
             })()
           : null,
         fadigados: criativos
           .filter((c) => c.fatigue.level === "fadigado")
-          .map((c) => ({ nome: c.name, motivo: c.fatigue.reason, gasto: money(c.spend) })),
+          .map((c) => ({ nome: rotuloCriativo(c, criativos), motivo: c.fatigue.reason, gasto: money(c.spend) })),
       },
     },
   };

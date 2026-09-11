@@ -14,7 +14,7 @@ import { activeBrandSlug } from "@/lib/active-brand";
 import { brandDef } from "@/lib/brands";
 import { pageRange } from "@/lib/page-range";
 import { getCascataFontes, getComercial } from "@/lib/robo/client";
-import { montarCascata, resumirCascata } from "@/lib/cascata";
+import { maiorVazamento, montarCascata, resumirCascata } from "@/lib/cascata";
 import { contarParados, montarFarol } from "@/lib/farol";
 import { FILA_ETAPAS } from "@/lib/fila";
 import { FarolCard } from "@/components/kpi/farol-card";
@@ -271,7 +271,7 @@ export default async function OverviewPage({
 
       <ChartCard
         title="Onde o dinheiro para"
-        description="Os degraus onde há gente parada, e o fim do funil."
+        description="Do lead ao negócio: onde há gente parada e onde mais se perde."
         action={
           <Link
             href={comPeriodo("/jornada", rangeKey)}
@@ -281,7 +281,11 @@ export default async function OverviewPage({
           </Link>
         }
       >
-        <Cascata degraus={resumirCascata(cascata.degraus)} />
+        <Cascata
+          degraus={resumirCascata(cascata.degraus)}
+          vazamentoKey={maiorVazamento(cascata.degraus)?.degrau.key}
+          tomVazamento="alerta"
+        />
       </ChartCard>
 
       <TrustBand travas={travasDeNumero} rangeKey={rangeKey} />

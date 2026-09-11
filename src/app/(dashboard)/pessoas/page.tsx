@@ -7,7 +7,7 @@ import { RolarParaAncora } from "@/components/ui/rolar-para-ancora";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getData, listLeadEvents } from "@/lib/data/store";
 import { activeBrandSlug } from "@/lib/active-brand";
-import { adIdFromUtmContent } from "@/lib/metrics";
+import { adIdFromUtmContent, creativePerformance, rotuloCriativo } from "@/lib/metrics";
 import { getComercial } from "@/lib/robo/client";
 import { can } from "@/lib/auth/guard";
 
@@ -48,7 +48,11 @@ export default async function PessoasPage() {
   const data = await getData(await activeBrandSlug());
   const canEdit = await can("leads:write");
   const [events, comercial] = await Promise.all([listLeadEvents({ limit: 200 }), getComercial()]);
-  const nameById = new Map(data.creatives.map((c) => [c.adId, c.name]));
+  // O mesmo nome pode estar em dois anúncios ("Carrossel -"): a origem usa o
+  // rótulo com o conjunto quando o nome se repete, como as ações e o Dinheiro.
+  const perf = creativePerformance(data);
+  const nameById = new Map<string, string>(data.creatives.map((c) => [c.adId, c.name]));
+  for (const c of perf) nameById.set(c.adId, rotuloCriativo(c, perf));
 
   const rows: LeadDirectoryRow[] = data.leads.map((l) => ({
     id: l.id,

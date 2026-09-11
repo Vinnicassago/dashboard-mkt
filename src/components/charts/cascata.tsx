@@ -1,4 +1,6 @@
+import Link from "next/link";
 import { FONTE_META, type Degrau } from "@/lib/cascata";
+import { DONO_LABEL } from "@/lib/dono";
 import { formatCurrency, formatInt, formatPercent } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -13,9 +15,17 @@ import { cn } from "@/lib/utils";
  * A junta entre dois degraus é tracejada quando o dado troca de sistema. É ali
  * que os números costumam parar de bater, e saber disso antes de investigar
  * economiza a suspeita errada.
+ *
+ * Só UMA junta ganha cor: a do maior vazamento. Pintar toda junta abaixo de 50%
+ * acendia quatro alarmes do mesmo tamanho — dois deles artefatos de medição — e
+ * a cascata deixava de responder "onde vaza".
  */
 
-const DONO_LABEL = { MKT: "marketing", BOT: "robô", COM: "comercial" } as const;
+type Tom = "perigo" | "alerta";
+const TOM: Record<Tom, string> = {
+  perigo: "text-[var(--danger-text)]",
+  alerta: "text-[var(--warning-text)]",
+};
 
 /**
  * Fração muito pequena não vira "0,0%".
@@ -29,9 +39,12 @@ function pct(v: number): string {
   return formatPercent(v);
 }
 
-function Junta({ degrau }: { degrau: Degrau }) {
+function Junta({ degrau, destaque }: { degrau: Degrau; destaque?: Tom }) {
   const perda = degrau.perda ?? 0;
-  const grave = degrau.daAnterior !== undefined && degrau.daAnterior < 0.5;
+  const cor = destaque ? TOM[destaque] : "text-muted-foreground";
+  const parados = degrau.parados
+    ? `▸ ${formatInt(degrau.parados)} ${degrau.parados === 1 ? "parado" : "parados"} agora`
+    : null;
 
   return (
     <div className="flex items-stretch gap-3 pl-1">
@@ -46,16 +59,12 @@ function Junta({ degrau }: { degrau: Degrau }) {
       />
       <div className="flex min-h-[2rem] flex-wrap items-center gap-x-3 gap-y-1 py-1.5 text-xs">
         {degrau.daAnterior !== undefined ? (
-          <span
-            className={cn(
-              "tabular font-medium",
-              grave ? "text-[var(--danger-text)]" : "text-muted-foreground",
-            )}
-          >
+          <span className={cn("tabular font-medium", cor)}>
             {pct(degrau.daAnterior)}
             {perda > 0 ? ` · −${formatInt(perda)}` : ""}
           </span>
         ) : null}
+        {destaque ? <span className={cn("font-semibold", cor)}>maior vazamento</span> : null}
         {degrau.dono ? (
           <span className="rounded border px-1.5 py-px text-[10px] uppercase tracking-wide text-muted-foreground">
             {DONO_LABEL[degrau.dono]}
@@ -64,10 +73,17 @@ function Junta({ degrau }: { degrau: Degrau }) {
         {degrau.trocaDeSistema ? (
           <span className="text-muted-foreground">o dado troca de sistema aqui</span>
         ) : null}
-        {degrau.parados ? (
-          <span className="font-medium text-[var(--danger-text)]">
-            ▸ {formatInt(degrau.parados)} {degrau.parados === 1 ? "parado" : "parados"} agora
-          </span>
+        {/* Quem está parado tem para onde ir: o marcador abre a Fila no recorte
+            desta etapa, com o mesmo número. */}
+        {parados && degrau.etapaFila ? (
+          <Link
+            href={`/fila?etapa=${degrau.etapaFila}`}
+            className="font-medium text-[var(--danger-text)] underline-offset-4 hover:underline"
+          >
+            {parados}
+          </Link>
+        ) : parados ? (
+          <span className="font-medium text-[var(--danger-text)]">{parados}</span>
         ) : null}
       </div>
     </div>
@@ -77,20 +93,26 @@ function Junta({ degrau }: { degrau: Degrau }) {
 export function Cascata({
   degraus,
   ancoraLabel = "do topo",
+  vazamentoKey,
+  tomVazamento = "perigo",
 }: {
   degraus: Degrau[];
   /** Como nomear a fração da primeira âncora. */
   ancoraLabel?: string;
+  /** Degrau do maior vazamento — a única junta com cor. */
+  vazamentoKey?: string;
+  /** "perigo" na Jornada; "alerta" na home, onde o vermelho é só do farol. */
+  tomVazamento?: Tom;
 }) {
   /*
    * Rótulo da âncora vigente por degrau, resolvido ANTES do render: a partir de
    * "Leads" os percentuais passam a ser sobre leads, e é o rótulo que impede a
-   * troca de base de passar despercebida.
+   * troca de base de passar despercebida. O resumo da home já começa em Leads.
    */
   const rotulos: string[] = [];
   let vigente = ancoraLabel;
   for (const [i, d] of degraus.entries()) {
-    if (d.ehAncora && i > 0) vigente = `de ${d.label.toLowerCase()}`;
+    if (d.ehAncora && !(i === 0 && d.key === "impressoes")) vigente = `de ${d.label.toLowerCase()}`;
     rotulos.push(vigente);
   }
 
@@ -102,7 +124,9 @@ export function Cascata({
 
         return (
           <div key={d.key}>
-            {i > 0 ? <Junta degrau={d} /> : null}
+            {i > 0 ? (
+              <Junta degrau={d} destaque={d.key === vazamentoKey ? tomVazamento : undefined} />
+            ) : null}
 
             <div className="flex items-start gap-3">
               <span
@@ -139,7 +163,7 @@ export function Cascata({
                   </span>
                   {!desconhecido && d.daAncora !== undefined ? (
                     <span className="tabular">
-                      {d.ehAncora && i > 0 ? "100%" : pct(d.daAncora)} {rotuloAncora}
+                      {d.ehAncora ? "100%" : pct(d.daAncora)} {rotuloAncora}
                     </span>
                   ) : null}
                   {d.custoUnitario !== undefined ? (
