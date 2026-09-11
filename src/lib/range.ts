@@ -95,3 +95,14 @@ export function resolveRange(
   if (span.from && from < span.from) from = span.from;
   return { from, to: span.to };
 }
+
+/**
+ * Leva o período escolhido num link interno — trocar de página não pode trocar
+ * de período em silêncio. Respeita a query e a âncora que o link já tiver.
+ */
+export function comPeriodo(href: string, rangeKey?: string | null): string {
+  if (!rangeKey || rangeKey === "all") return href;
+  const [base, hash] = href.split("#");
+  const sep = base.includes("?") ? "&" : "?";
+  return `${base}${sep}range=${encodeURIComponent(rangeKey)}${hash ? `#${hash}` : ""}`;
+}

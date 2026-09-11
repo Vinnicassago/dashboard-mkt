@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
-import { changeLeadStatus } from "@/app/(dashboard)/funil/actions";
+import { changeLeadStatus } from "@/app/(dashboard)/pessoas/actions";
 import { LEAD_STATUS_META, LOST_STATUSES, OPEN_STATUSES } from "@/lib/lead-status";
 import type { LeadStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";

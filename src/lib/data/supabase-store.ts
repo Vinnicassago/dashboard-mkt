@@ -1,7 +1,7 @@
 import "server-only";
 import { supabase } from "../supabase/client";
 import { buildSeedData, buildSeedLeadEvents } from "./seed";
-import type { DataBackend, LeadStatusPatch, LpDelta, PublicUser, StoredUser } from "./backend";
+import type { CampaignBudget, DataBackend, LeadStatusPatch, LpDelta, PublicUser, StoredUser } from "./backend";
 import { toRole } from "../auth/roles";
 import type {
   AdDaily,
@@ -257,6 +257,50 @@ export const supabaseBackend: DataBackend = {
       .from("goals")
       .upsert(fromGoal(goal), { onConflict: "brand,metric,period" });
     check(error, "upsert goal");
+    await touch();
+  },
+
+  async setCampaignBudget(brand: string, budget: CampaignBudget) {
+    const db = supabase();
+    const { data: atual, error: erroLeitura } = await db
+      .from("campaign")
+      .select("id")
+      .eq("brand", brand)
+      .limit(1)
+      .maybeSingle();
+    check(erroLeitura, "read campaign");
+    const patch: Row = { budget_total: budget.budgetTotal };
+    if (budget.dailyBudget != null) patch.daily_budget = budget.dailyBudget;
+    if (budget.endDate) patch.end_date = budget.endDate;
+    if (atual) {
+      const { error } = await db.from("campaign").update(patch).eq("brand", brand);
+      check(error, "update campaign budget");
+    } else {
+      // Sem linha de campanha: cria uma, começando no primeiro dia com gasto.
+      const { data: primeiro } = await db
+        .from("ad_daily")
+        .select("date")
+        .eq("brand", brand)
+        .order("date", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      const inicio =
+        typeof primeiro?.date === "string"
+          ? primeiro.date.slice(0, 10)
+          : new Date().toISOString().slice(0, 10);
+      const { error } = await db.from("campaign").insert(
+        fromCampaign({
+          ...FALLBACK_CAMPAIGN,
+          id: `campanha-${brand}`,
+          brand,
+          startDate: inicio,
+          endDate: budget.endDate,
+          budgetTotal: budget.budgetTotal,
+          dailyBudget: budget.dailyBudget,
+        }),
+      );
+      check(error, "insert campaign");
+    }
     await touch();
   },
 

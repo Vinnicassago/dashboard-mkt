@@ -136,7 +136,7 @@ export async function saveDraftAction(input: DraftInput): Promise<ActionState> {
   }
 
   await upsertDraft(draft);
-  revalidatePath("/producao");
+  revalidatePath("/conteudo/producao");
   return {
     ok: true,
     message: result.ready
@@ -164,7 +164,7 @@ export async function setDraftStatusAction(id: string, status: string): Promise<
   }
 
   await upsertDraft({ ...draft, status: next, updatedAt: new Date().toISOString() });
-  revalidatePath("/producao");
+  revalidatePath("/conteudo/producao");
   return { ok: true, message: `Peça marcada como ${next}.` };
 }
 
@@ -187,7 +187,7 @@ export async function reviewDraftAction(id: string): Promise<ActionState> {
     const validation = validateDraft(draft, await contextFor(brand, draft.id));
     const aiReview = await reviewDraft(draft, validation);
     await upsertDraft({ ...draft, aiReview, updatedAt: new Date().toISOString() });
-    revalidatePath("/producao");
+    revalidatePath("/conteudo/producao");
     const rotulo =
       aiReview.veredito === "aprova"
         ? "aprovou"
@@ -222,7 +222,7 @@ export async function linkDraftToPostAction(
       status: draft.status === "publicado" ? "aprovado" : draft.status,
       updatedAt: new Date().toISOString(),
     });
-    revalidatePath("/producao");
+    revalidatePath("/conteudo/producao");
     return { ok: true, message: "Vínculo desfeito." };
   }
 
@@ -243,7 +243,7 @@ export async function linkDraftToPostAction(
     status: "publicado",
     updatedAt: new Date().toISOString(),
   });
-  revalidatePath("/producao");
+  revalidatePath("/conteudo/producao");
   return { ok: true, message: "Peça vinculada ao post publicado." };
 }
 
@@ -253,6 +253,6 @@ export async function deleteDraftAction(id: string): Promise<ActionState> {
   const draft = await getDraft(id);
   if (!draft || draft.brand !== brand) return { ok: false, message: "Rascunho não encontrado." };
   await deleteDraft(id);
-  revalidatePath("/producao");
+  revalidatePath("/conteudo/producao");
   return { ok: true, message: "Rascunho excluído." };
 }

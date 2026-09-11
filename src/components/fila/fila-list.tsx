@@ -3,8 +3,8 @@
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Clock, MessageCircle, Check, ChevronDown, Mail } from "lucide-react";
-import { salvarComercial } from "@/app/(dashboard)/comercial/actions";
-import { changeLeadStatus } from "@/app/(dashboard)/funil/actions";
+import { salvarComercial } from "@/app/(dashboard)/pessoas/comercial-actions";
+import { changeLeadStatus } from "@/app/(dashboard)/pessoas/actions";
 import {
   ETAPAS_QUENTES,
   FILA_ETAPAS,

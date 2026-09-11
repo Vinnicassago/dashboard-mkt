@@ -21,7 +21,7 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   `generate_lead` e `qualify_lead`. Sem `client_id` real do gtag, **não envie**
   (GA4 aceitaria e criaria usuário fantasma). O endpoint de produção sempre
   responde 2xx, então sucesso HTTP não prova que o evento entrou.
-- **Privacidade:** nome/e-mail/telefone SÃO persistidos no lead (aba Leads, para o
+- **Privacidade:** nome/e-mail/telefone SÃO persistidos no lead (página Pessoas, para o
   comercial) e também hasheados para a CAPI. O painel exibe PII — proteja o acesso.
   Tabela `leads` atrás de RLS. Não adicionar PII nova sem necessidade (LGPD).
 - **Auth** (`src/lib/auth/*` + `middleware.ts`): ativa só com `AUTH_SECRET`. Sessão
@@ -57,7 +57,7 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   **mais a política** (desistência sai do CPR). Toda regra de "esta reunião conta?"
   mora em `isBooked`, nunca na ordem dos status. `lostAt` é a exceção: descreve o
   estado atual e é limpo se o lead voltar ao caminho feliz.
-- **Farol** (`src/lib/farol.ts`): o primeiro bloco da Visão Geral e o ÚNICO com destaque
+- **Farol** (`src/lib/farol.ts`): o primeiro bloco da home (Hoje) e o ÚNICO com destaque
   — hierarquia é escassez. O número é escolhido, não fixo: gente parada no funil vence
   qualquer custo (já foi paga, dá para recuperar, não exige verba nova); sem ninguém
   parado, cai no CPR, e se o CPR estiver em quarentena, no degrau mais fundo da cascata
@@ -81,12 +81,20 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   `src/lib/phone.ts` (fonte única do pareamento, usada também pela ponte do Comercial) —
   a mesma pessoa costuma estar em duas filas, e vence a etapa mais funda. Etapa nova =
   entrada em `FILA_ETAPAS` + um ramo em `montarFila`.
+- **Navegação** (`components/layout/nav-items.ts`): 7 páginas nomeadas pela PERGUNTA
+  que respondem (Hoje, Dinheiro, Jornada, Fila, Pessoas, Conteúdo, Ajustes), não pela
+  fonte do dado — eram 14, uma por sistema, e a mesma pessoa aparecia contada em três
+  com números diferentes. Página nova = fundir outra; sub-vista (`vistas`) só onde o
+  trabalho é outro (Produção). Um fato mora num lugar só: se duas páginas precisam
+  dele, uma mostra e a outra linka — e o número do link é o da página que ele abre.
+  O período viaja nos links (`comPeriodo`, `lib/range.ts`). Rota antiga = redirect em
+  `next.config.ts`, nunca 404.
 - **Régua editorial** (`src/lib/content/playbook.ts`): o "Guia de Produção" como código
   — grade semanal, ≤25s, gancho de 7 palavras, ciclo de CTA, "Nunca mais", metas de
   90 dias. Fonte ÚNICA: `validator.ts` (pré-publicação) e `recommendations.ts`
   (pós-publicação) leem dali — nunca hardcode um limite. Guia novo = subir
   `PLAYBOOK_VERSION` (cada validação grava contra qual régua passou). Só marcas em
-  `hasPlaybook()` têm a página Produção.
+  `hasPlaybook()` têm a vista Produção (em Conteúdo).
 - **Validação de peça** (`content/validator.ts`): função **pura**, roda no servidor e
   no cliente. `bloqueio` = item do checklist ou "Nunca mais" (não publica);
   `aviso` = fora do padrão. A nota gravada é sempre recalculada no servidor —
@@ -110,6 +118,6 @@ npx tsc --noEmit       # typecheck
 npm run build          # build de produção
 ```
 
-Reset dos dados de exemplo: botão em **Importar / Config**, ou `rm -rf .localdata`.
+Reset dos dados de exemplo: botão em **Ajustes**, ou `rm -rf .localdata`.
 
 Roadmap (Supabase + Meta Marketing API v25 + Instagram Login + GA4/CAPI): ver README.

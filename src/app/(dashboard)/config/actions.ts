@@ -8,6 +8,7 @@ import {
   getData,
   getState,
   resetToSeed,
+  setCampaignBudget,
   setState,
   upsertAdDaily,
   upsertCreatives,
@@ -342,6 +343,41 @@ export async function setGoalsAction(
   }
   revalidateAll();
   return { ok: true, message: "Metas atualizadas." };
+}
+
+/**
+ * Orçamento da campanha. Existia a trava "orçamento não cadastrado" e o botão
+ * "Cadastrar orçamento", mas nenhum campo que gravasse o valor — o painel pedia
+ * uma coisa que não dava para fazer.
+ */
+export async function setBudgetAction(
+  _prev: ActionState | null,
+  formData: FormData,
+): Promise<ActionState> {
+  if (!(await can("data:write"))) return DENIED;
+  const brand = await activeBrandSlug();
+
+  const total = Number(formData.get("budgetTotal"));
+  if (!Number.isFinite(total) || total <= 0) {
+    return { ok: false, message: "Informe o orçamento total (maior que zero)." };
+  }
+  const diarioRaw = String(formData.get("dailyBudget") ?? "").trim();
+  const diario = diarioRaw ? Number(diarioRaw) : undefined;
+  if (diario !== undefined && (!Number.isFinite(diario) || diario <= 0)) {
+    return { ok: false, message: "Budget diário inválido." };
+  }
+  const fim = String(formData.get("endDate") ?? "").trim() || undefined;
+  if (fim && !/^\d{4}-\d{2}-\d{2}$/.test(fim)) {
+    return { ok: false, message: "Data de fim inválida." };
+  }
+
+  try {
+    await setCampaignBudget(brand, { budgetTotal: total, dailyBudget: diario, endDate: fim });
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "Não consegui salvar o orçamento." };
+  }
+  revalidateAll();
+  return { ok: true, message: "Orçamento salvo." };
 }
 
 export async function resetSeedAction(): Promise<ActionState> {

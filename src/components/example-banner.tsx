@@ -8,10 +8,10 @@ export function ExampleBanner() {
       <Info className="mt-0.5 size-4 shrink-0 text-primary" />
       <p className="text-muted-foreground">
         <span className="font-medium text-foreground">Dados de exemplo.</span> Você
-        está vendo um dataset fictício para o dashboard ficar "vivo". Importe seus
+        está vendo um dataset fictício para o dashboard ficar &ldquo;vivo&rdquo;. Importe seus
         números reais em{" "}
         <Link href="/config" className="font-medium text-primary underline-offset-2 hover:underline">
-          Importar / Config
+          Ajustes
         </Link>
         .
       </p>

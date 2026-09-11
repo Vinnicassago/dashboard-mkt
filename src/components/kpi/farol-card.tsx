@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { comPeriodo } from "@/lib/range";
 import { ArrowRight } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import type { Farol } from "@/lib/farol";
@@ -32,7 +33,7 @@ const ESTILO = {
   },
 } as const;
 
-export function FarolCard({ farol }: { farol: Farol }) {
+export function FarolCard({ farol, rangeKey }: { farol: Farol; rangeKey?: string }) {
   const e = ESTILO[farol.estado];
 
   return (
@@ -69,7 +70,7 @@ export function FarolCard({ farol }: { farol: Farol }) {
 
         {farol.acao ? (
           <Link
-            href={farol.acao.href}
+            href={comPeriodo(farol.acao.href, rangeKey)}
             className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background hover:opacity-90"
           >
             {farol.acao.label}

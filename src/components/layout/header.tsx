@@ -2,7 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import { Suspense } from "react";
-import { sectionFromPath } from "./nav-items";
+import { navItemFromPath } from "./nav-items";
 import { PeriodSelector } from "./period-selector";
 import { BrandSelector } from "./brand-selector";
 import { UserMenu } from "./user-menu";
@@ -17,7 +17,7 @@ export function Header({
   brand: string;
 }) {
   const pathname = usePathname();
-  const section = sectionFromPath(pathname);
+  const item = navItemFromPath(pathname);
   const updated = new Date(updatedAt).toLocaleString("pt-BR", {
     day: "2-digit",
     month: "short",
@@ -28,9 +28,11 @@ export function Header({
   return (
     <header className="sticky top-0 z-10 flex h-16 items-center justify-between gap-3 border-b bg-background/85 px-4 shadow-sm backdrop-blur md:px-6 dark:shadow-none">
       <div className="min-w-0">
-        <h1 className="truncate text-base font-semibold md:text-lg">{section}</h1>
-        <p className="hidden text-xs text-muted-foreground sm:block">
-          Atualizado em {updated}
+        <h1 className="truncate text-base font-semibold md:text-lg">{item?.label ?? "Dashboard"}</h1>
+        {/* A pergunta da página fica colada ao título: é ela que diz o que
+            procurar aqui — e, por exclusão, o que procurar em outra aba. */}
+        <p className="hidden truncate text-xs text-muted-foreground sm:block">
+          {item ? `${item.pergunta} · atualizado em ${updated}` : `Atualizado em ${updated}`}
         </p>
       </div>
       <div className="flex items-center gap-2">

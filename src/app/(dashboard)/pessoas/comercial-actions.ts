@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { updateComercial, type ComercialPatch } from "@/lib/robo/client";
-import { changeLeadStatus } from "@/app/(dashboard)/funil/actions";
+import { changeLeadStatus } from "@/app/(dashboard)/pessoas/actions";
 import { getData, setLeadStatus } from "@/lib/data/store";
 import { mesmoTelefone } from "@/lib/phone";
 import { can } from "@/lib/auth/guard";
@@ -114,13 +114,13 @@ export async function salvarComercial(
 
   // Reunião e venda alimentam o funil, as metas e o aprendizado da campanha.
   if (!DECIDE_STATUS.has(campo)) {
-    revalidatePath("/comercial");
+    revalidatePath("/pessoas");
     return { ok: true, message: "Salvo." };
   }
 
   const lead = await acharLead(telefone ?? null, sessionId);
   if (!lead) {
-    revalidatePath("/comercial");
+    revalidatePath("/pessoas");
     revalidatePath("/fila");
     return {
       ok: true,
@@ -137,7 +137,7 @@ export async function salvarComercial(
 
   const novoStatus = statusDaDecisao(campo, valor, lead.status);
   if (!novoStatus) {
-    revalidatePath("/comercial");
+    revalidatePath("/pessoas");
     revalidatePath("/fila");
     return { ok: true, message: "Salvo." };
   }
@@ -148,13 +148,13 @@ export async function salvarComercial(
   // migração de marcos isso não apaga mais a reunião do CPR: `booked_at` fica
   // gravado e `isBooked` lê o fato, não o status atual.
   if (!isLostStatus(novoStatus) && statusRank(novoStatus) <= statusRank(lead.status)) {
-    revalidatePath("/comercial");
+    revalidatePath("/pessoas");
     revalidatePath("/fila");
     return { ok: true, message: "Salvo." };
   }
 
   const r = await changeLeadStatus(lead.id, novoStatus, valorNegocio);
-  revalidatePath("/comercial");
+  revalidatePath("/pessoas");
   revalidatePath("/fila");
   return { ok: true, message: r.message };
 }

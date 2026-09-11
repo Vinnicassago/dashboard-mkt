@@ -9,7 +9,7 @@ import {
   reviewDraftAction,
   saveDraftAction,
   type ActionState,
-} from "@/app/(dashboard)/producao/actions";
+} from "@/app/(dashboard)/conteudo/producao/actions";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import {

@@ -42,7 +42,7 @@ export default async function InstagramPage({
     return (
       <EmptyState
         title="Sem dados do Instagram no período"
-        hint="A conta foi criada há pouco — insights podem levar até 48h para consolidar. Registre snapshots diários em Importar / Config."
+        hint="A conta foi criada há pouco — insights podem levar até 48h para consolidar. Registre snapshots diários em Ajustes."
       />
     );
   }

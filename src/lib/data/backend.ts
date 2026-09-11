@@ -24,6 +24,13 @@ import type { Role } from "../auth/roles";
  * uma perda — não apague o fato de a reunião ter acontecido. `lostAt` é o
  * oposto: descreve o estado atual e é limpo quando o lead sai da perda.
  */
+/** Orçamento da campanha. Campo opcional ausente = mantém o que já está gravado. */
+export interface CampaignBudget {
+  budgetTotal: number;
+  dailyBudget?: number;
+  endDate?: string;
+}
+
 export interface LeadStatusPatch {
   meetingAt?: string;
   value?: number;
@@ -61,6 +68,9 @@ export interface DataBackend {
   /** Hard-delete a lead (ex.: entradas de teste) e seus eventos de auditoria. */
   deleteLead(id: string): Promise<void>;
   upsertGoal(goal: Goal): Promise<void>;
+  /** Grava o orçamento da campanha da marca, criando a linha da campanha se o
+   *  banco ainda não tiver uma (produção nunca rodou o seed). */
+  setCampaignBudget(brand: string, budget: CampaignBudget): Promise<void>;
 
   // ---- lead audit log ----
   addLeadEvent(event: LeadEvent): Promise<void>;

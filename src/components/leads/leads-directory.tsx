@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Download, Mail, MessageCircle, Search, Trash2 } from "lucide-react";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { LEAD_STATUSES, LEAD_STATUS_META, statusLabel } from "@/lib/lead-status";
-import { deleteLeadAction } from "@/app/(dashboard)/funil/actions";
+import { deleteLeadAction } from "@/app/(dashboard)/pessoas/actions";
 import type { LeadStatus } from "@/lib/types";
 import { formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";

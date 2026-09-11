@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { AlertTriangle, Settings2, TrendingDown, TrendingUp } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { comPeriodo } from "@/lib/range";
 import type { Trava } from "@/lib/trust";
 import { cn } from "@/lib/utils";
 
@@ -44,7 +45,7 @@ const ESTILO = {
   },
 } as const;
 
-export function TrustBand({ travas }: { travas: Trava[] }) {
+export function TrustBand({ travas, rangeKey }: { travas: Trava[]; rangeKey?: string }) {
   if (travas.length === 0) return null;
 
   return (
@@ -72,7 +73,7 @@ export function TrustBand({ travas }: { travas: Trava[] }) {
                   <p className="text-xs leading-relaxed text-muted-foreground">{t.detalhe}</p>
                   {t.cta ? (
                     <Link
-                      href={t.cta.href}
+                      href={comPeriodo(t.cta.href, rangeKey)}
                       className="inline-block pt-1 text-xs font-medium text-primary underline-offset-4 hover:underline"
                     >
                       {t.cta.label} →

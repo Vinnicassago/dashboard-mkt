@@ -15,7 +15,7 @@ import { isPostgresConfigured } from "../db/pg";
 import { localBackend } from "./local-store";
 import { supabaseBackend } from "./supabase-store";
 import { postgresBackend } from "./postgres-store";
-import type { DataBackend, LeadStatusPatch, LpDelta, StoredUser } from "./backend";
+import type { CampaignBudget, DataBackend, LeadStatusPatch, LpDelta, StoredUser } from "./backend";
 import type { Role } from "../auth/roles";
 import type {
   AdDaily,
@@ -77,6 +77,9 @@ export const setLeadStatus = (id: string, status: LeadStatus, patch?: LeadStatus
 export const deleteLead = (id: string) => backend().deleteLead(id);
 
 export const upsertGoal = (goal: Goal) => backend().upsertGoal(goal);
+
+export const setCampaignBudget = (brand: string, budget: CampaignBudget) =>
+  backend().setCampaignBudget(brand, budget);
 
 export const bumpLpDaily = (date: string, delta: LpDelta, brand: string = DEFAULT_BRAND) =>
   backend().bumpLpDaily(brand, date, delta);

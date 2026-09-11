@@ -1,6 +1,8 @@
-import { CalendarCheck, Camera, Clapperboard, Database, FileSpreadsheet, Layers, MessageCircle, Plug, Target, UserPlus, Users, UsersRound } from "lucide-react";
+import Link from "next/link";
+import { CalendarCheck, Camera, Clapperboard, Database, FileSpreadsheet, Layers, Link2, ListChecks, MessageCircle, Plug, Target, UserPlus, Users, UsersRound, Wallet } from "lucide-react";
 import {
   BrandMatchForm,
+  BudgetForm,
   DmForm,
   GoalsForm,
   ImportForm,
@@ -15,23 +17,27 @@ import {
   type PostMetaRow,
 } from "@/components/config/config-forms";
 import { UsersManager } from "@/components/config/users-manager";
+import { UtmBuilder } from "@/components/utm/utm-builder";
+import { RolarParaAncora } from "@/components/ui/rolar-para-ancora";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { activeBackend, getData, getState, listUsers } from "@/lib/data/store";
 import { STATE_KEYS } from "@/lib/data/backend";
 import { activeBrandSlug } from "@/lib/active-brand";
-import { BRANDS } from "@/lib/brands";
+import { BRANDS, brandDef } from "@/lib/brands";
 import { DEFAULT_BRAND } from "@/lib/types";
 import { ADS_CSV_TEMPLATE } from "@/lib/csv";
 import { LEADS_CSV_TEMPLATE } from "@/lib/leads-csv";
 import { LEAD_STATUSES, statusLabel } from "@/lib/lead-status";
-import { integrationStatus, metaBrandConfig } from "@/lib/meta/config";
+import { integrationStatus, metaBrandConfig, resolveMetaBrands } from "@/lib/meta/config";
 import { getLastSync } from "@/lib/meta/sync";
 import { isAuthEnabled } from "@/lib/auth/config";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { can } from "@/lib/auth/guard";
 import { formatCurrency0, formatDateShort, formatDateTime } from "@/lib/format";
-import { CTA_LABEL, detectCta } from "@/lib/metrics";
+import { CTA_LABEL, detectCta, overviewKpis } from "@/lib/metrics";
+import { pageRange } from "@/lib/page-range";
+import { assessTrust, type Trava } from "@/lib/trust";
 
 // Integration status and last-sync times must reflect runtime, never build time.
 export const dynamic = "force-dynamic";
@@ -56,8 +62,41 @@ function StatusRow({
   );
 }
 
-export default async function ConfigPage() {
-  const data = await getData(await activeBrandSlug());
+/** Um grupo da lista "O que falta aqui": o que é, por que importa, e o link ao campo. */
+function Pendencias({ titulo, itens }: { titulo: string; itens: Trava[] }) {
+  if (itens.length === 0) return null;
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+        {titulo} ({itens.length})
+      </p>
+      <ul className="space-y-3">
+        {itens.map((t) => (
+          <li key={t.id} className="space-y-0.5">
+            <p className="text-sm font-medium">{t.titulo}</p>
+            <p className="text-xs leading-relaxed text-muted-foreground">{t.detalhe}</p>
+            {t.cta ? (
+              <Link
+                href={t.cta.href}
+                className="inline-block pt-0.5 text-xs font-medium text-primary underline-offset-4 hover:underline"
+              >
+                {t.cta.label} →
+              </Link>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+export default async function ConfigPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ range?: string }>;
+}) {
+  const brand = brandDef(await activeBrandSlug());
+  const data = await getData(brand.slug);
   const status = integrationStatus();
   const lastSync = await getLastSync();
   const backend = activeBackend();
@@ -137,15 +176,63 @@ export default async function ConfigPage() {
   const syncHint = (iso: string | null) =>
     iso ? `Última sincronização: ${formatDateTime(iso)}` : "Ainda não sincronizado";
 
+  /*
+   * O que falta aqui — a mesma avaliação de confiança da home, filtrada pelo que
+   * se conserta NESTA página. "Preencher" é o que a home chama de configurações
+   * pendentes (o número do link de lá é o deste grupo); "Corrigir" são travas de
+   * número cujo conserto mora aqui (regra de marca, sincronização).
+   */
+  const { range } = pageRange(data, (await searchParams).range);
+  const k = overviewKpis(data, range);
+  const trust = assessTrust({
+    data,
+    range,
+    brandRules: await resolveMetaBrands(),
+    kpis: {
+      meetings: k.meetings,
+      leads: k.leads,
+      spendConversao: k.spendConversao,
+      spendTotal: k.spend,
+    },
+  });
+  const preencher = trust.travas.filter((t) => t.nivel === "config");
+  const corrigir = trust.travas.filter(
+    (t) => t.nivel !== "config" && (t.cta?.href.startsWith("/config") ?? false),
+  );
+
   return (
     <div className="max-w-3xl space-y-6">
+      <RolarParaAncora />
       <p className="text-sm text-muted-foreground">
         Conecte as APIs da Meta para a coleta rodar sozinha, ou alimente o
         dashboard à mão com o CSV do Ads Manager enquanto isso.
       </p>
 
+      {preencher.length + corrigir.length > 0 ? (
+        <Card id="pendencias" className="scroll-mt-24 border-[var(--warning)]/40">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <ListChecks className="size-4 text-primary" />
+              O que falta aqui
+            </CardTitle>
+            <CardDescription>
+              Cada item desliga um número ou uma regra em outra tela. O link leva direto ao
+              campo.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <Pendencias titulo="Preencher" itens={preencher} />
+            <Pendencias titulo="Corrigir" itens={corrigir} />
+          </CardContent>
+        </Card>
+      ) : (
+        <p id="pendencias" className="text-sm text-muted-foreground">
+          Nada pendente: nenhum número do painel está escondido por falta de configuração.
+        </p>
+      )}
+
       {/* Integrações */}
-      <Card>
+      <Card id="integracoes" className="scroll-mt-24">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Plug className="size-4 text-primary" />
@@ -323,7 +410,7 @@ export default async function ConfigPage() {
       {canData ? (
         <>
           {multiBrand ? (
-            <Card>
+            <Card id="marcas" className="scroll-mt-24">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <Layers className="size-4 text-primary" />
@@ -461,15 +548,38 @@ export default async function ConfigPage() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card id="orcamento" className="scroll-mt-24">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Wallet className="size-4 text-primary" />
+                Orçamento da campanha
+              </CardTitle>
+              <CardDescription>
+                Sem ele, o painel não mostra quanto da verba já foi consumido nem projeta se ela
+                acaba antes do fim. Com a data de fim, o ritmo de gasto vira projeção.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <BudgetForm
+                current={{
+                  budgetTotal: data.campaign.budgetTotal || undefined,
+                  dailyBudget: data.campaign.dailyBudget,
+                  endDate: data.campaign.endDate,
+                }}
+              />
+            </CardContent>
+          </Card>
+
+          <Card id="metas" className="scroll-mt-24">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Target className="size-4 text-primary" />
                 Metas
               </CardTitle>
               <CardDescription>
-                Usadas no bloco "Metas vs. realizado" da Visão Geral. As metas orgânicas seguem o
-                plano de 90 dias do diagnóstico (retenção 40%, salvos/1k 8+, 4 posts/semana…).
+                O farol, as ações e a tabela por conjunto julgam os custos contra estas metas —
+                sem elas, só dá para comparar com a semana passada. As orgânicas seguem o plano
+                de 90 dias do diagnóstico (retenção 40%, salvos/1k 8+, 4 posts/semana…).
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -495,6 +605,30 @@ export default async function ConfigPage() {
             </CardContent>
           </Card>
         </>
+      ) : null}
+
+      {/* Gerador de UTMs — era uma aba só para ele; é configuração de anúncio. */}
+      {brand.type !== "awareness" ? (
+        <Card id="utm" className="scroll-mt-24">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Link2 className="size-4 text-primary" />
+              Gerador de UTMs
+            </CardTitle>
+            <CardDescription>
+              Use estes links nos anúncios para que cada lead chegue com a origem certa.
+              Padronizar agora é o que permite comparar criativos depois — UTM que não foi
+              marcada no anúncio não tem como ser reconstruída.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <UtmBuilder
+              defaultBase={process.env.LP_BASE_URL ?? ""}
+              defaultCampaign={(data.campaign.id || "campanha").toLowerCase()}
+              creatives={creatives}
+            />
+          </CardContent>
+        </Card>
       ) : null}
     </div>
   );

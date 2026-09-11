@@ -42,7 +42,7 @@ import { AiAnalysisCard } from "@/components/kpi/ai-analysis";
 import { isAiConfigured } from "@/lib/ai/config";
 import { periodOf } from "@/lib/ai/briefing";
 import { can } from "@/lib/auth/guard";
-import { rangeLabel } from "@/lib/range";
+import { comPeriodo, rangeLabel } from "@/lib/range";
 import {
   formatCompact,
   formatCurrency,
@@ -186,7 +186,7 @@ export default async function OverviewPage({
     <div className="space-y-6">
       {data.isSeed ? <ExampleBanner /> : null}
 
-      <FarolCard farol={farol} />
+      <FarolCard farol={farol} rangeKey={rangeKey} />
 
       <Card>
         <CardHeader>
@@ -249,7 +249,7 @@ export default async function OverviewPage({
           {temPiso ? (
             <p className="text-xs text-muted-foreground">
               Os valores com ≥ são piso — faltam dias de gasto no período.{" "}
-              <Link href="/config" className="text-primary underline-offset-4 hover:underline">
+              <Link href="/config#integracoes" className="text-primary underline-offset-4 hover:underline">
                 Sincronizar
               </Link>
             </p>
@@ -258,7 +258,10 @@ export default async function OverviewPage({
             <p className="text-xs text-muted-foreground">
               CPL e custo por reunião usam só os {formatCurrency0(k.spendConversao)} de conversão,
               de {formatCurrency0(k.spend)} no total.{" "}
-              <Link href="/trafego" className="text-primary underline-offset-4 hover:underline">
+              <Link
+                href={comPeriodo("/dinheiro", rangeKey)}
+                className="text-primary underline-offset-4 hover:underline"
+              >
                 ver o split
               </Link>
             </p>
@@ -271,7 +274,7 @@ export default async function OverviewPage({
         description="Os degraus onde há gente parada, e o fim do funil."
         action={
           <Link
-            href="/jornada"
+            href={comPeriodo("/jornada", rangeKey)}
             className="text-xs font-medium text-primary underline-offset-4 hover:underline"
           >
             Cascata completa →
@@ -281,19 +284,19 @@ export default async function OverviewPage({
         <Cascata degraus={resumirCascata(cascata.degraus)} />
       </ChartCard>
 
-      <TrustBand travas={travasDeNumero} />
+      <TrustBand travas={travasDeNumero} rangeKey={rangeKey} />
 
       {aiCard}
 
       <p className="flex flex-wrap gap-x-5 gap-y-1 border-t pt-4 text-xs text-muted-foreground">
-        <Link href="/instagram" className="hover:text-foreground">
+        <Link href={comPeriodo("/conteudo", rangeKey)} className="hover:text-foreground">
           Orgânico: {formatCompact(ig.reach)} de alcance, +{formatInt(ig.followersEnd - ig.followersStart)} seguidores →
         </Link>
-        <Link href="/trafego" className="hover:text-foreground">
-          Séries por dia e por conjunto →
+        <Link href={comPeriodo("/dinheiro", rangeKey)} className="hover:text-foreground">
+          Verba por conjunto e por criativo →
         </Link>
         {pendencias.length > 0 ? (
-          <Link href="/config" className="hover:text-foreground">
+          <Link href="/config#pendencias" className="hover:text-foreground">
             {pendencias.length}{" "}
             {pendencias.length === 1 ? "configuração pendente" : "configurações pendentes"}:{" "}
             {pendencias.map((p) => p.titulo.toLowerCase()).join(", ")} →

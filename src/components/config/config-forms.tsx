@@ -15,6 +15,7 @@ import {
   setBrandMatchAction,
   setDmConversationsAction,
   setPresenceRoutineAction,
+  setBudgetAction,
   setGoalsAction,
   syncNowAction,
   updatePostsMetaAction,
@@ -437,6 +438,53 @@ export function LeadForm({ creatives }: { creatives: { adId: string; name: strin
         </Field>
       </div>
       <SubmitButton>Adicionar lead</SubmitButton>
+      <Message state={state} />
+    </form>
+  );
+}
+
+// ---- budget ---------------------------------------------------------
+
+export function BudgetForm({
+  current,
+}: {
+  current: { budgetTotal?: number; dailyBudget?: number; endDate?: string };
+}) {
+  const [state, action] = useActionState(setBudgetAction, null);
+  return (
+    <form action={action} className="space-y-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <Field label="Orçamento total (R$)">
+          <input
+            type="number"
+            name="budgetTotal"
+            min="0"
+            step="any"
+            required
+            defaultValue={current.budgetTotal ?? ""}
+            className={inputCls}
+          />
+        </Field>
+        <Field label="Budget diário (R$, opcional)">
+          <input
+            type="number"
+            name="dailyBudget"
+            min="0"
+            step="any"
+            defaultValue={current.dailyBudget ?? ""}
+            className={inputCls}
+          />
+        </Field>
+        <Field label="Fim da campanha (opcional)">
+          <input
+            type="date"
+            name="endDate"
+            defaultValue={current.endDate ?? ""}
+            className={inputCls}
+          />
+        </Field>
+      </div>
+      <SubmitButton>Salvar orçamento</SubmitButton>
       <Message state={state} />
     </form>
   );

@@ -2,7 +2,7 @@ import "server-only";
 import type { Pool, PoolClient, QueryResult } from "pg";
 import { ensureSchema, pg } from "../db/pg";
 import { buildSeedData, buildSeedLeadEvents } from "./seed";
-import type { DataBackend, LeadStatusPatch, LpDelta, PublicUser, StoredUser } from "./backend";
+import type { CampaignBudget, DataBackend, LeadStatusPatch, LpDelta, PublicUser, StoredUser } from "./backend";
 import type {
   AdDaily,
   Creative,
@@ -294,6 +294,38 @@ export const postgresBackend: DataBackend = {
 
   async upsertGoal(goal: Goal) {
     await upsertMany("goals", GOAL_COLS, [fromGoal(goal)], ["brand", "metric", "period"], ["target", "lower_is_better"]);
+  },
+
+  async setCampaignBudget(brand: string, budget: CampaignBudget) {
+    const res = await run(
+      `update campaign set
+         budget_total = $2,
+         daily_budget = coalesce($3::numeric, daily_budget),
+         end_date = coalesce($4::date, end_date)
+       where brand = $1`,
+      [brand, budget.budgetTotal, budget.dailyBudget ?? null, budget.endDate ?? null],
+    );
+    // Banco que nunca rodou o seed não tem linha de campanha — o painel lia o
+    // fallback em memória. Cria a linha; start_date é NOT NULL, então vem do
+    // primeiro dia com gasto da marca.
+    if (!res.rowCount) {
+      await run(
+        `insert into campaign (id, brand, name, objective, status, start_date, end_date, budget_total, daily_budget)
+         values ($1, $2, $3, $4, 'ativa',
+                 (select coalesce(min(date), current_date) from ad_daily where brand = $2),
+                 $5::date, $6, $7)`,
+        [
+          `campanha-${brand}`,
+          brand,
+          FALLBACK_CAMPAIGN.name,
+          FALLBACK_CAMPAIGN.objective,
+          budget.endDate ?? null,
+          budget.budgetTotal,
+          budget.dailyBudget ?? null,
+        ],
+      );
+    }
+    await touch();
   },
 
   async bumpLpDaily(brand: string, date: string, delta: LpDelta) {

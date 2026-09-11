@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { buildSeedData, buildSeedLeadEvents } from "./seed";
 import { FALLBACK_CAMPAIGN } from "./mappers";
-import type { DataBackend, LeadStatusPatch, LpDelta, PublicUser, StoredUser } from "./backend";
+import type { CampaignBudget, DataBackend, LeadStatusPatch, LpDelta, PublicUser, StoredUser } from "./backend";
 import { toRole } from "../auth/roles";
 import { LOST_STATUSES, normalizeLeadStatus } from "../lead-status";
 import { DEFAULT_BRAND } from "../types";
@@ -305,6 +305,21 @@ export const localBackend: DataBackend = {
         (g) => !(g.brand === goal.brand && g.metric === goal.metric && g.period === goal.period),
       );
       data.goals = [...others, goal];
+    });
+  },
+
+  async setCampaignBudget(brand: string, budget: CampaignBudget) {
+    commit((data) => {
+      // O arquivo local guarda UMA campanha. Gravar a de outra marca apagaria a
+      // existente — melhor falhar alto do que perder dado em silêncio.
+      if (data.campaign.brand !== brand) {
+        throw new Error(
+          "O modo local guarda uma campanha só. Conecte um banco para cadastrar o orçamento desta marca.",
+        );
+      }
+      data.campaign.budgetTotal = budget.budgetTotal;
+      if (budget.dailyBudget != null) data.campaign.dailyBudget = budget.dailyBudget;
+      if (budget.endDate) data.campaign.endDate = budget.endDate;
     });
   },
 
