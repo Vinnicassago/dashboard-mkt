@@ -294,7 +294,8 @@ export default async function OverviewPage({
         </Link>
         {pendencias.length > 0 ? (
           <Link href="/config" className="hover:text-foreground">
-            {pendencias.length} configuração(ões) pendente(s):{" "}
+            {pendencias.length}{" "}
+            {pendencias.length === 1 ? "configuração pendente" : "configurações pendentes"}:{" "}
             {pendencias.map((p) => p.titulo.toLowerCase()).join(", ")} →
           </Link>
         ) : null}

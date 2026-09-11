@@ -66,7 +66,7 @@ function Junta({ degrau }: { degrau: Degrau }) {
         ) : null}
         {degrau.parados ? (
           <span className="font-medium text-[var(--danger-text)]">
-            ▸ {formatInt(degrau.parados)} parado(s) agora
+            ▸ {formatInt(degrau.parados)} {degrau.parados === 1 ? "parado" : "parados"} agora
           </span>
         ) : null}
       </div>

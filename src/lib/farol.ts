@@ -161,7 +161,7 @@ export function montarFarol(input: FarolInput): Farol {
   // ---- ninguém parado: o farol volta a ser o custo ----------------------
   let valor: number | null = kpis.cpr;
   let rotulo = "custo por reunião";
-  let base: string | undefined = `${kpis.meetings} reunião(ões) · verba de conversão`;
+  let base: string | undefined = `${kpis.meetings} ${kpis.meetings === 1 ? "reunião" : "reuniões"} · verba de conversão`;
   let porQue: string | undefined;
 
   if (cprQuarentena?.nivel === "quarentena") {

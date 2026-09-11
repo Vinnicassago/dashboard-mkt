@@ -199,7 +199,7 @@ export function assessTrust(input: TrustInput): TrustReport {
       id: "fontes-divergem",
       nivel: "quarentena",
       titulo: "As fontes discordam sobre reuniões",
-      detalhe: `O atendimento registra ${input.roboReunioes} reunião(ões) e o funil do painel conta 0. Enquanto discordarem, o custo por reunião não é exibido — um dos dois lados está com o lead sem parear.`,
+      detalhe: `O atendimento registra ${input.roboReunioes} ${input.roboReunioes === 1 ? "reunião" : "reuniões"} e o funil do painel conta 0. Enquanto discordarem, o custo por reunião não é exibido — um dos dois lados está com o lead sem parear.`,
       afeta: ["cpr", "meetings"],
       cta: { label: "Ver atendimento", href: "/comercial" },
     });
