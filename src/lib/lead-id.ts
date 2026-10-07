@@ -69,6 +69,19 @@ export function pessoaDiferente(a: ContatoLead, b: ContatoLead): boolean {
   return true;
 }
 
+/**
+ * Há prova POSITIVA de que é a mesma pessoa: nome, telefone ou e-mail batem.
+ * Mais exigente que `!pessoaDiferente` — sem contato comparável, aqui é "não".
+ */
+export function mesmaPessoa(a: ContatoLead, b: ContatoLead): boolean {
+  const na = chaveNome(a.name);
+  return (
+    Boolean(na && na === chaveNome(b.name)) ||
+    mesmoTelefone(a.phone, b.phone) ||
+    emailIgual(a.email, b.email)
+  );
+}
+
 export type ResolucaoId =
   /** Ninguém com esse id: lead novo. */
   | { tipo: "novo"; id: string }
@@ -98,11 +111,13 @@ export function resolverIdLead(
       : { tipo: "reenvio", id: atual };
   }
 
-  // Lead gravado no esquema antigo: é reenvio se for a mesma pessoa; se for
-  // outra (o prefixo curto colidiu), o lead novo fica com o id atual, livre.
+  // Lead gravado no esquema antigo: só é reenvio com PROVA de que é a mesma
+  // pessoa. O prefixo curto é sabidamente compartilhado — a LP B manda
+  // "consorcio_b_<uuid>", e TODO lead dela cabia em "LEAD-LP-consorci". Sem
+  // prova, o lead novo fica com o id inteiro, livre.
   if (legado !== atual) {
     const noLegado = existente(legado);
-    if (noLegado && !pessoaDiferente(noLegado, contato)) return { tipo: "reenvio", id: legado };
+    if (noLegado && mesmaPessoa(noLegado, contato)) return { tipo: "reenvio", id: legado };
   }
   return { tipo: "novo", id: atual };
 }

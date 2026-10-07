@@ -96,6 +96,18 @@ describe("resolverIdLead", () => {
     expect(r).toEqual({ tipo: "reenvio", id: "LEAD-LP-lead_d9d" });
   });
 
+  it("LP B (consorcio_b_<uuid>): prefixo antigo compartilhado sem prova não vira reenvio", () => {
+    const eventId = "consorcio_b_3f9c2a10-1111-4aaa-9bbb-123456789abc";
+    const ocupado = banco({ "LEAD-LP-consorci": { name: "Pessoa Atual", phone: "11999990000" } });
+    // sem contato nenhum: antes caía como "reenvio" e sumia dentro do lead de outra pessoa
+    expect(resolverIdLead(eventId, { name: "Outra Pessoa" }, ocupado, sufixo)).toEqual({
+      tipo: "novo",
+      id: `LEAD-LP-${eventId}`,
+    });
+    // mesma pessoa reenviando pelo esquema antigo continua sendo reenvio
+    expect(resolverIdLead(eventId, { name: "pessoa atual" }, ocupado, sufixo).tipo).toBe("reenvio");
+  });
+
   it("prefixo antigo de outra pessoa: lead novo no id inteiro, sem sobrescrever ninguém", () => {
     const r = resolverIdLead(
       "lead_d9de70b9-e60a",
