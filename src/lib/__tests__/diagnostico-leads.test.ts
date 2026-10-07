@@ -89,6 +89,53 @@ describe("propostaDeReparo", () => {
   });
 });
 
+describe("id compartilhado por várias pessoas (colisão)", () => {
+  // O caso real de out/2026: um id recebeu dezenas de cadastros de pessoas
+  // diferentes desde 03/09; cada um sobrescreveu o anterior e só o último ficou.
+  const id = "LEAD-LP-compart";
+  const atual = lead(id, "lead", "2026-10-07T09:40:00.000Z", { name: "Pessoa Atual" });
+  const historico = [
+    ev(id, "2026-09-03T19:32:00.000Z", "created", { leadName: "Pessoa Um" }),
+    ev(id, "2026-09-04T10:00:00.000Z", "status_changed", { leadName: "Pessoa Um", toStatus: "agendado" }),
+    ev(id, "2026-09-10T10:00:00.000Z", "created", { leadName: "Pessoa Dois" }),
+    ev(id, "2026-09-11T10:00:00.000Z", "created", { leadName: "Pessoa Dois" }),
+    ev(id, "2026-10-07T09:40:00.000Z", "created", { leadName: "Pessoa Atual" }),
+  ];
+
+  it("não propõe reparo com o histórico de quem foi sobrescrito", () => {
+    // antes: entrada 03/09 e status "agendado" — ambos de OUTRA pessoa
+    expect(propostaDeReparo(atual, historico)).toBeNull();
+  });
+
+  it("lista quem sumiu, com a 1ª data e quantos envios", () => {
+    const d = diagnosticarLeads([atual], historico);
+    expect(d.colisoes).toEqual([
+      {
+        leadId: id,
+        nomeAtual: "Pessoa Atual",
+        criacoes: 4,
+        sobrescritos: [
+          { nome: "Pessoa Um", primeiraVez: "2026-09-03T19:32:00.000Z", envios: 1 },
+          { nome: "Pessoa Dois", primeiraVez: "2026-09-10T10:00:00.000Z", envios: 2 },
+        ],
+      },
+    ]);
+    expect(d.reparos).toEqual([]);
+  });
+
+  it("dentro do id compartilhado, o histórico da própria pessoa ainda repara", () => {
+    const comReenvio = [
+      ...historico,
+      ev(id, "2026-10-07T12:00:00.000Z", "status_changed", { leadName: "Pessoa Atual", toStatus: "agendado" }),
+      ev(id, "2026-10-07T13:00:00.000Z", "created", { leadName: "Pessoa Atual" }),
+    ];
+    const r = propostaDeReparo(atual, comReenvio);
+    expect(r?.statusProposto).toBe("agendado");
+    expect(r?.entradaProposta).toBeUndefined(); // a entrada certa é a dela, 07/10 09:40
+    expect(r?.bookedAt).toBe("2026-10-07T12:00:00.000Z"); // não o agendamento da Pessoa Um
+  });
+});
+
 describe("diagnosticarLeads", () => {
   it("separa reenvio, colisão, órfão e marca", () => {
     const leads = [
@@ -111,7 +158,14 @@ describe("diagnosticarLeads", () => {
     expect(d.criacoesLp).toBe(7);
     expect(d.leadsLp).toBe(4);
     expect(d.reenvios).toEqual([{ leadId: "LEAD-LP-r1", criacoes: 2 }]);
-    expect(d.colisoes).toEqual([{ leadId: "LEAD-LP-c1", nomes: 2 }]);
+    expect(d.colisoes).toEqual([
+      {
+        leadId: "LEAD-LP-c1",
+        nomeAtual: "Segunda Pessoa",
+        criacoes: 2,
+        sobrescritos: [{ nome: "Primeira Pessoa", primeiraVez: "2026-09-01T09:00:00.000Z", envios: 1 }],
+      },
+    ]);
     expect(d.orfaos).toBe(1);
     expect(d.foraDaMarcaPadrao).toBe(1);
     expect(d.excluidos).toBe(1);

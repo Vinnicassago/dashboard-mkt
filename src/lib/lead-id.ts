@@ -41,7 +41,7 @@ function emailIgual(a?: string | null, b?: string | null): boolean {
 }
 
 /** Nome comparável: sem acento, caixa e espaços extras; o genérico não conta. */
-function nomeChave(nome?: string | null): string | null {
+export function chaveNome(nome?: string | null): string | null {
   const n = (nome ?? "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -62,8 +62,8 @@ export function pessoaDiferente(a: ContatoLead, b: ContatoLead): boolean {
   const telefones = Boolean(a.phone && b.phone);
   const emails = Boolean(a.email && b.email);
   if (!telefones && !emails) return false;
-  const na = nomeChave(a.name);
-  if (na && na === nomeChave(b.name)) return false;
+  const na = chaveNome(a.name);
+  if (na && na === chaveNome(b.name)) return false;
   if (telefones && mesmoTelefone(a.phone, b.phone)) return false;
   if (emails && emailIgual(a.email, b.email)) return false;
   return true;

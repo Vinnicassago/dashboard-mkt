@@ -11,6 +11,7 @@
  */
 
 import { BOOKED_STATUSES, isLostStatus } from "./lead-status";
+import { chaveNome } from "./lead-id";
 import type { Lead, LeadEvent, LeadStatus } from "./types";
 import { DEFAULT_BRAND } from "./types";
 
@@ -33,6 +34,21 @@ export interface ReparoLead {
   lostAt?: string;
 }
 
+export interface PessoaSobrescrita {
+  nome: string;
+  /** 1º envio dessa pessoa no id compartilhado. */
+  primeiraVez: string;
+  envios: number;
+}
+
+export interface ColisaoId {
+  leadId: string;
+  /** Quem está no banco hoje (o último a cair no id). */
+  nomeAtual: string;
+  criacoes: number;
+  sobrescritos: PessoaSobrescrita[];
+}
+
 export interface RajadaRegistro {
   actor: string;
   inicio: string;
@@ -47,8 +63,12 @@ export interface DiagnosticoLeads {
   leadsLp: number;
   /** Mesmo id com mais de um "created" da LP e um nome só: reenvio. */
   reenvios: { leadId: string; criacoes: number }[];
-  /** Mesmo id com nomes diferentes na criação: duas pessoas no mesmo id. */
-  colisoes: { leadId: string; nomes: number }[];
+  /**
+   * Mesmo id com nomes diferentes na criação: várias pessoas caíram no mesmo id
+   * e cada uma SOBRESCREVEU a anterior — só a última ficou no banco. Nome e data
+   * de quem sumiu sobrevivem no histórico; telefone e e-mail, não.
+   */
+  colisoes: ColisaoId[];
   /** Criações cujo lead não existe mais (apagado fora do app). */
   orfaos: number;
   /** Leads da LP em outra marca que não a padrão. */
@@ -81,7 +101,18 @@ const primeiro = (list: LeadEvent[], pred: (e: LeadEvent) => boolean) => list.fi
 
 /** Reparo de UM lead a partir do histórico dele; `null` = nada a reparar. */
 export function propostaDeReparo(lead: Lead, historico: LeadEvent[]): ReparoLead | null {
-  const eventos = [...historico].sort((a, b) => ms(a.createdAt) - ms(b.createdAt));
+  let eventos = [...historico].sort((a, b) => ms(a.createdAt) - ms(b.createdAt));
+
+  // Id compartilhado por outras pessoas (colisão): o histórico anterior à 1ª
+  // criação DESTA pessoa é de quem ela sobrescreveu — não serve para reparar.
+  const doMesmoNome = (e: LeadEvent) => chaveNome(e.leadName) === chaveNome(lead.name);
+  const criacoesTodas = eventos.filter((e) => e.action === "created" && e.actor === ATOR_LP);
+  if (criacoesTodas.some((e) => !doMesmoNome(e))) {
+    const propria = criacoesTodas.find(doMesmoNome);
+    if (!propria) return null; // nada no histórico é dela com certeza
+    eventos = eventos.filter((e) => ms(e.createdAt) >= ms(propria.createdAt));
+  }
+
   const criacoesLp = eventos.filter((e) => e.action === "created" && e.actor === ATOR_LP);
   const mudancas = eventos.filter((e) => e.action === "status_changed" && e.toStatus);
   const ultimaMudanca = mudancas.at(-1);
@@ -186,9 +217,27 @@ export function diagnosticarLeads(leads: Lead[], events: LeadEvent[]): Diagnosti
   }
   for (const [leadId, list] of criacoesPorLead) {
     if (list.length < 2) continue;
-    const nomes = new Set(list.map((e) => e.leadName.trim().toLowerCase())).size;
-    if (nomes > 1) colisoes.push({ leadId, nomes });
-    else reenvios.push({ leadId, criacoes: list.length });
+    const nomes = new Set(list.map((e) => chaveNome(e.leadName)));
+    if (nomes.size < 2) {
+      reenvios.push({ leadId, criacoes: list.length });
+      continue;
+    }
+    const atual = byId.get(leadId);
+    const chaveAtual = chaveNome(atual?.name ?? list.at(-1)!.leadName);
+    const pessoas = new Map<string, PessoaSobrescrita>();
+    for (const e of [...list].sort((a, b) => ms(a.createdAt) - ms(b.createdAt))) {
+      const chave = chaveNome(e.leadName) ?? e.leadName;
+      if (chave === chaveAtual) continue;
+      const p = pessoas.get(chave);
+      if (p) p.envios++;
+      else pessoas.set(chave, { nome: e.leadName, primeiraVez: e.createdAt, envios: 1 });
+    }
+    colisoes.push({
+      leadId,
+      nomeAtual: atual?.name ?? list.at(-1)!.leadName,
+      criacoes: list.length,
+      sobrescritos: [...pessoas.values()],
+    });
   }
 
   const reparos: ReparoLead[] = [];
@@ -204,7 +253,7 @@ export function diagnosticarLeads(leads: Lead[], events: LeadEvent[]): Diagnosti
     criacoesLp: criacoes.length,
     leadsLp: leadsLp.length,
     reenvios: reenvios.sort((a, b) => b.criacoes - a.criacoes),
-    colisoes,
+    colisoes: colisoes.sort((a, b) => b.criacoes - a.criacoes),
     orfaos: [...criacoesPorLead.keys()].filter((id) => !byId.has(id)).length,
     foraDaMarcaPadrao: leadsLp.filter((l) => l.brand !== DEFAULT_BRAND).length,
     excluidos: leads.filter((l) => l.deletedAt).length,

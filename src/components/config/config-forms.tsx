@@ -719,6 +719,70 @@ function Numero({ label, valor, hint }: { label: string; valor: number; hint?: s
 }
 
 /**
+ * Um id em que várias pessoas caíram: cada cadastro sobrescreveu o anterior e
+ * só o último ficou no banco. O histórico guardou nome e data de quem sumiu —
+ * telefone e e-mail não. O CSV serve para cruzar com o outro destino da LP
+ * (planilha / n8n) e reimportar quem faltar.
+ */
+function ColisaoCard({ colisao }: { colisao: DiagnosticoLeads["colisoes"][number] }) {
+  const exportar = () => {
+    const linhas = [
+      ["Nome", "Primeiro envio", "Envios", "Id compartilhado"].join(";"),
+      ...colisao.sobrescritos.map((p) =>
+        [p.nome.replace(/;/g, ","), formatDateTime(p.primeiraVez), String(p.envios), colisao.leadId].join(";"),
+      ),
+    ];
+    const blob = new Blob(["﻿" + linhas.join("\r\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "leads-sobrescritos.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+  return (
+    <div className="space-y-2 rounded-lg border border-[var(--danger-text)]/30 p-3">
+      <p className="text-sm">
+        <strong>{colisao.sobrescritos.length} pessoa(s) sumiram</strong> num único id (
+        <code className="font-mono text-xs">{colisao.leadId}</code>): {colisao.criacoes} cadastros
+        caíram nele, cada um apagando o anterior. Hoje só existe{" "}
+        <strong>{colisao.nomeAtual}</strong>. Nomes e datas estão abaixo; telefone e e-mail se
+        perderam aqui — procure-os no outro destino da landing page (planilha / n8n) e reimporte
+        pelo CSV de leads. A causa foi corrigida: cadastros novos não se sobrescrevem mais.
+      </p>
+      <div className="max-h-60 overflow-auto rounded-md border">
+        <table className="w-full text-xs">
+          <thead className="sticky top-0 bg-card text-left text-muted-foreground">
+            <tr>
+              <th className="p-2">Nome</th>
+              <th className="p-2">Primeiro envio</th>
+              <th className="p-2 text-right">Envios</th>
+            </tr>
+          </thead>
+          <tbody>
+            {colisao.sobrescritos.map((p) => (
+              <tr key={`${p.nome}-${p.primeiraVez}`} className="border-t">
+                <td className="p-2">{p.nome}</td>
+                <td className="p-2">{formatDateTime(p.primeiraVez)}</td>
+                <td className="p-2 text-right tabular-nums">{p.envios}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <button
+        type="button"
+        onClick={exportar}
+        className="inline-flex h-8 items-center gap-2 rounded-lg border px-3 text-xs font-medium text-muted-foreground hover:text-foreground"
+      >
+        <Download className="size-3.5" />
+        Exportar lista (CSV)
+      </button>
+    </div>
+  );
+}
+
+/**
  * Lê o histórico e mostra o que os reenvios da LP fizeram com os leads. Nada é
  * alterado até alguém marcar os leads e clicar em "Aplicar".
  */
@@ -778,6 +842,10 @@ export function DiagnosticoLeadsPanel() {
               . Status registrado em lote, dias depois, não mede velocidade de contato.
             </p>
           ) : null}
+
+          {diag.colisoes.map((c) => (
+            <ColisaoCard key={c.leadId} colisao={c} />
+          ))}
 
           {diag.reparos.length === 0 ? (
             <p className="text-sm text-[var(--success-text)]">
