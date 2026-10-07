@@ -19,11 +19,19 @@ export function toRole(v: unknown): Role {
   return isRole(v) ? v : "marketing";
 }
 
-export type Capability = "leads:write" | "data:write" | "users:manage";
+export type Capability =
+  | "leads:write"
+  | "leads:delete"
+  | "data:write"
+  | "danger:run"
+  | "users:manage";
 
 /**
  * - leads:write  → alterar status de lead / adicionar lead   (admin, comercial)
+ * - leads:delete → excluir e restaurar lead (reversível)     (admin)
  * - data:write   → importar CSV, sync, metas, snapshot IG     (admin, marketing)
+ * - danger:run   → restaurar exemplo, ressincronizar todo o
+ *                  histórico de anúncios, corrigir leads em lote (admin)
  * - users:manage → criar/remover/alterar usuários             (admin)
  */
 export function hasCapability(role: Role, cap: Capability): boolean {
@@ -32,6 +40,8 @@ export function hasCapability(role: Role, cap: Capability): boolean {
       return role === "admin" || role === "comercial";
     case "data:write":
       return role === "admin" || role === "marketing";
+    case "leads:delete":
+    case "danger:run":
     case "users:manage":
       return role === "admin";
     default:

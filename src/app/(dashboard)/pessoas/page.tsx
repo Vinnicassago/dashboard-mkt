@@ -1,11 +1,16 @@
 import Link from "next/link";
 import { AlertTriangle } from "lucide-react";
-import { LeadsDirectory, type LeadDirectoryRow } from "@/components/leads/leads-directory";
+import {
+  DeletedLeads,
+  LeadsDirectory,
+  type DeletedLeadRow,
+  type LeadDirectoryRow,
+} from "@/components/leads/leads-directory";
 import { LeadActivity } from "@/components/leads/lead-activity";
 import { ComercialTable } from "@/components/robo/comercial-table";
 import { RolarParaAncora } from "@/components/ui/rolar-para-ancora";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { getData, listLeadEvents } from "@/lib/data/store";
+import { getData, listDeletedLeads, listLeadEvents } from "@/lib/data/store";
 import { activeBrandSlug } from "@/lib/active-brand";
 import { adIdFromUtmContent, creativePerformance, rotuloCriativo } from "@/lib/metrics";
 import { getComercial } from "@/lib/robo/client";
@@ -45,9 +50,22 @@ function duracao(min: number | null): string {
  * espera com contagens diferentes era parte dos "dados desconexos".
  */
 export default async function PessoasPage() {
-  const data = await getData(await activeBrandSlug());
+  const brand = await activeBrandSlug();
+  const data = await getData(brand);
   const canEdit = await can("leads:write");
-  const [events, comercial] = await Promise.all([listLeadEvents({ limit: 200 }), getComercial()]);
+  const canDelete = await can("leads:delete");
+  const [events, comercial, excluidos] = await Promise.all([
+    listLeadEvents({ brand, limit: 200 }),
+    getComercial(),
+    listDeletedLeads(brand),
+  ]);
+  const deletedRows: DeletedLeadRow[] = excluidos.map((l) => ({
+    id: l.id,
+    name: l.name,
+    deletedAt: l.deletedAt ?? "",
+    deletedBy: l.deletedBy,
+    deletedReason: l.deletedReason,
+  }));
   // O mesmo nome pode estar em dois anúncios ("Carrossel -"): a origem usa o
   // rótulo com o conjunto quando o nome se repete, como as ações e o Dinheiro.
   const perf = creativePerformance(data);
@@ -123,9 +141,26 @@ export default async function PessoasPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <LeadsDirectory rows={rows} canEdit={canEdit} />
+          <LeadsDirectory rows={rows} canDelete={canDelete} />
         </CardContent>
       </Card>
+
+      {/* Excluídos: fora das listas e dos números, mas à vista e recuperáveis. */}
+      {deletedRows.length ? (
+        <Card id="excluidos" className="scroll-mt-24">
+          <details>
+            <summary className="cursor-pointer p-5 text-sm font-semibold select-none">
+              Excluídos ({deletedRows.length}){" "}
+              <span className="font-normal text-muted-foreground">
+                · fora das listas e dos números; dá para restaurar
+              </span>
+            </summary>
+            <CardContent>
+              <DeletedLeads rows={deletedRows} canRestore={canDelete} />
+            </CardContent>
+          </details>
+        </Card>
+      ) : null}
 
       {/* Auditoria é consulta, não leitura diária: fica recolhida. */}
       <Card id="historico" className="scroll-mt-24">
@@ -133,7 +168,7 @@ export default async function PessoasPage() {
           <summary className="cursor-pointer p-5 text-sm font-semibold select-none">
             Histórico de alterações{" "}
             <span className="font-normal text-muted-foreground">
-              · quem criou e quem mudou o status de cada lead
+              · quem criou, reenviou, mudou o status ou excluiu cada lead
             </span>
           </summary>
           <CardContent>

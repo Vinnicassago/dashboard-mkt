@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
-import { addLead, addLeadEvent, bumpLpDaily } from "@/lib/data/store";
-import { DEFAULT_BRAND } from "@/lib/types";
+import { addLead, addLeadEvent, bumpLpDaily, getLead } from "@/lib/data/store";
+import { DEFAULT_BRAND, type Lead } from "@/lib/types";
+import { candidatosIdLead, resolverIdLead } from "@/lib/lead-id";
+import { mesmoTelefone } from "@/lib/phone";
 import { newEventId } from "@/lib/auth/actor";
 import { sendCapiEvent } from "@/lib/meta/capi";
 import { sendGa4Event } from "@/lib/ga4/measurement-protocol";
@@ -79,6 +81,8 @@ function clientIp(request: Request): string | undefined {
   return request.headers.get("x-real-ip") ?? undefined;
 }
 
+let avisouSemChave = false;
+
 function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
@@ -104,6 +108,12 @@ export async function POST(request: Request) {
   if (expectedKey && body.ingestKey !== expectedKey) {
     return NextResponse.json({ error: "Chave inválida." }, { status: 401, headers });
   }
+  // Sem chave o endpoint aceita lead de qualquer origem. Não recusamos (a LP em
+  // produção quebraria e leads reais se perderiam); Ajustes mostra o alerta.
+  if (!expectedKey && process.env.NODE_ENV === "production" && !avisouSemChave) {
+    avisouSemChave = true;
+    console.warn("[track] TRACK_INGEST_KEY não definida: /api/track aceita envios de qualquer origem.");
+  }
 
   const type = body.type;
   if (type !== "page_view" && type !== "cta_click" && type !== "lead") {
@@ -125,16 +135,31 @@ export async function POST(request: Request) {
   // ---- lead --------------------------------------------------------
   const attr = body.attribution ?? {};
   const eventId = body.eventId?.trim() || randomUUID();
-  const leadId = `LEAD-LP-${eventId.slice(0, 8)}`;
+  const name = (body.name ?? "").trim() || "Lead sem nome";
+  const email = (body.email ?? "").trim() || undefined;
+  const phone = (body.phone ?? "").trim() || undefined;
 
+  // O id sai do event_id: a mesma pessoa reenviando o formulário cai no MESMO
+  // lead (reenvio), nunca num lead novo nem num lead zerado. Ver lib/lead-id.ts.
+  const candidatos = new Map<string, Lead | null>();
+  for (const id of candidatosIdLead(eventId)) candidatos.set(id, await getLead(id));
+  const resolucao = resolverIdLead(
+    eventId,
+    { name, email, phone },
+    (id) => candidatos.get(id),
+    () => randomUUID().slice(0, 8),
+  );
+  const leadId = resolucao.id;
+
+  // Envio de formulário é EVENTO (conta reenvios); lead é PESSOA.
   await bumpLpDaily(date, { formSubmits: 1 });
-  await addLead({
+  const { created } = await addLead({
     id: leadId,
     brand: DEFAULT_BRAND,
     createdAt: new Date().toISOString(),
-    name: (body.name ?? "").trim() || "Lead sem nome",
-    email: (body.email ?? "").trim() || undefined,
-    phone: (body.phone ?? "").trim() || undefined,
+    name,
+    email,
+    phone,
     utmSource: attr.utm_source,
     utmCampaign: attr.utm_campaign,
     // utm_content carries the ad id — this is what ties the lead to a creative
@@ -146,15 +171,32 @@ export async function POST(request: Request) {
     gaClientId: body.gaClientId,
     gaSessionId: body.gaSessionId,
   });
+
+  // No reenvio, o contato que chegou diferente do gravado fica no histórico
+  // (o lead não é sobrescrito — quem atende decide qual vale).
+  const anterior = candidatos.get(leadId);
+  const payload: Record<string, string> = {};
+  if (!created && anterior) {
+    if (phone && anterior.phone && !mesmoTelefone(phone, anterior.phone)) payload.telefoneNovo = phone;
+    if (email && anterior.email && email.toLowerCase() !== anterior.email.toLowerCase()) payload.emailNovo = email;
+  }
+  if (resolucao.tipo === "colisao") payload.idOcupado = resolucao.idOcupado;
+
   await addLeadEvent({
     id: newEventId(),
     leadId,
-    leadName: (body.name ?? "").trim() || "Lead sem nome",
+    brand: DEFAULT_BRAND,
+    leadName: name,
     actor: "Landing page",
-    action: "created",
-    toStatus: "lead",
+    action: created ? "created" : "reenvio",
+    toStatus: created ? "lead" : undefined,
+    payload: Object.keys(payload).length ? payload : undefined,
     createdAt: new Date().toISOString(),
   });
+
+  // Reenvio não é conversão nova: a Meta deduplicaria pelo event_id, mas o GA4
+  // contaria duas vezes. Nada sai.
+  if (!created) return NextResponse.json({ ok: true, leadId }, { headers });
 
   // The user agent of THIS request is the visitor's browser (the landing page
   // posts directly), which is exactly what CAPI requires.
@@ -192,8 +234,10 @@ export async function POST(request: Request) {
     }),
   ]);
 
-  return NextResponse.json(
-    { ok: true, leadId, capi: capi.detail, ga4: ga4.detail },
-    { headers },
-  );
+  // O detalhe de CAPI/GA4 fica no log do servidor: a resposta vai para uma
+  // página pública e não deve expor erro interno.
+  if (!capi.sent || !ga4.sent) {
+    console.info(`[track] lead ${leadId} · CAPI: ${capi.detail} · GA4: ${ga4.detail}`);
+  }
+  return NextResponse.json({ ok: true, leadId }, { headers });
 }

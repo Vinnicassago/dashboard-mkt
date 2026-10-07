@@ -4,14 +4,18 @@ import { revalidatePath } from "next/cache";
 import {
   addLead,
   addLeadEvent,
-  clearAdData,
   getData,
+  getLead,
   getState,
+  listDeletedLeads,
+  listLeadEvents,
+  replaceAdData,
   resetToSeed,
   setCampaignBudget,
+  setLeadCreatedAt,
+  setLeadStatus,
   setState,
   upsertAdDaily,
-  upsertCreatives,
   upsertGoal,
   upsertIgAccountDaily,
   upsertIgPosts,
@@ -19,13 +23,18 @@ import {
 import { STATE_KEYS } from "@/lib/data/backend";
 import { parseAdsCsv } from "@/lib/csv";
 import { parseLeadsCsv } from "@/lib/leads-csv";
-import { runSync, type SyncSource } from "@/lib/meta/sync";
+import { resyncAdsHistory, runSync, type SyncSource } from "@/lib/meta/sync";
 import { resolveMetaBrands, brandForCampaign } from "@/lib/meta/config";
 import { BRANDS } from "@/lib/brands";
 import { can } from "@/lib/auth/guard";
 import { currentActor, newEventId } from "@/lib/auth/actor";
 import { activeBrandSlug } from "@/lib/active-brand";
 import { normalizeLeadStatus } from "@/lib/lead-status";
+import { candidatosIdLead, resolverIdLead } from "@/lib/lead-id";
+import { CONFIRMACAO_PERIGO } from "@/lib/perigo";
+import { diagnosticarLeads, type DiagnosticoLeads } from "@/lib/diagnostico-leads";
+import { registrarAuditoria } from "@/lib/auditoria";
+import { randomUUID } from "node:crypto";
 import {
   DEFAULT_BRAND,
   type AdDaily,
@@ -33,6 +42,7 @@ import {
   type CtaType,
   type GoalMetric,
   type IgPost,
+  type Lead,
 } from "@/lib/types";
 
 const DENIED: ActionState = { ok: false, message: "Você não tem permissão para esta ação." };
@@ -86,27 +96,49 @@ export async function importLeadsCsv(
   }
   try {
     const text = await file.text();
-    const { leads, skipped } = parseLeadsCsv(text);
+    const { leads, eventIds, skipped } = parseLeadsCsv(text);
     const brand = await activeBrandSlug();
     const actor = await currentActor();
-    for (const lead of leads) {
-      await addLead({ ...lead, brand });
+    let novos = 0;
+    for (const parsed of leads) {
+      // Mesmo esquema do /api/track: reconhece o lead que já existe (inclusive no
+      // formato de id antigo) e não confunde duas pessoas com o mesmo id.
+      const eventId = eventIds.get(parsed.id);
+      let id = parsed.id;
+      if (eventId) {
+        const existentes = new Map<string, Lead | null>();
+        for (const cand of candidatosIdLead(eventId)) existentes.set(cand, await getLead(cand));
+        id = resolverIdLead(
+          eventId,
+          parsed,
+          (cand) => existentes.get(cand),
+          () => randomUUID().slice(0, 8),
+        ).id;
+      }
+      // Lead novo entra na marca ativa; lead que já existe mantém a marca, o
+      // status e a entrada — reimportar só preenche contato vazio.
+      const { created } = await addLead({ ...parsed, id, brand });
+      if (!created) continue;
+      novos++;
       await addLeadEvent({
         id: newEventId(),
-        leadId: lead.id,
-        leadName: lead.name,
+        leadId: id,
+        brand,
+        leadName: parsed.name,
         actor,
         action: "created",
-        toStatus: lead.status,
-        createdAt: lead.createdAt,
+        toStatus: parsed.status,
+        createdAt: parsed.createdAt,
       });
     }
     revalidateAll();
-    const extra = skipped > 0 ? ` (${skipped} linha(s) ignorada(s))` : "";
-    return {
-      ok: true,
-      message: `${leads.length} lead(s) importado(s)${extra}. Reimportar atualiza pelo mesmo id, sem duplicar.`,
-    };
+    const existentes = leads.length - novos;
+    const extra = skipped > 0 ? ` ${skipped} linha(s) ignorada(s).` : "";
+    const jaHavia =
+      existentes > 0
+        ? ` ${existentes} já existia(m) e foram mantido(s) como estão — status muda pela Fila ou por Pessoas.`
+        : "";
+    return { ok: true, message: `${novos} lead(s) novo(s) importado(s).${jaHavia}${extra}` };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : "Falha ao importar os leads." };
   }
@@ -287,9 +319,10 @@ export async function addLeadAction(
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { ok: false, message: "Informe a data do lead." };
 
   const leadId = `LEAD-M-${Date.now()}`;
+  const brand = await activeBrandSlug();
   await addLead({
     id: leadId,
-    brand: await activeBrandSlug(),
+    brand,
     createdAt: `${date}T12:00:00`,
     name,
     email,
@@ -303,6 +336,7 @@ export async function addLeadAction(
   await addLeadEvent({
     id: newEventId(),
     leadId,
+    brand,
     leadName: name,
     actor: await currentActor(),
     action: "created",
@@ -380,46 +414,44 @@ export async function setBudgetAction(
   return { ok: true, message: "Orçamento salvo." };
 }
 
-export async function resetSeedAction(): Promise<ActionState> {
-  if (!(await can("data:write"))) return DENIED;
+/**
+ * Troca os dados de campanha pelo exemplo. Só administrador, com a palavra de
+ * confirmação conferida AQUI (não só no navegador). O histórico dos leads e o
+ * registro de auditoria sobrevivem.
+ */
+export async function resetSeedAction(confirmacao: string): Promise<ActionState> {
+  if (!(await can("danger:run"))) {
+    return { ok: false, message: "Só um administrador pode restaurar os dados de exemplo." };
+  }
+  if (confirmacao.trim().toUpperCase() !== CONFIRMACAO_PERIGO) {
+    return { ok: false, message: `Nada foi apagado: digite ${CONFIRMACAO_PERIGO} para confirmar.` };
+  }
   await resetToSeed();
+  await registrarAuditoria("Restaurar dados de exemplo", "dados de campanha trocados pelo exemplo");
   revalidateAll();
-  return { ok: true, message: "Dados de exemplo restaurados." };
+  return { ok: true, message: "Dados de exemplo restaurados. O histórico dos leads foi preservado." };
 }
 
 /**
- * Fix double-counting: wipe the ad tables (ad_daily + creatives) — where
- * CSV-imported rows and API rows live under different keys and get summed —
- * then re-pull cleanly from the Meta API so only the real numbers remain.
- * Leads and everything else are untouched.
+ * Conserta gasto dobrado (linhas de CSV somadas às da API): baixa da Meta TODO o
+ * histórico guardado e só então troca, numa operação, as linhas desse período
+ * pelas novas. Se a Meta não estiver configurada ou a busca falhar, nada é
+ * apagado. Leads e o resto não são tocados.
  */
 export async function resyncAdsCleanAction(): Promise<ActionState> {
-  if (!(await can("data:write"))) return DENIED;
+  if (!(await can("danger:run"))) {
+    return { ok: false, message: "Só um administrador pode ressincronizar o histórico de anúncios." };
+  }
   try {
-    await clearAdData();
-    const report = await runSync({ source: "ads" });
+    const r = await resyncAdsHistory();
+    if (!r.ok) return { ok: false, message: `Nada foi apagado. ${r.detail}` };
+    await registrarAuditoria("Ressincronizar histórico de anúncios", r.detail);
     revalidateAll();
-    if (!report.ads) {
-      return {
-        ok: false,
-        message:
-          "Dados de anúncios apagados, mas a Meta não está configurada — defina META_AD_ACCOUNT_ID e META_ADS_ACCESS_TOKEN e clique em Sincronizar agora.",
-      };
-    }
-    if (!report.ads.ok) {
-      return {
-        ok: false,
-        message: `Dados apagados, mas a sincronização falhou: ${report.ads.detail}. Corrija e clique em Sincronizar agora.`,
-      };
-    }
-    return {
-      ok: true,
-      message: `Anúncios zerados e ressincronizados da Meta · ${report.ads.detail}`,
-    };
+    return { ok: true, message: `Histórico de anúncios refeito a partir da Meta · ${r.detail}` };
   } catch (e) {
     return {
       ok: false,
-      message: e instanceof Error ? e.message : "Falha ao zerar e ressincronizar.",
+      message: `Nada foi apagado. ${e instanceof Error ? e.message : "Falha ao ressincronizar."}`,
     };
   }
 }
@@ -477,14 +509,14 @@ export async function reclassifyAdsAction(): Promise<ActionState> {
     for (const r of retaggedAds) if (!adBrand.has(r.adId)) adBrand.set(r.adId, r.brand);
     const retaggedCreatives = creatives.map((c) => ({ ...c, brand: adBrand.get(c.adId) ?? c.brand }));
 
-    await clearAdData();
-    await upsertAdDaily(retaggedAds);
-    await upsertCreatives(retaggedCreatives);
-    revalidateAll();
+    // Troca tudo numa operação só: se falhar no meio, nada some.
+    await replaceAdData(retaggedAds, retaggedCreatives);
 
     const dist: Record<string, number> = {};
     for (const r of retaggedAds) dist[r.brand] = (dist[r.brand] ?? 0) + 1;
     const summary = Object.entries(dist).map(([s, n]) => `${s}: ${n} linha(s)`).join(" · ");
+    await registrarAuditoria("Reclassificar anúncios por marca", summary || "nenhuma linha");
+    revalidateAll();
     return { ok: true, message: `Anúncios reclassificados por campanha — ${summary || "nenhuma linha"}.` };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : "Falha ao reclassificar." };
@@ -531,4 +563,78 @@ export async function syncNowAction(
       message: e instanceof Error ? e.message : "Falha na sincronização.",
     };
   }
+}
+
+// ---- diagnóstico dos leads (D8) -------------------------------------------
+
+/** Todos os leads de todas as marcas, inclusive excluídos — base do diagnóstico. */
+async function todosOsLeads(): Promise<Lead[]> {
+  const out: Lead[] = [];
+  for (const b of BRANDS) {
+    out.push(...(await getData(b.slug)).leads, ...(await listDeletedLeads(b.slug)));
+  }
+  return out;
+}
+
+/** Lê o histórico inteiro e diz o que os reenvios da LP fizeram com os leads. Só leitura. */
+export async function diagnosticoLeadsAction(): Promise<
+  { ok: true; diagnostico: DiagnosticoLeads } | { ok: false; message: string }
+> {
+  if (!(await can("danger:run"))) {
+    return { ok: false, message: "Só um administrador pode rodar o diagnóstico." };
+  }
+  const [leads, events] = await Promise.all([todosOsLeads(), listLeadEvents({ limit: 0 })]);
+  return { ok: true, diagnostico: diagnosticarLeads(leads, events) };
+}
+
+/**
+ * Aplica os reparos que o diagnóstico propôs para os ids escolhidos. Recalcula a
+ * proposta aqui (nunca confia no que veio do navegador) e registra cada mudança
+ * de status no histórico do lead.
+ */
+export async function repararLeadsAction(ids: string[]): Promise<ActionState> {
+  if (!(await can("danger:run"))) {
+    return { ok: false, message: "Só um administrador pode reparar leads." };
+  }
+  const [leads, events] = await Promise.all([todosOsLeads(), listLeadEvents({ limit: 0 })]);
+  const { reparos } = diagnosticarLeads(leads, events);
+  const escolhidos = reparos.filter((r) => ids.includes(r.leadId));
+  if (escolhidos.length === 0) return { ok: false, message: "Nenhum reparo pendente para esses leads." };
+
+  const actor = await currentActor();
+  const byId = new Map(leads.map((l) => [l.id, l]));
+  for (const r of escolhidos) {
+    const lead = byId.get(r.leadId);
+    if (!lead) continue;
+    const status = r.statusProposto ?? lead.status;
+    await setLeadStatus(r.leadId, status, {
+      bookedAt: r.bookedAt,
+      attendedAt: r.attendedAt,
+      closedAt: r.closedAt,
+      // Data da reunião no esquema antigo = momento em que foi marcada.
+      meetingAt: !lead.meetingAt && (r.bookedAt ?? lead.bookedAt) ? (r.bookedAt ?? lead.bookedAt) : undefined,
+      lostAt: r.lostAt,
+    });
+    if (r.entradaProposta) await setLeadCreatedAt(r.leadId, r.entradaProposta);
+    if (r.statusProposto) {
+      await addLeadEvent({
+        id: newEventId(),
+        leadId: r.leadId,
+        brand: lead.brand,
+        leadName: lead.name,
+        actor,
+        action: "status_changed",
+        fromStatus: lead.status,
+        toStatus: r.statusProposto,
+        payload: { motivo: "restaurado do histórico (reenvio da LP tinha zerado o lead)" },
+        createdAt: new Date().toISOString(),
+      });
+    }
+  }
+  await registrarAuditoria(
+    "Reparar leads zerados por reenvio",
+    `${escolhidos.length} lead(s): ${escolhidos.map((r) => r.leadId).join(", ")}`,
+  );
+  revalidateAll();
+  return { ok: true, message: `${escolhidos.length} lead(s) reparado(s).` };
 }

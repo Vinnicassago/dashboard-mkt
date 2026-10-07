@@ -15,10 +15,19 @@ import { isPostgresConfigured } from "../db/pg";
 import { localBackend } from "./local-store";
 import { supabaseBackend } from "./supabase-store";
 import { postgresBackend } from "./postgres-store";
-import type { CampaignBudget, DataBackend, LeadStatusPatch, LpDelta, StoredUser } from "./backend";
+import type {
+  AdScope,
+  CampaignBudget,
+  DataBackend,
+  LeadStatusPatch,
+  ListEventsOpts,
+  LpDelta,
+  StoredUser,
+} from "./backend";
 import type { Role } from "../auth/roles";
 import type {
   AdDaily,
+  AuditEntry,
   Creative,
   Goal,
   IgAccountDaily,
@@ -54,8 +63,9 @@ export const upsertAdDaily = (rows: AdDaily[]) => backend().upsertAdDaily(rows);
 
 export const upsertCreatives = (rows: Creative[]) => backend().upsertCreatives(rows);
 
-/** Remove all ad rows (ad_daily + creatives) before a clean re-sync from the Meta API. */
-export const clearAdData = () => backend().clearAdData();
+/** Troca as linhas de anúncio de um recorte (ou todas) pelas novas, de uma vez. */
+export const replaceAdData = (rows: AdDaily[], creatives: Creative[], scope?: AdScope) =>
+  backend().replaceAdData(rows, creatives, scope);
 
 export const upsertIgAccountDaily = (rows: IgAccountDaily[]) =>
   backend().upsertIgAccountDaily(rows);
@@ -69,12 +79,20 @@ export const getDraft = (id: string) => backend().getDraft(id);
 export const upsertDraft = (draft: PostDraft) => backend().upsertDraft(draft);
 export const deleteDraft = (id: string) => backend().deleteDraft(id);
 
+/** Lead novo; se o id já existe, só preenche contato vazio (ver DataBackend). */
 export const addLead = (lead: Lead) => backend().addLead(lead);
+export const getLead = (id: string) => backend().getLead(id);
 
 export const setLeadStatus = (id: string, status: LeadStatus, patch?: LeadStatusPatch) =>
   backend().setLeadStatus(id, status, patch);
 
-export const deleteLead = (id: string) => backend().deleteLead(id);
+export const setLeadCreatedAt = (id: string, createdAt: string) =>
+  backend().setLeadCreatedAt(id, createdAt);
+
+export const softDeleteLead = (id: string, info: { at: string; by: string; reason: string }) =>
+  backend().softDeleteLead(id, info);
+export const restoreLead = (id: string) => backend().restoreLead(id);
+export const listDeletedLeads = (brand: string = DEFAULT_BRAND) => backend().listDeletedLeads(brand);
 
 export const upsertGoal = (goal: Goal) => backend().upsertGoal(goal);
 
@@ -85,8 +103,10 @@ export const bumpLpDaily = (date: string, delta: LpDelta, brand: string = DEFAUL
   backend().bumpLpDaily(brand, date, delta);
 
 export const addLeadEvent = (event: LeadEvent) => backend().addLeadEvent(event);
-export const listLeadEvents = (opts?: { leadId?: string; limit?: number }) =>
-  backend().listLeadEvents(opts);
+export const listLeadEvents = (opts?: ListEventsOpts) => backend().listLeadEvents(opts);
+
+export const addAuditEntry = (entry: AuditEntry) => backend().addAuditEntry(entry);
+export const listAuditEntries = (limit = 20) => backend().listAuditEntries(limit);
 
 // ---- state bag (last sync, tokens) ---------------------------------
 

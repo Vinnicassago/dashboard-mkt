@@ -11,6 +11,7 @@ import { toRole } from "../auth/roles";
 import { normalizeLeadStatus } from "../lead-status";
 import type {
   AdDaily,
+  AuditEntry,
   Campaign,
   CampaignStatus,
   Creative,
@@ -275,6 +276,9 @@ export const toLead = (r: Row): Lead => ({
   fbp: r.fbp ? s(r.fbp) : undefined,
   gaClientId: r.ga_client_id ? s(r.ga_client_id) : undefined,
   gaSessionId: r.ga_session_id ? s(r.ga_session_id) : undefined,
+  deletedAt: r.deleted_at ? iso(r.deleted_at) : undefined,
+  deletedBy: r.deleted_by ? s(r.deleted_by) : undefined,
+  deletedReason: r.deleted_reason ? s(r.deleted_reason) : undefined,
 });
 
 export const fromLead = (l: Lead): Row => ({
@@ -299,6 +303,9 @@ export const fromLead = (l: Lead): Row => ({
   fbp: l.fbp ?? null,
   ga_client_id: l.gaClientId ?? null,
   ga_session_id: l.gaSessionId ?? null,
+  deleted_at: l.deletedAt ?? null,
+  deleted_by: l.deletedBy ?? null,
+  deleted_reason: l.deletedReason ?? null,
 });
 
 export const toGoal = (r: Row): Goal => ({
@@ -410,21 +417,41 @@ export const fromStoredUser = (u: StoredUser): Row => ({
 export const toEvent = (r: Row): LeadEvent => ({
   id: s(r.id),
   leadId: s(r.lead_id),
+  brand: r.brand ? s(r.brand) : undefined,
   leadName: s(r.lead_name),
   actor: s(r.actor),
   action: s(r.action) as LeadEventAction,
   fromStatus: r.from_status ? normalizeLeadStatus(s(r.from_status)) : undefined,
   toStatus: r.to_status ? normalizeLeadStatus(s(r.to_status)) : undefined,
+  payload: r.payload && typeof r.payload === "object" ? (r.payload as Record<string, string>) : undefined,
   createdAt: iso(r.created_at),
 });
 
 export const fromEvent = (e: LeadEvent): Row => ({
   id: e.id,
   lead_id: e.leadId,
+  brand: e.brand ?? null,
   lead_name: e.leadName,
   actor: e.actor,
   action: e.action,
   from_status: e.fromStatus ?? null,
   to_status: e.toStatus ?? null,
+  payload: e.payload ?? null,
   created_at: e.createdAt,
+});
+
+export const toAudit = (r: Row): AuditEntry => ({
+  id: s(r.id),
+  at: iso(r.at),
+  actor: s(r.actor),
+  action: s(r.action),
+  detail: r.detail ? s(r.detail) : undefined,
+});
+
+export const fromAudit = (a: AuditEntry): Row => ({
+  id: a.id,
+  at: a.at,
+  actor: a.actor,
+  action: a.action,
+  detail: a.detail ?? null,
 });

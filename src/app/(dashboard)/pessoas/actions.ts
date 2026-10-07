@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { addLeadEvent, deleteLead, getData, setLeadStatus } from "@/lib/data/store";
+import { addLeadEvent, getLead, restoreLead, setLeadStatus, softDeleteLead } from "@/lib/data/store";
 import { isBooked } from "@/lib/metrics";
 import { isBookedStatus, isLostStatus } from "@/lib/lead-status";
 import { can } from "@/lib/auth/guard";
@@ -16,20 +16,55 @@ export interface StatusResult {
 }
 
 /**
- * Exclui um lead permanentemente (ex.: entradas de teste que não devem ser
- * contabilizadas). Remove o lead e seus eventos de auditoria. Não notifica
- * Meta/GA4 — exclusão é interna.
+ * Exclui um lead (ex.: teste, duplicado, spam) de forma REVERSÍVEL: ele sai de
+ * todas as listas e métricas, mas a linha e o histórico ficam, com quem excluiu
+ * e por quê — e dá para restaurar. Só administrador. Não notifica Meta/GA4.
  */
-export async function deleteLeadAction(leadId: string): Promise<StatusResult> {
-  if (!(await can("leads:write"))) {
-    return { ok: false, message: "Você não tem permissão para excluir leads." };
+export async function deleteLeadAction(leadId: string, reason: string): Promise<StatusResult> {
+  if (!(await can("leads:delete"))) {
+    return { ok: false, message: "Só um administrador pode excluir leads." };
   }
-  const data = await getData();
-  const lead = data.leads.find((l) => l.id === leadId);
-  if (!lead) return { ok: false, message: "Lead não encontrado." };
-  await deleteLead(leadId);
+  const motivo = reason.trim();
+  if (!motivo) return { ok: false, message: "Diga o motivo da exclusão." };
+  const lead = await getLead(leadId);
+  if (!lead || lead.deletedAt) return { ok: false, message: "Lead não encontrado." };
+
+  const actor = await currentActor();
+  const at = new Date().toISOString();
+  await softDeleteLead(leadId, { at, by: actor, reason: motivo.slice(0, 200) });
+  await addLeadEvent({
+    id: newEventId(),
+    leadId,
+    brand: lead.brand,
+    leadName: lead.name,
+    actor,
+    action: "excluido",
+    payload: { motivo: motivo.slice(0, 200) },
+    createdAt: at,
+  });
   revalidatePath("/", "layout");
-  return { ok: true, message: `Lead "${lead.name}" excluído.` };
+  return { ok: true, message: `Lead "${lead.name}" excluído. Dá para restaurar em "Excluídos".` };
+}
+
+/** Desfaz uma exclusão: o lead volta às listas e métricas como estava. */
+export async function restoreLeadAction(leadId: string): Promise<StatusResult> {
+  if (!(await can("leads:delete"))) {
+    return { ok: false, message: "Só um administrador pode restaurar leads." };
+  }
+  const lead = await getLead(leadId);
+  if (!lead?.deletedAt) return { ok: false, message: "Este lead não está excluído." };
+  await restoreLead(leadId);
+  await addLeadEvent({
+    id: newEventId(),
+    leadId,
+    brand: lead.brand,
+    leadName: lead.name,
+    actor: await currentActor(),
+    action: "restaurado",
+    createdAt: new Date().toISOString(),
+  });
+  revalidatePath("/", "layout");
+  return { ok: true, message: `Lead "${lead.name}" restaurado.` };
 }
 
 /**
@@ -48,9 +83,9 @@ export async function changeLeadStatus(
     return { ok: false, message: "Você não tem permissão para alterar leads." };
   }
 
-  const data = await getData();
-  const lead = data.leads.find((l) => l.id === leadId);
-  if (!lead) return { ok: false, message: "Lead não encontrado." };
+  // Pelo id, não pela marca padrão: lead de qualquer marca pode mudar de status.
+  const lead = await getLead(leadId);
+  if (!lead || lead.deletedAt) return { ok: false, message: "Lead não encontrado." };
 
   const prevStatus = lead.status;
   const wasBooked = isBooked(lead);
@@ -77,6 +112,7 @@ export async function changeLeadStatus(
     await addLeadEvent({
       id: newEventId(),
       leadId,
+      brand: lead.brand,
       leadName: lead.name,
       actor: await currentActor(),
       action: "status_changed",

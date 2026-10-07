@@ -2,14 +2,16 @@ import Papa from "papaparse";
 import type { Lead, LeadStatus } from "./types";
 import { DEFAULT_BRAND } from "./types";
 import { normalizeLeadStatus } from "./lead-status";
+import { idLeadLp } from "./lead-id";
 
 /**
  * Importador de leads (backfill). Aceita o CSV exportado do rastreamento da
  * landing page (colunas created_at, event_id, nome, whatsapp, email, utm_*,
  * fbp, fbc, Status). Casa 1:1 com o que o /api/track grava — inclusive o
- * esquema de id `LEAD-LP-<8 chars do event_id>` — para que um lead já capturado
- * ao vivo e o mesmo lead importado da planilha sejam a MESMA linha (upsert por
- * id), sem duplicar.
+ * esquema de id de `lib/lead-id.ts` — para que um lead já capturado ao vivo e o
+ * mesmo lead importado da planilha sejam a MESMA linha, sem duplicar. Quem
+ * importa resolve o id contra o banco (formato antigo, colisão) com
+ * `resolverIdLead`, usando o `eventId` devolvido aqui.
  */
 
 /** Strip accents + lowercase for tolerant header matching. */
@@ -102,11 +104,13 @@ function toStatus(raw?: string): LeadStatus {
 /** Mesmo esquema de id do /api/track, para deduplicar com os leads ao vivo. */
 function leadIdFrom(eventId: string, fallbackSeed: string): string {
   const ev = eventId.trim();
-  return ev ? `LEAD-LP-${ev.slice(0, 8)}` : `LEAD-IMP-${fallbackSeed}`;
+  return ev ? idLeadLp(ev) : `LEAD-IMP-${fallbackSeed}`;
 }
 
 export interface LeadsParseResult {
   leads: Lead[];
+  /** event_id de cada lead (por id), para o importador resolver contra o banco. */
+  eventIds: Map<string, string>;
   matchedColumns: Partial<Record<Field, string>>;
   skipped: number;
 }
@@ -126,6 +130,7 @@ export function parseLeadsCsv(text: string): LeadsParseResult {
   }
 
   const byId = new Map<string, Lead>();
+  const eventIds = new Map<string, string>();
   let skipped = 0;
   parsed.data.forEach((r, i) => {
     const name = (map.name ? r[map.name] : "")?.trim() ?? "";
@@ -136,6 +141,7 @@ export function parseLeadsCsv(text: string): LeadsParseResult {
     }
     const eventId = (map.eventId ? r[map.eventId] : "")?.trim() ?? "";
     const id = leadIdFrom(eventId, `${createdAt.slice(0, 10).replace(/-/g, "")}-${i}`);
+    if (eventId) eventIds.set(id, eventId);
     const pick = (f: Field) => (map[f] ? r[map[f]!]?.trim() || undefined : undefined);
     byId.set(id, {
       id,
@@ -157,7 +163,7 @@ export function parseLeadsCsv(text: string): LeadsParseResult {
   if (leads.length === 0) {
     throw new Error("Nenhum lead válido encontrado no CSV.");
   }
-  return { leads, matchedColumns: map, skipped };
+  return { leads, eventIds, matchedColumns: map, skipped };
 }
 
 /**

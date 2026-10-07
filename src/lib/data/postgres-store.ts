@@ -2,9 +2,20 @@ import "server-only";
 import type { Pool, PoolClient, QueryResult } from "pg";
 import { ensureSchema, pg } from "../db/pg";
 import { buildSeedData, buildSeedLeadEvents } from "./seed";
-import type { CampaignBudget, DataBackend, LeadStatusPatch, LpDelta, PublicUser, StoredUser } from "./backend";
+import {
+  LEAD_CONTACT_FIELDS,
+  type AdScope,
+  type CampaignBudget,
+  type DataBackend,
+  type LeadStatusPatch,
+  type ListEventsOpts,
+  type LpDelta,
+  type PublicUser,
+  type StoredUser,
+} from "./backend";
 import type {
   AdDaily,
+  AuditEntry,
   Creative,
   DashboardData,
   Goal,
@@ -20,6 +31,7 @@ import {
   type Row,
   s,
   toAd,
+  toAudit,
   toCampaign,
   toCreative,
   toDraft,
@@ -32,6 +44,7 @@ import {
   toPublicUser,
   toStoredUser,
   fromAd,
+  fromAudit,
   fromCampaign,
   fromCreative,
   fromDraft,
@@ -57,12 +70,25 @@ const POST_COLS = ["id", "brand", "published_at", "type", "caption", "permalink"
 const CREATIVE_COLS = ["ad_id", "brand", "name", "format", "thumbnail_url", "video_plays", "thru_plays", "instagram_media_id", "instagram_permalink"];
 const AD_COLS = ["brand", "date", "ad_id", "campaign", "adset", "objective", "spend", "impressions", "reach", "frequency", "clicks", "leads"];
 const LP_COLS = ["brand", "date", "visits", "clicks", "form_submits"];
-const LEAD_COLS = ["id", "brand", "created_at", "name", "email", "phone", "utm_source", "utm_campaign", "utm_content", "status", "meeting_at", "value", "booked_at", "attended_at", "closed_at", "lost_at", "robo_session_id", "fbc", "fbp", "ga_client_id", "ga_session_id"];
+const LEAD_COLS = ["id", "brand", "created_at", "name", "email", "phone", "utm_source", "utm_campaign", "utm_content", "status", "meeting_at", "value", "booked_at", "attended_at", "closed_at", "lost_at", "robo_session_id", "fbc", "fbp", "ga_client_id", "ga_session_id", "deleted_at", "deleted_by", "deleted_reason"];
 const GOAL_COLS = ["brand", "metric", "period", "target", "lower_is_better"];
-const EVENT_COLS = ["id", "lead_id", "lead_name", "actor", "action", "from_status", "to_status", "created_at"];
+const EVENT_COLS = ["id", "lead_id", "brand", "lead_name", "actor", "action", "from_status", "to_status", "payload", "created_at"];
+const AUDIT_COLS = ["id", "at", "actor", "action", "detail"];
 const DRAFT_COLS = ["id", "brand", "status", "created_at", "updated_at", "planned_for", "type", "pillar", "hook_text", "hook_spoken", "promise", "script", "caption", "cta_type", "cta_keyword", "duration_sec", "has_burned_captions", "score", "validated_at", "playbook_version", "published_post_id", "notes", "ai_review", "validation_failed"];
 
 const withoutPk = (cols: string[], pk: string[]) => cols.filter((c) => !pk.includes(c));
+
+const snake = (camel: string) => camel.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
+
+/**
+ * Lead que já existe: um reenvio só PREENCHE contato vazio. O nome só é trocado
+ * se o gravado for o genérico. Nenhuma outra coluna aparece aqui — é isso que
+ * impede um reenvio do formulário de zerar status, entrada e marcos.
+ */
+const LEAD_FILL_ON_CONFLICT = [
+  "name = case when leads.name in ('', 'Lead sem nome') then excluded.name else leads.name end",
+  ...LEAD_CONTACT_FIELDS.map((f) => `${snake(f)} = coalesce(leads.${snake(f)}, excluded.${snake(f)})`),
+].join(", ");
 
 /** Ensure the schema exists, then run a query on the pool. */
 async function run(text: string, params: unknown[] = []): Promise<QueryResult> {
@@ -87,31 +113,66 @@ function buildTuples(cols: string[], rows: Row[]) {
   return { values, tuples: tuples.join(",") };
 }
 
-/** Multi-row insert, chunked to stay under the parameter limit. */
-async function insertMany(table: string, cols: string[], rows: Row[], runner?: Runner) {
+/**
+ * Multi-row insert, chunked to stay under the parameter limit. `ignoreConflicts`
+ * pula linhas cuja chave já existe (ex.: eventos do exemplo num reset repetido).
+ */
+async function insertMany(
+  table: string,
+  cols: string[],
+  rows: Row[],
+  runner?: Runner,
+  ignoreConflicts = false,
+) {
   if (rows.length === 0) return;
   const exec = runner ?? pg();
   if (!runner) await ensureSchema();
   const chunk = 500;
+  const tail = ignoreConflicts ? " on conflict do nothing" : "";
   for (let i = 0; i < rows.length; i += chunk) {
     const { values, tuples } = buildTuples(cols, rows.slice(i, i + chunk));
-    await exec.query(`insert into ${table} (${cols.join(",")}) values ${tuples}`, values);
+    await exec.query(`insert into ${table} (${cols.join(",")}) values ${tuples}${tail}`, values);
   }
 }
 
 /** Multi-row insert with ON CONFLICT … DO UPDATE. */
-async function upsertMany(table: string, cols: string[], rows: Row[], conflict: string[], update: string[]) {
+async function upsertMany(
+  table: string,
+  cols: string[],
+  rows: Row[],
+  conflict: string[],
+  update: string[],
+  runner?: Runner,
+) {
   if (rows.length === 0) return;
-  await ensureSchema();
+  const exec = runner ?? pg();
+  if (!runner) await ensureSchema();
   const setClause = update.map((c) => `${c} = excluded.${c}`).join(", ");
   const chunk = 500;
   for (let i = 0; i < rows.length; i += chunk) {
     const { values, tuples } = buildTuples(cols, rows.slice(i, i + chunk));
-    await pg().query(
+    await exec.query(
       `insert into ${table} (${cols.join(",")}) values ${tuples} ` +
         `on conflict (${conflict.join(",")}) do update set ${setClause}`,
       values,
     );
+  }
+}
+
+/** Roda `fn` numa transação de um cliente do pool. */
+async function inTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
+  await ensureSchema();
+  const client = await pg().connect();
+  try {
+    await client.query("begin");
+    const out = await fn(client);
+    await client.query("commit");
+    return out;
+  } catch (e) {
+    await client.query("rollback");
+    throw e;
+  } finally {
+    client.release();
   }
 }
 
@@ -139,7 +200,7 @@ export const postgresBackend: DataBackend = {
       q("select * from ad_daily where brand = $1 order by date", [brand]),
       q("select * from creatives where brand = $1", [brand]),
       q("select * from lp_daily where brand = $1 order by date", [brand]),
-      q("select * from leads where brand = $1 order by created_at desc", [brand]),
+      q("select * from leads where brand = $1 and deleted_at is null order by created_at desc", [brand]),
       q("select * from goals where brand = $1", [brand]),
       q("select * from app_state"),
     ]);
@@ -162,21 +223,10 @@ export const postgresBackend: DataBackend = {
   async resetToSeed(): Promise<DashboardData> {
     const seed = buildSeedData();
     const events = buildSeedLeadEvents(seed.leads);
-    await ensureSchema();
-    const client = await pg().connect();
-    try {
-      await client.query("begin");
-      for (const t of [
-        "ad_daily",
-        "creatives",
-        "ig_account_daily",
-        "ig_posts",
-        "lp_daily",
-        "leads",
-        "goals",
-        "campaign",
-        "lead_events",
-      ]) {
+    await inTransaction(async (client) => {
+      // lead_events e audit_log ficam de fora de propósito: o reset apaga os
+      // leads, mas a trilha do que existia continua consultável.
+      for (const t of ["ad_daily", "creatives", "ig_account_daily", "ig_posts", "lp_daily", "leads", "goals", "campaign"]) {
         await client.query(`delete from ${t}`);
       }
       await insertMany("campaign", CAMPAIGN_COLS, [fromCampaign(seed.campaign)], client);
@@ -187,14 +237,8 @@ export const postgresBackend: DataBackend = {
       await insertMany("lp_daily", LP_COLS, seed.lpDaily.map(fromLp), client);
       await insertMany("leads", LEAD_COLS, seed.leads.map(fromLead), client);
       await insertMany("goals", GOAL_COLS, seed.goals.map(fromGoal), client);
-      await insertMany("lead_events", EVENT_COLS, events.map(fromEvent), client);
-      await client.query("commit");
-    } catch (e) {
-      await client.query("rollback");
-      throw e;
-    } finally {
-      client.release();
-    }
+      await insertMany("lead_events", EVENT_COLS, events.map(fromEvent), client, true);
+    });
     await touch(true);
     return seed;
   },
@@ -210,9 +254,30 @@ export const postgresBackend: DataBackend = {
     return rows.length;
   },
 
-  async clearAdData() {
-    await run("delete from ad_daily");
-    await run("delete from creatives");
+  async replaceAdData(rows: AdDaily[], creatives: Creative[], scope?: AdScope) {
+    await inTransaction(async (client) => {
+      if (scope) {
+        await client.query(
+          "delete from ad_daily where brand = any($1) and date between $2 and $3",
+          [scope.brands, scope.since, scope.until],
+        );
+      } else {
+        await client.query("delete from ad_daily");
+      }
+      const adPk = ["brand", "date", "ad_id"];
+      await upsertMany("ad_daily", AD_COLS, rows.map(fromAd), adPk, withoutPk(AD_COLS, adPk), client);
+      await upsertMany(
+        "creatives",
+        CREATIVE_COLS,
+        creatives.map(fromCreative),
+        ["ad_id"],
+        withoutPk(CREATIVE_COLS, ["ad_id"]),
+        client,
+      );
+      await client.query(
+        "delete from creatives c where not exists (select 1 from ad_daily a where a.ad_id = c.ad_id)",
+      );
+    });
     await touch(false);
   },
 
@@ -250,8 +315,25 @@ export const postgresBackend: DataBackend = {
   },
 
   async addLead(lead: Lead) {
-    await upsertMany("leads", LEAD_COLS, [fromLead(lead)], ["id"], withoutPk(LEAD_COLS, ["id"]));
+    const { values, tuples } = buildTuples(LEAD_COLS, [fromLead(lead)]);
+    const res = await run(
+      `insert into leads (${LEAD_COLS.join(",")}) values ${tuples} ` +
+        `on conflict (id) do update set ${LEAD_FILL_ON_CONFLICT} ` +
+        `returning (xmax = 0) as inserted`,
+      values,
+    );
     await touch(false);
+    return { created: res.rows[0]?.inserted === true };
+  },
+
+  async getLead(id: string): Promise<Lead | null> {
+    const rows = await q("select * from leads where id = $1", [id]);
+    return rows[0] ? toLead(rows[0]) : null;
+  },
+
+  async setLeadCreatedAt(id: string, createdAt: string) {
+    await run("update leads set created_at = $2 where id = $1", [id, createdAt]);
+    await touch();
   },
 
   async setLeadStatus(id: string, status: LeadStatus, patch?: LeadStatusPatch) {
@@ -286,10 +368,28 @@ export const postgresBackend: DataBackend = {
     await touch();
   },
 
-  async deleteLead(id: string) {
-    await run("delete from lead_events where lead_id = $1", [id]);
-    await run("delete from leads where id = $1", [id]);
+  async softDeleteLead(id: string, info: { at: string; by: string; reason: string }) {
+    await run(
+      "update leads set deleted_at = $2, deleted_by = $3, deleted_reason = $4 where id = $1",
+      [id, info.at, info.by, info.reason],
+    );
     await touch(false);
+  },
+
+  async restoreLead(id: string) {
+    await run(
+      "update leads set deleted_at = null, deleted_by = null, deleted_reason = null where id = $1",
+      [id],
+    );
+    await touch(false);
+  },
+
+  async listDeletedLeads(brand: string): Promise<Lead[]> {
+    const rows = await q(
+      "select * from leads where brand = $1 and deleted_at is not null order by deleted_at desc",
+      [brand],
+    );
+    return rows.map(toLead);
   },
 
   async upsertGoal(goal: Goal) {
@@ -384,11 +484,35 @@ export const postgresBackend: DataBackend = {
     await insertMany("lead_events", EVENT_COLS, [fromEvent(event)]);
   },
 
-  async listLeadEvents(opts?: { leadId?: string; limit?: number }): Promise<LeadEvent[]> {
+  async listLeadEvents(opts?: ListEventsOpts): Promise<LeadEvent[]> {
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (opts?.leadId) {
+      params.push(opts.leadId);
+      where.push(`lead_id = $${params.length}`);
+    }
+    if (opts?.brand) {
+      params.push(opts.brand);
+      where.push(`(brand = $${params.length} or brand is null)`);
+    }
     const limit = opts?.limit ?? 200;
-    const rows = opts?.leadId
-      ? await q("select * from lead_events where lead_id = $1 order by created_at desc limit $2", [opts.leadId, limit])
-      : await q("select * from lead_events order by created_at desc limit $1", [limit]);
+    let sql = "select * from lead_events";
+    if (where.length) sql += ` where ${where.join(" and ")}`;
+    sql += " order by created_at desc";
+    if (limit > 0) {
+      params.push(limit);
+      sql += ` limit $${params.length}`;
+    }
+    const rows = await q(sql, params);
     return rows.map(toEvent);
+  },
+
+  async addAuditEntry(entry: AuditEntry) {
+    await insertMany("audit_log", AUDIT_COLS, [fromAudit(entry)]);
+  },
+
+  async listAuditEntries(limit: number): Promise<AuditEntry[]> {
+    const rows = await q("select * from audit_log order by at desc limit $1", [limit]);
+    return rows.map(toAudit);
   },
 };

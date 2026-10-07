@@ -206,6 +206,16 @@ export interface AdsSyncResult {
   byBrand: Record<string, number>;
 }
 
+/** Linhas de um ad account já buscadas na Meta, ainda não gravadas. */
+export interface AdsPull {
+  adRows: AdDaily[];
+  creatives: Creative[];
+  since: string;
+  until: string;
+  objectives: string[];
+  byBrand: Record<string, number>;
+}
+
 /**
  * Pull the last `days` days of ad performance for ONE ad account and store it,
  * atribuindo cada linha à marca dona da campanha (`brands` = marcas que dividem
@@ -223,8 +233,37 @@ export async function syncAdsAccount({
   brands: BrandMeta[];
   days?: number;
 }): Promise<AdsSyncResult> {
-  const since = isoDaysAgo(days);
-  const until = isoToday();
+  const pull = await fetchAdsAccount({ account, token, brands, since: isoDaysAgo(days), until: isoToday() });
+  await upsertAdDaily(pull.adRows);
+  await upsertCreatives(pull.creatives);
+  return {
+    rows: pull.adRows.length,
+    creatives: pull.creatives.length,
+    since: pull.since,
+    until: pull.until,
+    objectives: pull.objectives,
+    byBrand: pull.byBrand,
+  };
+}
+
+/**
+ * Busca (sem gravar) a performance diária de um ad account entre `since` e
+ * `until`. Separado da gravação para quem precisa ter os dados novos em mãos
+ * ANTES de apagar os antigos (ressincronização do histórico).
+ */
+export async function fetchAdsAccount({
+  account,
+  token,
+  brands,
+  since,
+  until,
+}: {
+  account: string;
+  token: string;
+  brands: BrandMeta[];
+  since: string;
+  until: string;
+}): Promise<AdsPull> {
 
   const url = graphUrl(GRAPH_FB, `/${account}/insights`, {
     level: "ad",
@@ -332,13 +371,9 @@ export async function syncAdsAccount({
     });
   }
 
-  const creatives = [...creativeAcc.values()];
-  await upsertAdDaily(adRows);
-  await upsertCreatives(creatives);
-
   return {
-    rows: adRows.length,
-    creatives: creatives.length,
+    adRows,
+    creatives: [...creativeAcc.values()],
     since,
     until,
     objectives: [...objectivesSeen].sort(),

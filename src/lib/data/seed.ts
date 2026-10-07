@@ -527,6 +527,7 @@ function buildSeedLeadEvents(leads: Lead[]): LeadEvent[] {
     events.push({
       id: `EVT-S-${++seq}`,
       leadId: l.id,
+      brand: l.brand,
       leadName: l.name,
       actor: "Landing page",
       action: "created",
@@ -537,6 +538,7 @@ function buildSeedLeadEvents(leads: Lead[]): LeadEvent[] {
       events.push({
         id: `EVT-S-${++seq}`,
         leadId: l.id,
+        brand: l.brand,
         leadName: l.name,
         actor: "Equipe comercial",
         action: "status_changed",

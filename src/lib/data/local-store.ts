@@ -3,12 +3,23 @@ import fs from "node:fs";
 import path from "node:path";
 import { buildSeedData, buildSeedLeadEvents } from "./seed";
 import { FALLBACK_CAMPAIGN } from "./mappers";
-import type { CampaignBudget, DataBackend, LeadStatusPatch, LpDelta, PublicUser, StoredUser } from "./backend";
+import {
+  LEAD_CONTACT_FIELDS,
+  type AdScope,
+  type CampaignBudget,
+  type DataBackend,
+  type LeadStatusPatch,
+  type ListEventsOpts,
+  type LpDelta,
+  type PublicUser,
+  type StoredUser,
+} from "./backend";
 import { toRole } from "../auth/roles";
 import { LOST_STATUSES, normalizeLeadStatus } from "../lead-status";
 import { DEFAULT_BRAND } from "../types";
 import type {
   AdDaily,
+  AuditEntry,
   Creative,
   DashboardData,
   Goal,
@@ -26,7 +37,9 @@ import type {
  * (serverless filesystems are ephemeral and not shared) — use Supabase there.
  */
 
-const DATA_DIR = path.join(process.cwd(), ".localdata");
+// LOCAL_DATA_DIR existe para os testes rodarem num diretório próprio, sem
+// tocar no arquivo do dev.
+const DATA_DIR = process.env.LOCAL_DATA_DIR || path.join(process.cwd(), ".localdata");
 const DATA_FILE = path.join(DATA_DIR, "store.json");
 
 interface LocalFile {
@@ -36,9 +49,26 @@ interface LocalFile {
   leadEvents: LeadEvent[];
   /** Peças em produção — fora de `data` porque não são dados de campanha. */
   drafts: PostDraft[];
+  /** Ações administrativas (restaurar exemplo, ressincronizar, reclassificar). */
+  audit: AuditEntry[];
 }
 
 let cache: LocalFile | null = null;
+/**
+ * Quando o arquivo foi lido/gravado por ESTA instância. No `next dev`, a rota da
+ * LP e as server actions podem carregar este módulo em grafos diferentes — cada
+ * um com o seu cache. Sem conferir o arquivo, uma instância regrava o JSON com a
+ * cópia velha e apaga o que a outra acabou de salvar.
+ */
+let cacheMtime = 0;
+
+function mtimeDoArquivo(): number {
+  try {
+    return fs.statSync(DATA_FILE).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
 
 /**
  * Backfill de marca para arquivos locais criados antes da coluna `brand`
@@ -105,6 +135,7 @@ function persist(file: LocalFile) {
   try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
     fs.writeFileSync(DATA_FILE, JSON.stringify(file, null, 2), "utf8");
+    cacheMtime = mtimeDoArquivo();
   } catch {
     // best-effort on read-only filesystems
   }
@@ -119,6 +150,7 @@ function load(): LocalFile {
         if (!Array.isArray(parsed.leadEvents)) parsed.leadEvents = [];
         // Arquivos criados antes da Etapa 1 não têm a chave.
         if (!Array.isArray(parsed.drafts)) parsed.drafts = [];
+        if (!Array.isArray(parsed.audit)) parsed.audit = [];
         migrateBrand(parsed.data);
         migrateLeadStatus(parsed);
         migrateLeadMilestones(parsed);
@@ -135,13 +167,18 @@ function load(): LocalFile {
     users: [],
     leadEvents: buildSeedLeadEvents(data.leads),
     drafts: [],
+    audit: [],
   };
   persist(fresh);
   return fresh;
 }
 
 function file(): LocalFile {
-  if (!cache) cache = load();
+  const m = mtimeDoArquivo();
+  if (!cache || m > cacheMtime) {
+    cache = load();
+    cacheMtime = mtimeDoArquivo();
+  }
   return cache;
 }
 
@@ -168,21 +205,25 @@ export const localBackend: DataBackend = {
       adDaily: d.adDaily.filter((r) => r.brand === brand),
       creatives: d.creatives.filter((r) => r.brand === brand),
       lpDaily: d.lpDaily.filter((r) => r.brand === brand),
-      leads: d.leads.filter((r) => r.brand === brand),
+      leads: d.leads.filter((r) => r.brand === brand && !r.deletedAt),
       goals: d.goals.filter((r) => r.brand === brand),
     };
   },
 
   async resetToSeed() {
-    // keep users, drafts and the state bag — só os dados de campanha voltam ao
-    // seed (rascunho é trabalho de produção, não dado de exemplo)
+    // keep users, drafts, the state bag, the lead history and the audit log —
+    // só os dados de campanha voltam ao seed (rascunho é trabalho de produção;
+    // o histórico é a trilha do que existia antes do reset)
     const data = buildSeedData();
+    const atuais = file().leadEvents;
+    const ids = new Set(atuais.map((e) => e.id));
     cache = {
       data,
       state: file().state,
       users: file().users,
-      leadEvents: buildSeedLeadEvents(data.leads),
+      leadEvents: [...buildSeedLeadEvents(data.leads).filter((e) => !ids.has(e.id)), ...atuais],
       drafts: file().drafts,
+      audit: file().audit,
     };
     persist(cache);
     return cache.data;
@@ -234,10 +275,20 @@ export const localBackend: DataBackend = {
     return rows.length;
   },
 
-  async clearAdData() {
+  async replaceAdData(rows: AdDaily[], creatives: Creative[], scope?: AdScope) {
     commit((data) => {
-      data.adDaily = [];
-      data.creatives = [];
+      const fora = (r: AdDaily) =>
+        scope ? !(scope.brands.includes(r.brand) && r.date >= scope.since && r.date <= scope.until) : false;
+      const key = (r: AdDaily) => `${r.brand}::${r.date}::${r.adId}`;
+      const index = new Map(data.adDaily.filter(fora).map((r) => [key(r), r]));
+      for (const row of rows) index.set(key(row), row);
+      data.adDaily = [...index.values()].sort((a, b) =>
+        a.date === b.date ? a.adId.localeCompare(b.adId) : a.date.localeCompare(b.date),
+      );
+      const comLinha = new Set(data.adDaily.map((r) => r.adId));
+      const cr = new Map(data.creatives.map((c) => [c.adId, c]));
+      for (const c of creatives) cr.set(c.adId, { ...cr.get(c.adId), ...c });
+      data.creatives = [...cr.values()].filter((c) => comLinha.has(c.adId));
       data.isSeed = false;
     });
   },
@@ -266,10 +317,32 @@ export const localBackend: DataBackend = {
   },
 
   async addLead(lead: Lead) {
+    let created = false;
     commit((data) => {
-      // upsert por id: reimportar/recadastrar o mesmo lead atualiza, não duplica
-      data.leads = [lead, ...data.leads.filter((l) => l.id !== lead.id)];
+      const atual = data.leads.find((l) => l.id === lead.id);
+      if (!atual) {
+        data.leads = [lead, ...data.leads];
+        created = true;
+      } else {
+        // Reenvio: só preenche contato vazio. Status, entrada e marcos ficam.
+        if (!atual.name || atual.name === "Lead sem nome") atual.name = lead.name;
+        for (const f of LEAD_CONTACT_FIELDS) {
+          if (atual[f] == null || atual[f] === "") atual[f] = lead[f];
+        }
+      }
       data.isSeed = false;
+    });
+    return { created };
+  },
+
+  async getLead(id: string) {
+    return file().data.leads.find((l) => l.id === id) ?? null;
+  },
+
+  async setLeadCreatedAt(id: string, createdAt: string) {
+    commit((data) => {
+      const lead = data.leads.find((l) => l.id === id);
+      if (lead) lead.createdAt = createdAt;
     });
   },
 
@@ -290,13 +363,30 @@ export const localBackend: DataBackend = {
     });
   },
 
-  async deleteLead(id: string) {
-    const f = file();
-    f.data.leads = f.data.leads.filter((l) => l.id !== id);
-    f.leadEvents = f.leadEvents.filter((e) => e.leadId !== id);
-    f.data.updatedAt = new Date().toISOString();
-    persist(f);
-    cache = f;
+  async softDeleteLead(id: string, info: { at: string; by: string; reason: string }) {
+    commit((data) => {
+      const lead = data.leads.find((l) => l.id === id);
+      if (!lead) return;
+      lead.deletedAt = info.at;
+      lead.deletedBy = info.by;
+      lead.deletedReason = info.reason;
+    });
+  },
+
+  async restoreLead(id: string) {
+    commit((data) => {
+      const lead = data.leads.find((l) => l.id === id);
+      if (!lead) return;
+      delete lead.deletedAt;
+      delete lead.deletedBy;
+      delete lead.deletedReason;
+    });
+  },
+
+  async listDeletedLeads(brand: string) {
+    return file()
+      .data.leads.filter((l) => l.brand === brand && l.deletedAt)
+      .sort((a, b) => (b.deletedAt ?? "").localeCompare(a.deletedAt ?? ""));
   },
 
   async upsertGoal(goal: Goal) {
@@ -402,10 +492,23 @@ export const localBackend: DataBackend = {
     cache = f;
   },
 
-  async listLeadEvents(opts?: { leadId?: string; limit?: number }): Promise<LeadEvent[]> {
+  async listLeadEvents(opts?: ListEventsOpts): Promise<LeadEvent[]> {
     let list = file().leadEvents;
     if (opts?.leadId) list = list.filter((e) => e.leadId === opts.leadId);
+    if (opts?.brand) list = list.filter((e) => !e.brand || e.brand === opts.brand);
     const sorted = [...list].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-    return opts?.limit ? sorted.slice(0, opts.limit) : sorted;
+    const limit = opts?.limit ?? 200;
+    return limit > 0 ? sorted.slice(0, limit) : sorted;
+  },
+
+  async addAuditEntry(entry: AuditEntry) {
+    const f = file();
+    f.audit = [entry, ...f.audit];
+    persist(f);
+    cache = f;
+  },
+
+  async listAuditEntries(limit: number) {
+    return [...file().audit].sort((a, b) => b.at.localeCompare(a.at)).slice(0, limit);
   },
 };

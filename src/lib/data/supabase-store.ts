@@ -1,10 +1,21 @@
 import "server-only";
 import { supabase } from "../supabase/client";
 import { buildSeedData, buildSeedLeadEvents } from "./seed";
-import type { CampaignBudget, DataBackend, LeadStatusPatch, LpDelta, PublicUser, StoredUser } from "./backend";
+import {
+  LEAD_CONTACT_FIELDS,
+  type AdScope,
+  type CampaignBudget,
+  type DataBackend,
+  type LeadStatusPatch,
+  type ListEventsOpts,
+  type LpDelta,
+  type PublicUser,
+  type StoredUser,
+} from "./backend";
 import { toRole } from "../auth/roles";
 import type {
   AdDaily,
+  AuditEntry,
   Creative,
   DashboardData,
   Goal,
@@ -23,6 +34,7 @@ import {
   n,
   s,
   toAd,
+  toAudit,
   toCampaign,
   toCreative,
   toDraft,
@@ -33,6 +45,7 @@ import {
   toLp,
   toPost,
   fromAd,
+  fromAudit,
   fromCampaign,
   fromCreative,
   fromDraft,
@@ -69,7 +82,12 @@ export const supabaseBackend: DataBackend = {
         db.from("ad_daily").select("*").eq("brand", brand).order("date"),
         db.from("creatives").select("*").eq("brand", brand),
         db.from("lp_daily").select("*").eq("brand", brand).order("date"),
-        db.from("leads").select("*").eq("brand", brand).order("created_at", { ascending: false }),
+        db
+          .from("leads")
+          .select("*")
+          .eq("brand", brand)
+          .is("deleted_at", null)
+          .order("created_at", { ascending: false }),
         db.from("goals").select("*").eq("brand", brand),
         db.from("app_state").select("*"),
       ]);
@@ -109,7 +127,7 @@ export const supabaseBackend: DataBackend = {
       db.from("leads").delete().not("id", "is", null),
       db.from("goals").delete().not("metric", "is", null),
       db.from("campaign").delete().not("id", "is", null),
-      db.from("lead_events").delete().not("id", "is", null),
+      // lead_events e audit_log ficam: a trilha do que existia sobrevive ao reset.
     ]);
 
     await Promise.all([
@@ -121,7 +139,9 @@ export const supabaseBackend: DataBackend = {
       db.from("lp_daily").insert(seed.lpDaily.map(fromLp)),
       db.from("leads").insert(seed.leads.map(fromLead)),
       db.from("goals").insert(seed.goals.map(fromGoal)),
-      db.from("lead_events").insert(buildSeedLeadEvents(seed.leads).map(fromEvent)),
+      db
+        .from("lead_events")
+        .upsert(buildSeedLeadEvents(seed.leads).map(fromEvent), { onConflict: "id", ignoreDuplicates: true }),
     ]);
 
     await touch(true);
@@ -147,13 +167,35 @@ export const supabaseBackend: DataBackend = {
     return rows.length;
   },
 
-  async clearAdData() {
+  /**
+   * O REST do Supabase não tem transação: aqui a troca é apagar o recorte e
+   * gravar em seguida. Quem chama já tem as linhas novas em mãos, então a janela
+   * de risco é só a da escrita — o backend de produção (Postgres) faz numa
+   * transação.
+   */
+  async replaceAdData(rows: AdDaily[], creatives: Creative[], scope?: AdScope) {
     const db = supabase();
-    // PostgREST requires a filter on delete, so match "pk is not null" (all rows).
-    const ad = await db.from("ad_daily").delete().not("ad_id", "is", null);
-    check(ad.error, "clear ad_daily");
-    const cr = await db.from("creatives").delete().not("ad_id", "is", null);
-    check(cr.error, "clear creatives");
+    const del = scope
+      ? db.from("ad_daily").delete().in("brand", scope.brands).gte("date", scope.since).lte("date", scope.until)
+      : db.from("ad_daily").delete().not("ad_id", "is", null);
+    check((await del).error, "replace ad_daily (delete)");
+    if (rows.length) {
+      const up = await db.from("ad_daily").upsert(rows.map(fromAd), { onConflict: "brand,date,ad_id" });
+      check(up.error, "replace ad_daily (upsert)");
+    }
+    if (creatives.length) {
+      const up = await db.from("creatives").upsert(creatives.map(fromCreative), { onConflict: "ad_id" });
+      check(up.error, "replace creatives (upsert)");
+    }
+    // Criativo sem nenhuma linha de anúncio: sobra de import antigo.
+    const { data: ads } = await db.from("ad_daily").select("ad_id");
+    const comLinha = new Set((ads ?? []).map((r: Row) => s(r.ad_id)));
+    const { data: crs } = await db.from("creatives").select("ad_id");
+    const orfaos = (crs ?? []).map((r: Row) => s(r.ad_id)).filter((id) => !comLinha.has(id));
+    if (orfaos.length) {
+      const rm = await db.from("creatives").delete().in("ad_id", orfaos);
+      check(rm.error, "replace creatives (prune)");
+    }
     await touch(false);
   },
 
@@ -205,11 +247,41 @@ export const supabaseBackend: DataBackend = {
   },
 
   async addLead(lead: Lead) {
-    const { error } = await supabase().from("leads").upsert(fromLead(lead), {
-      onConflict: "id",
-    });
-    check(error, "insert lead");
-    await touch(false);
+    const db = supabase();
+    const cur = await db.from("leads").select("*").eq("id", lead.id).maybeSingle();
+    check(cur.error, "read lead");
+    if (!cur.data) {
+      const { error } = await db.from("leads").insert(fromLead(lead));
+      check(error, "insert lead");
+      await touch(false);
+      return { created: true };
+    }
+    // Reenvio: só preenche contato vazio. Status, entrada e marcos ficam.
+    const atual = toLead(cur.data as Row);
+    const novo = fromLead(lead);
+    const patch: Row = {};
+    if (!atual.name || atual.name === "Lead sem nome") patch.name = lead.name;
+    for (const f of LEAD_CONTACT_FIELDS) {
+      const col = f.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
+      if ((atual[f] == null || atual[f] === "") && novo[col] != null) patch[col] = novo[col];
+    }
+    if (Object.keys(patch).length) {
+      const { error } = await db.from("leads").update(patch).eq("id", lead.id);
+      check(error, "update lead (reenvio)");
+    }
+    return { created: false };
+  },
+
+  async getLead(id: string) {
+    const { data, error } = await supabase().from("leads").select("*").eq("id", id).maybeSingle();
+    check(error, "get lead");
+    return data ? toLead(data as Row) : null;
+  },
+
+  async setLeadCreatedAt(id: string, createdAt: string) {
+    const { error } = await supabase().from("leads").update({ created_at: createdAt }).eq("id", id);
+    check(error, "set lead created_at");
+    await touch();
   },
 
   async setLeadStatus(id: string, status: LeadStatus, patch?: LeadStatusPatch) {
@@ -244,12 +316,33 @@ export const supabaseBackend: DataBackend = {
     await touch();
   },
 
-  async deleteLead(id: string) {
-    const ev = await supabase().from("lead_events").delete().eq("lead_id", id);
-    check(ev.error, "delete lead events");
-    const { error } = await supabase().from("leads").delete().eq("id", id);
-    check(error, "delete lead");
+  async softDeleteLead(id: string, info: { at: string; by: string; reason: string }) {
+    const { error } = await supabase()
+      .from("leads")
+      .update({ deleted_at: info.at, deleted_by: info.by, deleted_reason: info.reason })
+      .eq("id", id);
+    check(error, "soft delete lead");
     await touch(false);
+  },
+
+  async restoreLead(id: string) {
+    const { error } = await supabase()
+      .from("leads")
+      .update({ deleted_at: null, deleted_by: null, deleted_reason: null })
+      .eq("id", id);
+    check(error, "restore lead");
+    await touch(false);
+  },
+
+  async listDeletedLeads(brand: string) {
+    const { data, error } = await supabase()
+      .from("leads")
+      .select("*")
+      .eq("brand", brand)
+      .not("deleted_at", "is", null)
+      .order("deleted_at", { ascending: false });
+    check(error, "list deleted leads");
+    return (data ?? []).map(toLead);
   },
 
   async upsertGoal(goal: Goal) {
@@ -410,15 +503,29 @@ export const supabaseBackend: DataBackend = {
     check(error, "add lead event");
   },
 
-  async listLeadEvents(opts?: { leadId?: string; limit?: number }): Promise<LeadEvent[]> {
-    let query = supabase()
-      .from("lead_events")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(opts?.limit ?? 200);
+  async listLeadEvents(opts?: ListEventsOpts): Promise<LeadEvent[]> {
+    let query = supabase().from("lead_events").select("*").order("created_at", { ascending: false });
+    const limit = opts?.limit ?? 200;
+    if (limit > 0) query = query.limit(limit);
     if (opts?.leadId) query = query.eq("lead_id", opts.leadId);
+    if (opts?.brand) query = query.or(`brand.eq.${opts.brand},brand.is.null`);
     const { data, error } = await query;
     check(error, "list lead events");
     return (data ?? []).map(toEvent);
+  },
+
+  async addAuditEntry(entry: AuditEntry) {
+    const { error } = await supabase().from("audit_log").insert(fromAudit(entry));
+    check(error, "add audit entry");
+  },
+
+  async listAuditEntries(limit: number) {
+    const { data, error } = await supabase()
+      .from("audit_log")
+      .select("*")
+      .order("at", { ascending: false })
+      .limit(limit);
+    check(error, "list audit entries");
+    return (data ?? []).map(toAudit);
   },
 };

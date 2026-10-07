@@ -1,8 +1,10 @@
 import Link from "next/link";
-import { CalendarCheck, Camera, Clapperboard, Database, FileSpreadsheet, Layers, Link2, ListChecks, MessageCircle, Plug, Target, UserPlus, Users, UsersRound, Wallet } from "lucide-react";
+import { CalendarCheck, Camera, Clapperboard, Database, FileSpreadsheet, ShieldAlert, Stethoscope, Layers, Link2, ListChecks, MessageCircle, Plug, Target, UserPlus, Users, UsersRound, Wallet } from "lucide-react";
 import {
   BrandMatchForm,
   BudgetForm,
+  CleanResyncAdsButton,
+  DiagnosticoLeadsPanel,
   DmForm,
   GoalsForm,
   ImportForm,
@@ -21,7 +23,8 @@ import { UtmBuilder } from "@/components/utm/utm-builder";
 import { RolarParaAncora } from "@/components/ui/rolar-para-ancora";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { activeBackend, getData, getState, listUsers } from "@/lib/data/store";
+import { activeBackend, getData, getState, listAuditEntries, listUsers } from "@/lib/data/store";
+import { VERSAO } from "@/lib/version";
 import { STATE_KEYS } from "@/lib/data/backend";
 import { activeBrandSlug } from "@/lib/active-brand";
 import { BRANDS, brandDef } from "@/lib/brands";
@@ -109,6 +112,9 @@ export default async function ConfigPage({
   const isAdmin = await can("users:manage");
   const canData = await can("data:write");
   const canLeads = await can("leads:write");
+  const canDanger = await can("danger:run");
+  const auditoria = canDanger ? await listAuditEntries(10) : [];
+  const ingestKey = Boolean(process.env.TRACK_INGEST_KEY?.trim());
 
   const creatives = data.creatives.map((c) => ({ adId: c.adId, name: c.name }));
   const currentGoals: Record<string, number> = {};
@@ -307,9 +313,9 @@ export default async function ConfigPage({
               label="Rastreio da landing page"
               ok={status.lpTracking}
               hint={
-                status.lpTracking
-                  ? "TRACK_INGEST_KEY definido — instale lp-tracking.js na LP"
-                  : "Defina TRACK_INGEST_KEY e instale public/lp-tracking.js na LP"
+                ingestKey
+                  ? "TRACK_INGEST_KEY definido — só a LP com a chave consegue enviar leads"
+                  : "Sem TRACK_INGEST_KEY o endereço de envio aceita lead de QUALQUER origem: defina a chave no servidor (a mesma que está na LP)"
               }
             />
             <StatusRow
@@ -587,24 +593,28 @@ export default async function ConfigPage({
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Database className="size-4 text-primary" />
-                Dados
-              </CardTitle>
-              <CardDescription>
-                Backend ativo: <strong>{dbLabel}</strong>.
-                {dbConnected
-                  ? " Restaurar o exemplo apaga os dados do banco."
-                  : " Defina DATABASE_URL (Postgres) para persistir os dados de verdade."}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ResetButton destructive={dbConnected} />
-            </CardContent>
-          </Card>
         </>
+      ) : null}
+
+      {/* Diagnóstico dos leads — lê o histórico, só altera com aprovação. */}
+      {canDanger ? (
+        <Card id="diagnostico-leads" className="scroll-mt-24">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Stethoscope className="size-4 text-primary" />
+              Diagnóstico dos leads
+            </CardTitle>
+            <CardDescription>
+              Até out/2026, quando alguém reenviava o formulário da landing page, o lead voltava
+              a &ldquo;Novo&rdquo;, perdia a data de entrada e a reunião registrada. O histórico
+              guardou tudo: aqui dá para ver quantos foram afetados e devolver cada um ao estado
+              certo. Nada muda até você aplicar.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <DiagnosticoLeadsPanel />
+          </CardContent>
+        </Card>
       ) : null}
 
       {/* Gerador de UTMs — era uma aba só para ele; é configuração de anúncio. */}
@@ -630,6 +640,45 @@ export default async function ConfigPage({
           </CardContent>
         </Card>
       ) : null}
+
+      {/* Zona de perigo — por último, só administrador, tudo registrado. */}
+      {canDanger ? (
+        <Card id="perigo" className="scroll-mt-24 border-[var(--danger-text)]/30">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <ShieldAlert className="size-4 text-[var(--danger-text)]" />
+              Zona de perigo
+            </CardTitle>
+            <CardDescription>
+              Ações que mexem em muitos dados de uma vez. Só administrador; cada uma fica
+              registrada abaixo. Banco ativo: <strong>{dbLabel}</strong>
+              {dbConnected ? "." : " (defina DATABASE_URL para persistir os dados de verdade)."}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <ResetButton />
+            <CleanResyncAdsButton />
+            <div className="border-t pt-3">
+              <p className="mb-2 text-xs font-medium text-muted-foreground">Últimas ações</p>
+              {auditoria.length ? (
+                <ul className="space-y-1 text-xs">
+                  {auditoria.map((a) => (
+                    <li key={a.id}>
+                      <span className="text-muted-foreground">{formatDateTime(a.at)}</span> ·{" "}
+                      <strong>{a.actor}</strong> · {a.action}
+                      {a.detail ? <span className="text-muted-foreground"> — {a.detail}</span> : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-xs text-muted-foreground">Nenhuma ainda.</p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <p className="text-xs text-muted-foreground">Versão do painel: {VERSAO}</p>
     </div>
   );
 }

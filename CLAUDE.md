@@ -7,8 +7,18 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
 
 - **Dados:** tudo passa por `src/lib/data/store.ts`, que é **async** e escolhe o
   backend por env (Supabase se configurado, senão JSON local). Nunca ler/escrever
-  fora dele; ao adicionar uma operação, implemente nos DOIS backends e no
-  `backend.ts`. `seed.ts` é o dataset de exemplo determinístico.
+  fora dele; ao adicionar uma operação, implemente nos backends (local, Postgres e
+  Supabase) e no `backend.ts`. `seed.ts` é o dataset de exemplo determinístico.
+  `src/lib/data/__tests__/store-contract.test.ts` roda a MESMA suíte no JSON local e
+  num Postgres real (PGlite): operação nova entra lá também.
+- **Nada de lead se perde** (Fase 0, out/2026): `addLead` insere lead NOVO; se o id
+  já existe, só PREENCHE contato vazio (`LEAD_CONTACT_FIELDS`) — nunca toca status,
+  entrada, marcos, reunião, valor, marca ou exclusão (o upsert de linha inteira
+  zerava o lead a cada reenvio da LP). Reenvio vira evento `reenvio`. O id da LP
+  sai de `lib/lead-id.ts` (event_id inteiro; o esquema antigo de 8 caracteres só é
+  reconhecido). Exclusão é **reversível** (`softDeleteLead`, `deleted_at`): o lead
+  some de `getData` e das métricas, a linha e os eventos ficam. Nunca `DELETE` em
+  `leads` nem em `lead_events` — nem no reset do exemplo.
 - **APIs Meta** (`src/lib/meta/*`): versão **fixada** em `config.ts` — não use o
   default. Janela retroativa + upsert (insights atrasam até 48h). No Instagram, só
   `reach` tem série temporal; o resto é 1 request por dia. Leads vêm de
@@ -28,11 +38,15 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   = cookie HMAC httpOnly (Web Crypto, portável Edge/Node — `session.ts` NÃO pode ter
   import node). Senha em scrypt (`passwords.ts`, server-only). Usuários passam pelo
   store (`countUsers`/`getUser`/...). Middleware libera `/login`, `/api/track`,
-  `/api/sync`.
+  `/api/sync`, `/api/health` (só a versão — `lib/version.ts`, atualizar a cada
+  release: é como se confere que o deploy do EasyPanel pegou o código novo).
 - **Papéis** (`auth/roles.ts`): admin/marketing/comercial + capabilities
-  (`leads:write` = admin+comercial; `data:write` = admin+marketing; `users:manage` =
-  admin). Toda mutação chama `can(cap)` de `auth/guard.ts` (modo aberto sem
-  `AUTH_SECRET` = tudo liberado). Enforçar SEMPRE no server, não só na UI.
+  (`leads:write` = admin+comercial; `data:write` = admin+marketing; `leads:delete`,
+  `danger:run` e `users:manage` = admin). Toda mutação chama `can(cap)` de
+  `auth/guard.ts` (modo aberto sem `AUTH_SECRET` = tudo liberado). Enforçar SEMPRE no
+  server, não só na UI. Ação da zona de perigo confere `CONFIRMACAO_PERIGO`
+  (`lib/perigo.ts`) no server e registra em `audit_log` (`lib/auditoria.ts`); troca de
+  linhas de anúncio só com o substituto em mãos (`replaceAdData`, numa transação).
 - **KPIs:** somente em `src/lib/metrics.ts`, funções **puras** (sem I/O). Reutilize-as.
   Criativo citado em ação, alerta ou IA passa por `rotuloCriativo()` — dois anúncios
   podem ter o mesmo nome ("Carrossel -"), e o nome sozinho manda pausar o errado.
@@ -122,6 +136,7 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
 
 ```bash
 npm run dev            # http://localhost:3000
+npm test               # Vitest (unidade + contrato do store em JSON e Postgres/PGlite)
 npx tsc --noEmit       # typecheck
 npm run build          # build de produção
 ```

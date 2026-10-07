@@ -377,28 +377,62 @@ export interface Lead {
   /**
    * Pseudonymous identifiers captured on the landing page. Kept so a later
    * server-side event (Schedule) can still be matched to the same person.
-   * No e-mail/phone is stored — those are hashed at ingest and discarded.
    */
   fbc?: string;
   fbp?: string;
   gaClientId?: string;
   gaSessionId?: string;
+
+  /**
+   * EXCLUSÃO REVERSÍVEL. Lead excluído sai de todas as listas e métricas
+   * (`getData` não o devolve), mas a linha e o histórico ficam: dá para ver o
+   * que foi apagado, por quem e por quê, e restaurar. Nunca há DELETE de lead.
+   */
+  deletedAt?: string;
+  deletedBy?: string;
+  deletedReason?: string;
 }
 
 // ------------------------- Lead audit log ---------------------------
 
-export type LeadEventAction = "created" | "status_changed";
+/**
+ * - created        → o lead entrou (LP, importação, cadastro manual)
+ * - reenvio        → a mesma pessoa mandou o formulário de novo (mesmo id);
+ *                    o lead NÃO é recriado nem tem o status mexido
+ * - status_changed → mudança de status
+ * - excluido / restaurado → exclusão reversível
+ */
+export type LeadEventAction = "created" | "reenvio" | "status_changed" | "excluido" | "restaurado";
 
 /** One entry in the "quem alterou o lead" trail. */
 export interface LeadEvent {
   id: string;
   leadId: string;
+  /** Marca do lead (o histórico de uma marca não mostra o da outra). */
+  brand?: Brand;
   leadName: string; // denormalised for display
   actor: string; // username, or "Landing page" for automated ingest
   action: LeadEventAction;
   fromStatus?: LeadStatus;
   toStatus?: LeadStatus;
+  /** Detalhe do evento (ex.: motivo da exclusão, contato novo num reenvio). */
+  payload?: Record<string, string>;
   createdAt: string; // full ISO datetime
+}
+
+// ------------------------- Audit log (ações administrativas) ----------
+
+/**
+ * Registro de ações que mexem em muitos dados de uma vez (restaurar exemplo,
+ * ressincronizar anúncios, reclassificar marcas, corrigir leads). O histórico
+ * de cada lead mora em `lead_events`; isto é o "quem apertou o botão".
+ */
+export interface AuditEntry {
+  id: string;
+  at: string;
+  actor: string;
+  action: string;
+  detail?: string;
 }
 
 // ------------------------- Goals ------------------------------------

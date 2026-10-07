@@ -2,10 +2,10 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Download, Mail, MessageCircle, Search, Trash2 } from "lucide-react";
+import { Download, Mail, MessageCircle, RotateCcw, Search, Trash2 } from "lucide-react";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { LEAD_STATUSES, LEAD_STATUS_META, statusLabel } from "@/lib/lead-status";
-import { deleteLeadAction } from "@/app/(dashboard)/pessoas/actions";
+import { deleteLeadAction, restoreLeadAction } from "@/app/(dashboard)/pessoas/actions";
 import type { LeadStatus } from "@/lib/types";
 import { formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -70,9 +70,16 @@ function DeleteLeadButton({ id, name }: { id: string; name: string }) {
         title="Excluir lead"
         disabled={pending}
         onClick={() => {
-          if (!window.confirm(`Excluir o lead "${name}"? Esta ação não pode ser desfeita.`)) return;
+          const motivo = window.prompt(
+            `Excluir o lead "${name}"?\n\nEle sai das listas e dos números, mas fica no histórico e pode ser restaurado. Qual o motivo (teste, duplicado, spam…)?`,
+          );
+          if (motivo == null) return;
+          if (!motivo.trim()) {
+            setMsg("Diga o motivo da exclusão.");
+            return;
+          }
           start(async () => {
-            const result = await deleteLeadAction(id);
+            const result = await deleteLeadAction(id, motivo);
             if (result.ok) {
               router.refresh();
             } else {
@@ -92,7 +99,7 @@ function DeleteLeadButton({ id, name }: { id: string; name: string }) {
   );
 }
 
-function buildColumns(canEdit: boolean): Column<LeadDirectoryRow>[] {
+function buildColumns(canDelete: boolean): Column<LeadDirectoryRow>[] {
   return [
     {
       key: "name",
@@ -128,7 +135,7 @@ function buildColumns(canEdit: boolean): Column<LeadDirectoryRow>[] {
       sortValue: (r) => r.meetingAt ?? "",
       render: (r) => (r.meetingAt ? formatDateTime(r.meetingAt) : "—"),
     },
-    ...(canEdit
+    ...(canDelete
       ? [
           {
             key: "actions",
@@ -186,10 +193,11 @@ const FILTERS: { key: StatusFilter; label: string }[] = [
 
 export function LeadsDirectory({
   rows,
-  canEdit = true,
+  canDelete = false,
 }: {
   rows: LeadDirectoryRow[];
-  canEdit?: boolean;
+  /** Excluir é só do administrador (e reversível — ver `DeletedLeads`). */
+  canDelete?: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<StatusFilter>("todos");
@@ -272,13 +280,64 @@ export function LeadsDirectory({
         </p>
       ) : (
         <DataTable
-          columns={buildColumns(canEdit)}
+          columns={buildColumns(canDelete)}
           rows={filtered}
           initialSortKey="createdAt"
           initialSortDir="desc"
           rowKey={(r) => r.id}
         />
       )}
+    </div>
+  );
+}
+
+export interface DeletedLeadRow {
+  id: string;
+  name: string;
+  deletedAt: string;
+  deletedBy?: string;
+  deletedReason?: string;
+}
+
+/** Leads excluídos: quem, quando e por quê — e o botão de desfazer. */
+export function DeletedLeads({ rows, canRestore }: { rows: DeletedLeadRow[]; canRestore: boolean }) {
+  const [pending, start] = useTransition();
+  const [msg, setMsg] = useState<string | null>(null);
+  const router = useRouter();
+  return (
+    <div className="space-y-2">
+      <ul className="divide-y rounded-lg border text-sm">
+        {rows.map((r) => (
+          <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+            <span>
+              <span className="font-medium">{r.name}</span>{" "}
+              <span className="text-muted-foreground">
+                · excluído em {formatDateTime(r.deletedAt)}
+                {r.deletedBy ? ` por ${r.deletedBy}` : ""}
+                {r.deletedReason ? ` — ${r.deletedReason}` : ""}
+              </span>
+            </span>
+            {canRestore ? (
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() =>
+                  start(async () => {
+                    const result = await restoreLeadAction(r.id);
+                    setMsg(result.message);
+                    if (result.ok) router.refresh();
+                  })
+                }
+                className="inline-flex h-7 items-center gap-1.5 rounded-md border px-2 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
+              >
+                <RotateCcw className="size-3.5" />
+                Restaurar
+              </button>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+      {msg ? <p className="text-xs text-muted-foreground">{msg}</p> : null}
     </div>
   );
 }

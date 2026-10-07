@@ -9,6 +9,24 @@ import type { LeadEvent } from "@/lib/types";
 import { formatDateTime } from "@/lib/format";
 
 function ChangeCell({ e }: { e: LeadEvent }) {
+  if (e.action === "reenvio") {
+    const novo = [e.payload?.telefoneNovo, e.payload?.emailNovo].filter(Boolean).join(" · ");
+    return (
+      <span className="text-muted-foreground">
+        Reenviou o formulário{novo ? ` com contato diferente: ${novo}` : ""} — o lead não foi alterado
+      </span>
+    );
+  }
+  if (e.action === "excluido") {
+    return (
+      <span className="text-[var(--danger-text)]">
+        Excluído{e.payload?.motivo ? ` — ${e.payload.motivo}` : ""}
+      </span>
+    );
+  }
+  if (e.action === "restaurado") {
+    return <span className="text-[var(--success-text)]">Restaurado</span>;
+  }
   if (e.action === "created") {
     return (
       <span className="flex items-center gap-1.5 text-muted-foreground">
@@ -75,7 +93,8 @@ export function LeadActivity({ events }: { events: LeadEvent[] }) {
   if (events.length === 0) {
     return (
       <p className="rounded-lg border border-dashed py-8 text-center text-sm text-muted-foreground">
-        Nenhuma alteração registrada ainda. Cada criação e mudança de status aparece aqui.
+        Nenhuma alteração registrada ainda. Cada criação, reenvio, mudança de status e
+        exclusão aparece aqui.
       </p>
     );
   }

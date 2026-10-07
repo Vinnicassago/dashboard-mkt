@@ -3,13 +3,15 @@
 import { useActionState, useState, useTransition } from "react";
 import { useFormStatus } from "react-dom";
 import { useRouter } from "next/navigation";
-import { Download, RefreshCw, RotateCcw, Upload } from "lucide-react";
+import { Download, RefreshCw, RotateCcw, Stethoscope, Upload } from "lucide-react";
 import {
   addLeadAction,
   addManualIgDay,
+  diagnosticoLeadsAction,
   importAdsCsv,
   importLeadsCsv,
   reclassifyAdsAction,
+  repararLeadsAction,
   resetSeedAction,
   resyncAdsCleanAction,
   setBrandMatchAction,
@@ -21,7 +23,10 @@ import {
   updatePostsMetaAction,
   type ActionState,
 } from "@/app/(dashboard)/config/actions";
-import { LEAD_STATUS_META, LOST_STATUSES, OPEN_STATUSES } from "@/lib/lead-status";
+import { LEAD_STATUS_META, LOST_STATUSES, OPEN_STATUSES, statusLabel } from "@/lib/lead-status";
+import type { DiagnosticoLeads } from "@/lib/diagnostico-leads";
+import { CONFIRMACAO_PERIGO } from "@/lib/perigo";
+import { formatDateTime } from "@/lib/format";
 import { BRANDS } from "@/lib/brands";
 import { DEFAULT_BRAND } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -550,17 +555,15 @@ export function SyncPanel() {
         </div>
         <Message state={state} />
       </form>
-      <CleanResyncAdsButton />
     </div>
   );
 }
 
 /**
- * Fix for double-counted spend: wipes ad_daily + creatives (where CSV imports
- * and API rows live under different keys and get summed) and re-pulls cleanly
- * from Meta. Leads and everything else are untouched.
+ * Conserto de gasto dobrado (CSV somado à API): baixa da Meta todo o histórico
+ * guardado e só então troca as linhas. Se a busca falhar, nada é apagado.
  */
-function CleanResyncAdsButton() {
+export function CleanResyncAdsButton() {
   const [pending, startTransition] = useTransition();
   const [state, setState] = useState<ActionState | null>(null);
   const router = useRouter();
@@ -572,7 +575,7 @@ function CleanResyncAdsButton() {
         onClick={() => {
           if (
             !window.confirm(
-              "Isso APAGA os dados de anúncios (gasto, criativos) e baixa tudo de novo, limpo, direto da Meta.\n\nSeus leads e o restante NÃO são afetados. Continuar?",
+              "Isso baixa da Meta todo o histórico de anúncios guardado e, se a busca der certo, troca as linhas atuais pelas novas.\n\nSe a Meta falhar, nada é apagado. Leads e o restante não são afetados. Continuar?",
             )
           ) {
             return;
@@ -586,10 +589,11 @@ function CleanResyncAdsButton() {
         className="inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-medium text-muted-foreground hover:text-foreground disabled:opacity-50"
       >
         <RefreshCw className={cn("size-4", pending && "animate-spin")} />
-        {pending ? "Limpando e ressincronizando…" : "Zerar anúncios e ressincronizar"}
+        {pending ? "Baixando da Meta…" : "Refazer o histórico de anúncios a partir da Meta"}
       </button>
       <p className="text-xs text-muted-foreground">
-        Use se os números de tráfego pago estiverem dobrados (dados de CSV somados com os da Meta).
+        Use se os números de tráfego pago estiverem dobrados (dados de CSV somados com os da
+        Meta). Busca primeiro, troca depois: com a Meta fora do ar, nada é apagado.
       </p>
       <Message state={state} />
     </div>
@@ -644,6 +648,13 @@ export function ReclassifyAdsButton() {
         type="button"
         disabled={pending}
         onClick={() => {
+          if (
+            !window.confirm(
+              "Reetiquetar todos os anúncios guardados pela regra de marca acima? Os números de cada marca mudam na hora.",
+            )
+          ) {
+            return;
+          }
           startTransition(async () => {
             const result = await reclassifyAdsAction();
             setState(result);
@@ -666,31 +677,187 @@ export function ReclassifyAdsButton() {
 
 // ---- reset ----------------------------------------------------------
 
-export function ResetButton({ destructive = false }: { destructive?: boolean }) {
+export function ResetButton() {
   const [pending, startTransition] = useTransition();
+  const [state, setState] = useState<ActionState | null>(null);
   const router = useRouter();
   return (
-    <button
-      type="button"
-      disabled={pending}
-      onClick={() => {
-        if (
-          destructive &&
-          !window.confirm(
-            "Isso APAGA os dados atuais do banco e grava o dataset de exemplo no lugar. Continuar?",
-          )
-        ) {
-          return;
-        }
-        startTransition(async () => {
-          await resetSeedAction();
-          router.refresh();
-        });
-      }}
-      className="inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-medium text-muted-foreground hover:text-foreground disabled:opacity-50"
-    >
-      <RotateCcw className="size-4" />
-      Restaurar dados de exemplo
-    </button>
+    <div className="space-y-1.5">
+      <button
+        type="button"
+        disabled={pending}
+        onClick={() => {
+          const digitado = window.prompt(
+            `Isso APAGA leads, anúncios, Instagram e metas e grava o exemplo no lugar. O histórico dos leads fica.\n\nPara confirmar, digite ${CONFIRMACAO_PERIGO}:`,
+          );
+          if (digitado == null) return;
+          startTransition(async () => {
+            const result = await resetSeedAction(digitado);
+            setState(result);
+            router.refresh();
+          });
+        }}
+        className="inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--danger-text)]/40 px-3 text-sm font-medium text-[var(--danger-text)] hover:bg-[var(--danger-text)]/5 disabled:opacity-50"
+      >
+        <RotateCcw className="size-4" />
+        Restaurar dados de exemplo
+      </button>
+      <Message state={state} />
+    </div>
+  );
+}
+
+// ---- diagnóstico dos leads (D8) ------------------------------------
+
+function Numero({ label, valor, hint }: { label: string; valor: number; hint?: string }) {
+  return (
+    <div className="rounded-lg border px-3 py-2" title={hint}>
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="text-lg font-semibold tabular-nums">{valor}</p>
+    </div>
+  );
+}
+
+/**
+ * Lê o histórico e mostra o que os reenvios da LP fizeram com os leads. Nada é
+ * alterado até alguém marcar os leads e clicar em "Aplicar".
+ */
+export function DiagnosticoLeadsPanel() {
+  const [pending, startTransition] = useTransition();
+  const [diag, setDiag] = useState<DiagnosticoLeads | null>(null);
+  const [erro, setErro] = useState<string | null>(null);
+  const [marcados, setMarcados] = useState<Set<string>>(new Set());
+  const [state, setState] = useState<ActionState | null>(null);
+  const router = useRouter();
+
+  const rodar = () =>
+    startTransition(async () => {
+      const r = await diagnosticoLeadsAction();
+      if (!r.ok) {
+        setErro(r.message);
+        return;
+      }
+      setErro(null);
+      setDiag(r.diagnostico);
+      setMarcados(new Set(r.diagnostico.reparos.map((x) => x.leadId)));
+    });
+
+  return (
+    <div className="space-y-4">
+      <button
+        type="button"
+        disabled={pending}
+        onClick={rodar}
+        className="inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-medium text-muted-foreground hover:text-foreground disabled:opacity-50"
+      >
+        <Stethoscope className="size-4" />
+        {pending ? "Lendo o histórico…" : diag ? "Rodar de novo" : "Rodar diagnóstico"}
+      </button>
+      {erro ? <p className="text-sm text-[var(--danger-text)]">{erro}</p> : null}
+
+      {diag ? (
+        <>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <Numero label="Criações pela LP" valor={diag.criacoesLp} hint="Eventos de criação vindos da landing page" />
+            <Numero label="Leads da LP" valor={diag.leadsLp} hint="Leads que entraram pela landing page (pelo histórico), inclusive excluídos" />
+            <Numero label="Leads com reenvio" valor={diag.reenvios.length} hint="Mesmo id, mais de uma criação, mesmo nome" />
+            <Numero label="Colisões de id" valor={diag.colisoes.length} hint="Mesmo id, nomes diferentes: duas pessoas" />
+            <Numero label="Criações sem lead" valor={diag.orfaos} hint="Lead apagado fora do painel" />
+            <Numero label="Em outra marca" valor={diag.foraDaMarcaPadrao} hint="Leads da LP fora da marca padrão" />
+            <Numero label="Excluídos" valor={diag.excluidos} />
+            <Numero label="Registros em lote" valor={diag.rajadas.length} hint="10+ mudanças de status do mesmo usuário em 15 min" />
+          </div>
+
+          {diag.rajadas.length ? (
+            <p className="text-xs text-muted-foreground">
+              Registros em lote:{" "}
+              {diag.rajadas
+                .slice(0, 5)
+                .map((r) => `${r.actor} · ${r.eventos} em ${formatDateTime(r.inicio)}`)
+                .join(" · ")}
+              . Status registrado em lote, dias depois, não mede velocidade de contato.
+            </p>
+          ) : null}
+
+          {diag.reparos.length === 0 ? (
+            <p className="text-sm text-[var(--success-text)]">
+              Nenhum lead com status ou data de entrada para reparar.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-sm">
+                <strong>{diag.reparos.length}</strong> lead(s) com algo que o histórico permite
+                consertar. Confira e desmarque o que não quiser aplicar.
+              </p>
+              <div className="max-h-80 overflow-auto rounded-lg border">
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-card text-left text-muted-foreground">
+                    <tr>
+                      <th className="p-2"></th>
+                      <th className="p-2">Lead</th>
+                      <th className="p-2">Status</th>
+                      <th className="p-2">Entrada</th>
+                      <th className="p-2">Marcos</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {diag.reparos.map((r) => (
+                      <tr key={r.leadId} className="border-t">
+                        <td className="p-2">
+                          <input
+                            type="checkbox"
+                            aria-label={`Reparar ${r.nome}`}
+                            checked={marcados.has(r.leadId)}
+                            onChange={(e) => {
+                              const next = new Set(marcados);
+                              if (e.target.checked) next.add(r.leadId);
+                              else next.delete(r.leadId);
+                              setMarcados(next);
+                            }}
+                          />
+                        </td>
+                        <td className="p-2 font-medium">{r.nome}</td>
+                        <td className="p-2">
+                          {r.statusProposto
+                            ? `${statusLabel(r.statusAtual)} → ${statusLabel(r.statusProposto)}`
+                            : "—"}
+                        </td>
+                        <td className="p-2">
+                          {r.entradaProposta
+                            ? `${formatDateTime(r.entradaAtual)} → ${formatDateTime(r.entradaProposta)}`
+                            : "—"}
+                        </td>
+                        <td className="p-2 text-muted-foreground">
+                          {[r.bookedAt && "agendou", r.attendedAt && "compareceu", r.closedAt && "fechou"]
+                            .filter(Boolean)
+                            .join(", ") || "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <button
+                type="button"
+                disabled={pending || marcados.size === 0}
+                onClick={() => {
+                  if (!window.confirm(`Aplicar o reparo em ${marcados.size} lead(s)? Cada mudança de status entra no histórico.`)) return;
+                  startTransition(async () => {
+                    const r = await repararLeadsAction([...marcados]);
+                    setState(r);
+                    router.refresh();
+                    if (r.ok) setDiag(null);
+                  });
+                }}
+                className="inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+              >
+                Aplicar reparo ({marcados.size})
+              </button>
+            </div>
+          )}
+        </>
+      ) : null}
+      <Message state={state} />
+    </div>
   );
 }

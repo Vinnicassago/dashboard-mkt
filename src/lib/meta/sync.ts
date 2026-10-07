@@ -1,9 +1,10 @@
 import "server-only";
-import { syncAdsAccount } from "./ads";
+import { fetchAdsAccount, syncAdsAccount, type AdsPull } from "./ads";
+import { isoDaysAgo, isoToday } from "./http";
 import { syncInstagram } from "./instagram";
 import { refreshIgTokenIfNeeded, getIgToken } from "./token";
 import { resolveMetaBrands, type BrandMeta } from "./config";
-import { getState, setState } from "../data/store";
+import { getData, getState, replaceAdData, setState } from "../data/store";
 import { STATE_KEYS } from "../data/backend";
 
 /**
@@ -104,6 +105,60 @@ export async function runSync({
   }
 
   return report;
+}
+
+/** A Meta guarda insights por até 37 meses; mais que isso a busca falha. */
+const LIMITE_HISTORICO_DIAS = 37 * 30;
+
+/**
+ * Refaz o histórico de anúncios a partir da Meta — conserto de gasto dobrado
+ * (linhas de CSV somadas às da API). A ordem é o que protege o dado:
+ *   1. busca TODAS as contas, do primeiro dia guardado até hoje;
+ *   2. só se todas as buscas derem certo, troca o período de cada conta numa
+ *      operação (`replaceAdData`).
+ * Meta não configurada ou busca com erro = nada apagado.
+ */
+export async function resyncAdsHistory(): Promise<SourceOutcome> {
+  const all = await resolveMetaBrands();
+  const accounts = new Map<string, BrandMeta[]>();
+  for (const b of all) {
+    if (!b.adAccountId || !b.adsToken) continue;
+    accounts.set(b.adAccountId, all.filter((x) => x.adAccountId === b.adAccountId && x.adsToken));
+  }
+  if (accounts.size === 0) {
+    return {
+      ok: false,
+      detail: "A Meta não está configurada: defina META_AD_ACCOUNT_ID e META_ADS_ACCESS_TOKEN.",
+    };
+  }
+
+  const until = isoToday();
+  const limite = isoDaysAgo(LIMITE_HISTORICO_DIAS);
+  const pulls: { brands: BrandMeta[]; pull: AdsPull }[] = [];
+  for (const [account, brands] of accounts) {
+    // Do primeiro dia guardado de qualquer marca da conta (no mínimo 30 dias).
+    let since = isoDaysAgo(30);
+    for (const b of brands) {
+      const first = (await getData(b.slug)).adDaily[0]?.date;
+      if (first && first < since) since = first;
+    }
+    if (since < limite) since = limite;
+    const pull = await fetchAdsAccount({ account, token: brands[0].adsToken!, brands, since, until });
+    pulls.push({ brands, pull });
+  }
+
+  const notes: string[] = [];
+  for (const { brands, pull } of pulls) {
+    await replaceAdData(pull.adRows, pull.creatives, {
+      brands: brands.map((b) => b.slug),
+      since: pull.since,
+      until: pull.until,
+    });
+    const dist = Object.entries(pull.byBrand).map(([s, n]) => `${s}: ${n}`).join(", ") || "0 linhas";
+    notes.push(`${pull.since}→${pull.until} → ${dist}`);
+  }
+  await setState(STATE_KEYS.lastSyncAds, new Date().toISOString());
+  return { ok: true, detail: notes.join(" · ") };
 }
 
 export interface LastSyncInfo {

@@ -350,4 +350,29 @@ update leads set lost_at = coalesce(lost_at, created_at)
 update leads set lost_at = null
   where lost_at is not null
     and status not in ('contato_invalido', 'sem_resposta', 'sem_interesse', 'desistencia');
+
+-- 0013 — nada de lead se perde.
+-- Exclusão reversível: o lead excluído sai das listas e métricas, mas a linha e
+-- o histórico ficam (antes, excluir apagava o lead E os eventos dele).
+alter table leads add column if not exists deleted_at timestamptz;
+alter table leads add column if not exists deleted_by text;
+alter table leads add column if not exists deleted_reason text;
+
+-- Histórico com marca (o de uma marca não aparece na outra) e detalhe do evento
+-- (motivo da exclusão, contato novo num reenvio).
+alter table lead_events add column if not exists brand text;
+alter table lead_events add column if not exists payload jsonb;
+update lead_events e set brand = l.brand
+  from leads l where l.id = e.lead_id and e.brand is null;
+create index if not exists lead_events_brand_idx on lead_events (brand, created_at desc);
+
+-- Quem apertou os botões que mexem em muitos dados de uma vez.
+create table if not exists audit_log (
+  id text primary key,
+  at timestamptz not null default now(),
+  actor text not null default '',
+  action text not null,
+  detail text
+);
+create index if not exists audit_log_at_idx on audit_log (at desc);
 `;
