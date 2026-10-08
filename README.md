@@ -141,6 +141,18 @@ Também dá para rodar sob demanda pelo botão **Sincronizar agora** em Config, 
 curl "https://SEU-APP/api/sync?secret=SEU_CRON_SECRET&source=all"
 ```
 
+**Resumo da semana (IA).** Com `ANTHROPIC_API_KEY` e o mesmo `CRON_SECRET`, agende no
+cron-job.org (ou em qualquer cron) para **segunda às 08:00 (Brasília)**:
+
+```bash
+curl "https://SEU-APP/api/resumo-semanal?secret=SEU_CRON_SECRET"
+```
+
+Ele lê a semana fechada anterior (segunda a domingo) — só a camada de métricas, a
+régua e as ações do motor — e grava a leitura, que aparece recolhida no rodapé da
+Bússola com as 12 anteriores. Custa cerca de US$ 0,09 por execução; `?brand=` gera
+para uma marca só. O botão "Gerar de novo" na Bússola faz o mesmo à mão.
+
 ### Como a coleta funciona (e por que assim)
 
 - **Versão fixada** (`v25.0`). A Meta lança versão nova a cada ~trimestre e aposenta

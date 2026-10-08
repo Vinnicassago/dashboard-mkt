@@ -10,13 +10,16 @@ import {
   type CampaignBudget,
   type DataBackend,
   type LeadStatusPatch,
+  type ListAcoesEstadoOpts,
   type ListEventsOpts,
+  type ListResumosOpts,
   type ListSyncRunsOpts,
   type LpDelta,
   type PublicUser,
   type StoredUser,
 } from "./backend";
 import type {
+  AcaoEstado,
   AdDaily,
   AuditEntry,
   SyncRun,
@@ -30,11 +33,13 @@ import type {
   LeadEvent,
   LeadStatus,
   PostDraft,
+  ResumoSemanal,
 } from "../types";
 import {
   FALLBACK_CAMPAIGN,
   type Row,
   s,
+  toAcaoEstado,
   toAd,
   toAudit,
   toSyncRun,
@@ -49,7 +54,9 @@ import {
   toLp,
   toPost,
   toPublicUser,
+  toResumoSemanal,
   toStoredUser,
+  fromAcaoEstado,
   fromAd,
   fromAudit,
   fromSyncRun,
@@ -63,6 +70,7 @@ import {
   fromLead,
   fromLp,
   fromPost,
+  fromResumoSemanal,
 } from "./mappers";
 
 /**
@@ -86,6 +94,8 @@ const EVENT_COLS = ["id", "lead_id", "brand", "lead_name", "actor", "action", "f
 const AUDIT_COLS = ["id", "at", "actor", "action", "detail"];
 const SYNC_RUN_COLS = ["id", "source", "brand", "started_at", "finished_at", "ok", "date_from", "date_to", "rows", "error"];
 const DRAFT_COLS = ["id", "brand", "status", "created_at", "updated_at", "planned_for", "type", "pillar", "hook_text", "hook_spoken", "promise", "script", "caption", "cta_type", "cta_keyword", "duration_sec", "has_burned_captions", "score", "validated_at", "playbook_version", "published_post_id", "notes", "ai_review", "validation_failed"];
+const ACAO_ESTADO_COLS = ["id", "brand", "semana", "acao", "estado", "motivo", "titulo", "por", "em"];
+const RESUMO_COLS = ["id", "brand", "semana", "periodo_de", "periodo_ate", "analise", "origem", "criado_em"];
 
 const withoutPk = (cols: string[], pk: string[]) => cols.filter((c) => !pk.includes(c));
 
@@ -588,5 +598,43 @@ export const postgresBackend: DataBackend = {
       sql += ` limit $${params.length}`;
     }
     return (await q(sql, params)).map(toSyncRun);
+  },
+
+  // ---- Bússola (Fase 5) ----
+
+  async addAcaoEstado(e: AcaoEstado) {
+    // Só insere: o histórico fica; quem lê pega a última por (marca, semana, ação).
+    await insertMany("acoes_estado", ACAO_ESTADO_COLS, [fromAcaoEstado(e)]);
+  },
+
+  async listAcoesEstado(opts: ListAcoesEstadoOpts): Promise<AcaoEstado[]> {
+    const params: unknown[] = [opts.brand];
+    let sql = "select * from acoes_estado where brand = $1";
+    if (opts.semana) {
+      params.push(opts.semana);
+      sql += ` and semana = $${params.length}`;
+    }
+    sql += " order by em desc";
+    const limit = opts.limit ?? 200;
+    if (limit > 0) {
+      params.push(limit);
+      sql += ` limit $${params.length}`;
+    }
+    return (await q(sql, params)).map(toAcaoEstado);
+  },
+
+  async addResumoSemanal(r: ResumoSemanal) {
+    await insertMany("resumos_semanais", RESUMO_COLS, [fromResumoSemanal(r)]);
+  },
+
+  async listResumosSemanais(opts: ListResumosOpts): Promise<ResumoSemanal[]> {
+    const params: unknown[] = [opts.brand];
+    let sql = "select * from resumos_semanais where brand = $1 order by semana desc, criado_em desc";
+    const limit = opts.limit ?? 12;
+    if (limit > 0) {
+      params.push(limit);
+      sql += ` limit $${params.length}`;
+    }
+    return (await q(sql, params)).map(toResumoSemanal);
   },
 };

@@ -15,8 +15,7 @@ import {
   podeTransitar,
 } from "../lead-status";
 import { etapaDoLead, montarFila } from "../fila";
-import { contarParados } from "../farol";
-import { montarCascata } from "../cascata";
+import { motorDeAcoes } from "../motor";
 import { kpisDoPeriodo } from "../kpis";
 import type { DashboardData, Lead, LeadEvent } from "../types";
 
@@ -200,8 +199,8 @@ describe("etapas da Fila", () => {
   });
 });
 
-describe("farol sem robô: quem espera o 1º contato é 'gente parada'", () => {
-  it("conta os leads Novos e abre a Fila direto em 'Novos'", () => {
+describe("motor sem robô: quem espera o 1º contato além do prazo é a ação nº 1 (C1)", () => {
+  it("conta os leads Novos fora do prazo e abre a Fila direto em 'Novos'", () => {
     const data: DashboardData = {
       campaign: { id: "c", brand: "consorcio", name: "C", objective: "L", status: "ativa", startDate: "2026-10-01", budgetTotal: 0 },
       igAccountDaily: [],
@@ -213,10 +212,12 @@ describe("farol sem robô: quem espera o 1º contato é 'gente parada'", () => {
       goals: [],
       updatedAt: agoraIso(),
     };
-    const c = montarCascata({ data, robo: null, comercial: null, kpis: kpisDoPeriodo(data, undefined) });
-    const p = contarParados(c.degraus);
-    expect(p.parados).toBe(2);
-    expect(p.filaHref).toBe("/fila?etapa=novo");
+    // `lead()` entra às 10h; ao meio-dia o prazo de 1 hora útil já venceu para os dois Novos.
+    const agora = brt("2026-10-08", "12:00");
+    const acoes = motorDeAcoes({ data, range: undefined, kpis: kpisDoPeriodo(data, undefined, { agora }), eventos: [], agora, hoje: "2026-10-08" });
+    expect(acoes[0]?.regra).toBe("C1");
+    expect(acoes[0]?.amostra.n).toBe(2);
+    expect(acoes[0]?.href).toBe("/fila?etapa=novo");
   });
 });
 

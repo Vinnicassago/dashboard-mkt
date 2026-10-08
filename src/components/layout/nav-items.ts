@@ -11,6 +11,7 @@ import {
 
 import type { BrandDef } from "@/lib/brands";
 import { hasPlaybook } from "@/lib/content/playbook";
+import type { RangeKey } from "@/lib/range";
 
 /**
  * A navegação é nomeada pela PERGUNTA que cada página responde, não pela fonte
@@ -40,6 +41,12 @@ export interface NavItem {
   conversaoOnly?: boolean;
   /** Vistas dentro da página, em abas no topo do conteúdo. */
   vistas?: NavVista[];
+  /**
+   * Período que a página assume sem `?range=` na URL. A Bússola olha a semana
+   * ("7 dias vs 7 anteriores"); as outras páginas, a campanha inteira. O seletor
+   * lê daqui para marcar o preset certo quando a URL está limpa.
+   */
+  periodoPadrao?: RangeKey;
 }
 
 export const NAV: NavItem[] = [
@@ -47,7 +54,8 @@ export const NAV: NavItem[] = [
     label: "Hoje",
     href: "/",
     Icon: LayoutDashboard,
-    pergunta: "Estou bem ou mal — e o que eu faço agora?",
+    pergunta: "Estamos no ritmo, onde trava e o que fazer esta semana?",
+    periodoPadrao: "7d",
   },
   {
     label: "Dinheiro",
@@ -114,4 +122,9 @@ export function isActive(pathname: string, href: string): boolean {
 
 export function navItemFromPath(pathname: string): NavItem | undefined {
   return NAV.find((n) => isActive(pathname, n.href));
+}
+
+/** O período de uma página sem `?range=`: o padrão dela, ou a campanha inteira. */
+export function periodoPadraoDe(pathname: string): RangeKey {
+  return navItemFromPath(pathname)?.periodoPadrao ?? "all";
 }

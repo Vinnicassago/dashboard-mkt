@@ -9,7 +9,9 @@ import {
   type CampaignBudget,
   type DataBackend,
   type LeadStatusPatch,
+  type ListAcoesEstadoOpts,
   type ListEventsOpts,
+  type ListResumosOpts,
   type ListSyncRunsOpts,
   type LpDelta,
   type PublicUser,
@@ -17,6 +19,7 @@ import {
 } from "./backend";
 import { toRole } from "../auth/roles";
 import type {
+  AcaoEstado,
   AdDaily,
   AuditEntry,
   SyncRun,
@@ -30,6 +33,7 @@ import type {
   LeadEvent,
   LeadStatus,
   PostDraft,
+  ResumoSemanal,
 } from "../types";
 // Mappers COMPARTILHADOS (mesmos do backend Postgres): campo novo entra num
 // lugar só e vale para os dois backends SQL — nunca duplicar mappers aqui.
@@ -38,6 +42,7 @@ import {
   type Row,
   n,
   s,
+  toAcaoEstado,
   toAd,
   toAudit,
   toSyncRun,
@@ -51,6 +56,8 @@ import {
   toLead,
   toLp,
   toPost,
+  toResumoSemanal,
+  fromAcaoEstado,
   fromAd,
   fromAudit,
   fromSyncRun,
@@ -64,6 +71,7 @@ import {
   fromLead,
   fromLp,
   fromPost,
+  fromResumoSemanal,
 } from "./mappers";
 
 async function touch(isSeed?: boolean) {
@@ -597,5 +605,43 @@ export const supabaseBackend: DataBackend = {
     const { data, error } = await query;
     check(error, "list sync runs");
     return (data ?? []).map(toSyncRun);
+  },
+
+  // ---- Bússola (Fase 5) ----
+
+  async addAcaoEstado(e: AcaoEstado) {
+    // Só insere: o histórico fica; quem lê pega a última por (marca, semana, ação).
+    const { error } = await supabase().from("acoes_estado").insert(fromAcaoEstado(e));
+    check(error, "add acao estado");
+  },
+
+  async listAcoesEstado(opts: ListAcoesEstadoOpts) {
+    let query = supabase().from("acoes_estado").select("*").eq("brand", opts.brand);
+    if (opts.semana) query = query.eq("semana", opts.semana);
+    query = query.order("em", { ascending: false });
+    const limit = opts.limit ?? 200;
+    if (limit > 0) query = query.limit(limit);
+    const { data, error } = await query;
+    check(error, "list acoes estado");
+    return (data ?? []).map(toAcaoEstado);
+  },
+
+  async addResumoSemanal(r: ResumoSemanal) {
+    const { error } = await supabase().from("resumos_semanais").insert(fromResumoSemanal(r));
+    check(error, "add resumo semanal");
+  },
+
+  async listResumosSemanais(opts: ListResumosOpts) {
+    let query = supabase()
+      .from("resumos_semanais")
+      .select("*")
+      .eq("brand", opts.brand)
+      .order("semana", { ascending: false })
+      .order("criado_em", { ascending: false });
+    const limit = opts.limit ?? 12;
+    if (limit > 0) query = query.limit(limit);
+    const { data, error } = await query;
+    check(error, "list resumos semanais");
+    return (data ?? []).map(toResumoSemanal);
   },
 };

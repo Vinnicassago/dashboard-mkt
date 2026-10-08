@@ -24,6 +24,9 @@ import {
   weeklyDmSeries,
 } from "@/lib/metrics";
 import { absDelta, pctDelta } from "@/components/kpi/delta";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { RecommendationsCard } from "@/components/kpi/recommendations";
+import { buildRecommendations } from "@/lib/recommendations";
 import { formatCompact, formatCurrency0, formatCurrencyOrDash, formatDecimal, formatInt, formatPercent } from "@/lib/format";
 
 export default async function InstagramPage({
@@ -71,6 +74,11 @@ export default async function InstagramPage({
       : avgGain > 0 && daysAtRate != null
         ? `Faltam ${formatInt(remaining)} · no ritmo de +${formatDecimal(avgGain, 1)}/dia, ~${daysAtRate} dias.`
         : `Faltam ${formatInt(remaining)} · sem crescimento no período para projetar.`;
+
+  // As ações de conteúdo (cadência, formato, CTA, grade) moram AQUI desde a
+  // Bússola (Fase 5): a home de conversão só lista o motor v2, que é o funil
+  // pago. A marca de seguidores já as mostra na home dela — um fato, um lugar.
+  const acoesDeConteudo = brand.type === "awareness" ? [] : buildRecommendations(data, range, new Date().toISOString());
 
   return (
     <div className="space-y-6">
@@ -192,6 +200,20 @@ export default async function InstagramPage({
           </>
         ) : null}
       </div>
+
+      {acoesDeConteudo.length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Sparkles className="size-4 text-primary" />
+              Ações de conteúdo
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <RecommendationsCard recs={acoesDeConteudo} />
+          </CardContent>
+        </Card>
+      ) : null}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <ChartCard

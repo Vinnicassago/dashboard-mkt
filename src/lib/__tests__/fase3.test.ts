@@ -17,7 +17,7 @@ import {
 } from "../metrics";
 import { custoExibivel, kpisDoPeriodo, mostrar } from "../kpis";
 import { montarCascata } from "../cascata";
-import { contarParados, montarFarol } from "../farol";
+import { montarBussola } from "../bussola";
 import { buildBriefing } from "../ai/briefing";
 import { buildRecommendations } from "../recommendations";
 import { assessTrust } from "../trust";
@@ -26,6 +26,7 @@ import { atribuidor, isPaidSource } from "../atribuicao";
 import { alertasDeAtribuicao } from "../alertas";
 import { brandForCampaign, CURINGA, NAO_CLASSIFICADO, type BrandMeta } from "../meta/config";
 import { DICIONARIO } from "../dicionario";
+import { formatCurrency } from "../format";
 import type { AdDaily, Creative, DashboardData, Lead, SyncRun } from "../types";
 
 // ---------------------------------------------------------------- fixtures
@@ -135,11 +136,10 @@ describe("custo por reunião: uma régua só (MIN_REUNIOES) em toda a parte", ()
     expect("pago" in b && b.pago && "cpr" in b.pago ? b.pago.cpr : "x").toBeNull();
   });
 
-  it("o farol não imprime o custo por reunião e diz o fato (verba e reuniões)", () => {
-    const c = montarCascata({ data, range: OUT, robo: null, comercial: null, kpis: k });
-    const f = montarFarol({ degraus: c.degraus, trust: k.trust, kpis: k, parados: 0, midiaParada: 0, fontesOk: true });
-    expect(f.rotulo).not.toBe("custo por reunião");
-    expect(f.porQueEsteNumero).toMatch(/investidos em conversão para 2 reuniões/);
+  it("o placar não imprime o custo por reunião e diz o fato (verba e reuniões)", () => {
+    const b = montarBussola({ data, range: OUT, kpis: k, eventos: [], agora: "2026-10-08T12:00:00.000Z", hoje: "2026-10-08" });
+    expect(b.placar.custo).not.toMatch(/por reunião/);
+    expect(b.placar.custo).toMatch(/investidos em conversão · 2 reuniões/);
   });
 
   it("sem lead não há CPL: '—', nunca R$ 0,00", () => {
@@ -204,14 +204,14 @@ describe("portão da Fase 3: mesmo nome, mesmo número (3 períodos × 2 marcas)
         // E não imprime um segundo custo por reunião.
         expect(c.degraus.find((d) => d.key === "reunioes")?.custoUnitario).toBeUndefined();
 
-        // O farol, quando mostra custo por reunião, mostra ESTE.
-        const p = contarParados(c.degraus);
-        const f = montarFarol({ degraus: c.degraus, trust: k.trust, kpis: k, parados: 0, midiaParada: p.midiaParada, fontesOk: true });
-        if (f.rotulo === "custo por reunião" && f.valor !== null) {
-          expect(f.valor).toBe(k.custoPorReuniao.valor);
-          expect(custoExibivel(k.custoPorReuniao)).toBe(true);
-        }
-        if (f.rotulo.startsWith("CPL")) expect(f.valor).toBe(k.cpl.valor);
+        // A Bússola (placar, motores, gargalo, ações) lê ESTES números.
+        const bu = montarBussola({ data, range, kpis: k, eventos: [], agora: "2026-10-08T12:00:00.000Z", hoje: "2026-10-08" });
+        expect(bu.placar.reunioes.valor).toBe(k.reunioesAgendadas.valor);
+        if (custoExibivel(k.custoPorReuniao)) expect(bu.placar.custo).toContain(formatCurrency(k.custoPorReuniao.valor));
+        else expect(bu.placar.custo).not.toMatch(/por reunião/);
+        const leadAgendada = bu.transicoes.find((t) => t.id === "lead_agendada")!;
+        expect(leadAgendada.entradas).toBe(k.leads.valor);
+        expect(leadAgendada.saidas).toBe(k.agendaram.valor);
 
         // A IA recebe os mesmos números (ou null, onde a tela mostra "—").
         const b = buildBriefing(data, range, { nowIso: "2026-10-08T12:00:00.000Z", warnings: [] });
@@ -229,10 +229,12 @@ describe("portão da Fase 3: mesmo nome, mesmo número (3 períodos × 2 marcas)
         expect(adsets.reduce((s, x) => s + x.meetings, 0)).toBeLessThanOrEqual(k.reunioesAgendadas.valor);
 
         // O motor de ações não decide por custo por reunião abaixo da régua.
-        const recs = buildRecommendations(data, range, "2026-10-08T12:00:00.000Z");
         if (!custoExibivel(k.custoPorReuniao)) {
-          expect(recs.some((r) => r.id === "cpr-over" || r.id === "realloc" || r.id.startsWith("scale-"))).toBe(false);
+          expect(bu.acoes.some((a) => a.regra === "M2" || a.regra === "M6")).toBe(false);
         }
+        // E as regras de conteúdo continuam fora do funil pago.
+        const recs = buildRecommendations(data, range, "2026-10-08T12:00:00.000Z");
+        expect(recs.every((r) => !["cpr-over", "cpl-over", "realloc", "pace-over", "pace-sub"].includes(r.id) && !r.id.startsWith("scale-") && !r.id.startsWith("fatigue-"))).toBe(true);
       });
     }
   }

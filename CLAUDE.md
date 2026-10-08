@@ -114,16 +114,45 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   **mais a política** (desistência sai do CPR). Toda regra de "esta reunião conta?"
   mora em `isBooked`, nunca na ordem dos status. `lostAt` é a exceção: descreve o
   estado atual e é limpo se o lead voltar ao caminho feliz.
-- **Farol** (`src/lib/farol.ts`): o primeiro bloco da home (Hoje) e o ÚNICO com destaque
-  — hierarquia é escassez. O número é escolhido, não fixo: gente parada no funil vence
-  qualquer custo (já foi paga, dá para recuperar, não exige verba nova); sem ninguém
-  parado, cai no CPR, e se o CPR estiver em quarentena, no degrau mais fundo da cascata
-  com amostra ≥3, dizendo que desceu. Se a leitura do robô falhar, o farol diz "não sei"
-  — nunca "no ritmo", que seria a mentira mais cara da tela. A home tem 5 blocos: farol,
-  ações, tira de 3 números, cascata resumida, rodapé de links. Bloco novo na home = tirar
-  um.
-- **Cascata** (`src/lib/cascata.ts`): o funil ponta a ponta atravessando os quatro
-  sistemas (Meta → LP → painel → robô → atendimento). Regras: **duas âncoras** (acima
+- **Bússola** (Fase 5, a home): responde "estamos no ritmo? onde trava? o que fazer?"
+  em 5 blocos — placar, motores, onde trava, ações da semana, rodapé — e bloco novo =
+  tirar um. Tudo sai de UMA função pura, `montarBussola` (`lib/bussola.ts`); quem
+  carrega robô, syncs e estados é `lib/bussola-server.ts` (também o caminho do resumo
+  semanal: a IA lê o que a tela mostra). Sem `?range=` a Bússola olha a semana (7 dias
+  vs 7 anteriores — `periodoPadrao` em `nav-items.ts`, que o seletor respeita); o
+  comercial entra por `/fila`. **Placar** (`lib/placar.ts`): o veredito é REUNIÕES
+  AGENDADAS contra a meta do período ("FORA DO RITMO — 0 de 7 na semana"); sem meta é
+  "SEM META", fontes divergindo é "SEM LEITURA" — nunca "no ritmo" por silêncio. O custo
+  por reunião entra como FATO (decisão 4.2: "R$ 160 investidos · 0 reuniões"), nunca a
+  razão abaixo de `MIN_REUNIOES`. O minigráfico de 10 semanas é `serieSemanal`
+  (kpisDoPeriodo por semana). **Motores**: só os de dinheiro (investimento no ritmo, CPL,
+  leads); as taxas moram no funil. **Onde trava** (`lib/gargalo.ts`, puro): transições
+  com dono, taxa, régua e n; gargalo = menor razão taxa ÷ régua entre as com
+  `AMOSTRA_GARGALO` (10) entradas; a régua é a meta vigente ou, sem meta, a média das 8
+  semanas anteriores — E O RÓTULO DIZ QUAL. Impacto = entradas × (régua − real) × produto
+  das taxas seguintes até "agendada" (régua quando a real é 0), inteiro e só com amostra.
+  **Motor v2** (`lib/motor.ts`, puro): regras C1–C5, M1–M5, L1–L2, D1–D2, G1 do
+  relatório (+ M6 escalar vencedor e M7 ritmo de verba), cada uma com id estável
+  (`regra:alvo` — a C1 leva a `assinatura` de QUEM espera: pessoas novas fora do prazo
+  = ação nova, de volta ao topo mesmo depois de um "Feito"), dono (`lib/dono.ts`),
+  amostra mínima (`AMOSTRA_MIN`), impacto e confiança. A landing page só entra em
+  "Onde trava" com linha NO período (`temLpNoPeriodo`): histórico sem dado é rastreio
+  que parou (alerta), não "0%". Decide com os números de `kpisDoPeriodo` (nunca com custo em quarentena) e
+  lê a Fila pela mesma `montarFila` da página. Ordem = severidade × impacto × confiança,
+  mais a regra do farol como regra de ORDEM: C1 (gente sem o 1º contato, fora do prazo)
+  vem primeiro sempre que existir. Impacto só inteiro e só com amostra — senão
+  `semImpacto` diz "estimativa indisponível". Confiança cai com piso/sync falhando
+  (mídia) e com registro em lote (taxas do comercial). Regra nova = função `regraXn` +
+  teste em `fase5.test.ts`; regras de conteúdo ficam em `recommendations.ts` (Conteúdo).
+  **Estado** das ações: tabela `acoes_estado` (migração 0018), só-insert, por SEMANA
+  (`semanaDaAcao` = segunda em Brasília, `lib/semana.ts`): a última linha de (marca,
+  semana, ação) vale; feita/ignorada (com motivo) sai do topo e volta com "reaberta"; na
+  segunda seguinte tudo é reavaliado. **Resumo da semana** (H7): `/api/resumo-semanal`
+  (CRON_SECRET, cron-job.org segunda 08:00) gera a leitura da semana fechada anterior
+  (`semanaAnteriorFechada`) e grava em `resumos_semanais`; a Bússola mostra a última
+  recolhida e as 12 anteriores. Nunca gere no render — custa.
+- **Cascata** (`src/lib/cascata.ts`, em Jornada): o funil ponta a ponta atravessando os
+  quatro sistemas (Meta → LP → painel → robô → atendimento). Regras: **duas âncoras** (acima
   de Leads mede sobre impressões; de Leads para baixo, Leads = 100%) — com uma só,
   oito linhas imprimem "0,0%", que é mentira por arredondamento; **selo de fonte** em
   todo degrau e junta tracejada onde o dado troca de sistema; **cliques NÃO é degrau**

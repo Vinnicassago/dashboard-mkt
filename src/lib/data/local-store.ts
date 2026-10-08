@@ -11,7 +11,9 @@ import {
   type CampaignBudget,
   type DataBackend,
   type LeadStatusPatch,
+  type ListAcoesEstadoOpts,
   type ListEventsOpts,
+  type ListResumosOpts,
   type ListSyncRunsOpts,
   type LpDelta,
   type PublicUser,
@@ -21,6 +23,7 @@ import { toRole } from "../auth/roles";
 import { LOST_STATUSES, normalizeLeadStatus } from "../lead-status";
 import { DEFAULT_BRAND } from "../types";
 import type {
+  AcaoEstado,
   AdDaily,
   AuditEntry,
   SyncRun,
@@ -34,6 +37,7 @@ import type {
   LeadEvent,
   LeadStatus,
   PostDraft,
+  ResumoSemanal,
 } from "../types";
 
 /**
@@ -58,6 +62,10 @@ interface LocalFile {
   audit: AuditEntry[];
   /** Cada sincronização, com a janela que cobriu (ADR-04/06). */
   syncRuns: SyncRun[];
+  /** Decisões sobre as ações da semana — só se insere; a última vale (Fase 5). */
+  acoesEstado: AcaoEstado[];
+  /** Uma linha por geração do resumo semanal da IA (Fase 5). */
+  resumosSemanais: ResumoSemanal[];
 }
 
 let cache: LocalFile | null = null;
@@ -160,6 +168,8 @@ function load(): LocalFile {
         if (!Array.isArray(parsed.drafts)) parsed.drafts = [];
         if (!Array.isArray(parsed.audit)) parsed.audit = [];
         if (!Array.isArray(parsed.syncRuns)) parsed.syncRuns = [];
+        if (!Array.isArray(parsed.acoesEstado)) parsed.acoesEstado = [];
+        if (!Array.isArray(parsed.resumosSemanais)) parsed.resumosSemanais = [];
         if (!Array.isArray(parsed.data.metas)) parsed.data.metas = [];
         migrateBrand(parsed.data);
         migrateLeadStatus(parsed);
@@ -179,6 +189,8 @@ function load(): LocalFile {
     drafts: [],
     audit: [],
     syncRuns: [],
+    acoesEstado: [],
+    resumosSemanais: [],
   };
   persist(fresh);
   return fresh;
@@ -251,6 +263,8 @@ export const localBackend: DataBackend = {
       drafts: file().drafts,
       audit: file().audit,
       syncRuns: file().syncRuns,
+      acoesEstado: file().acoesEstado,
+      resumosSemanais: file().resumosSemanais,
     };
     persist(cache);
     return seed;
@@ -572,6 +586,40 @@ export const localBackend: DataBackend = {
     if (opts?.brand) list = list.filter((r) => r.brand === opts.brand);
     const sorted = [...list].sort((a, b) => b.finishedAt.localeCompare(a.finishedAt)).map((r) => ({ ...r }));
     const limit = opts?.limit ?? 50;
+    return limit > 0 ? sorted.slice(0, limit) : sorted;
+  },
+
+  // ---- Bússola (Fase 5) ----
+
+  async addAcaoEstado(e: AcaoEstado) {
+    // Só insere: o histórico fica; quem lê pega a última por (marca, semana, ação).
+    const f = file();
+    f.acoesEstado = [e, ...f.acoesEstado];
+    persist(f);
+    cache = f;
+  },
+
+  async listAcoesEstado(opts: ListAcoesEstadoOpts) {
+    let list = file().acoesEstado.filter((e) => e.brand === opts.brand);
+    if (opts.semana) list = list.filter((e) => e.semana === opts.semana);
+    const sorted = [...list].sort((a, b) => b.em.localeCompare(a.em)).map((e) => ({ ...e }));
+    const limit = opts.limit ?? 200;
+    return limit > 0 ? sorted.slice(0, limit) : sorted;
+  },
+
+  async addResumoSemanal(r: ResumoSemanal) {
+    const f = file();
+    f.resumosSemanais = [r, ...f.resumosSemanais];
+    persist(f);
+    cache = f;
+  },
+
+  async listResumosSemanais(opts: ListResumosOpts) {
+    const list = file().resumosSemanais.filter((r) => r.brand === opts.brand);
+    const sorted = [...list]
+      .sort((a, b) => b.semana.localeCompare(a.semana) || b.criadoEm.localeCompare(a.criadoEm))
+      .map((r) => ({ ...r, periodo: { ...r.periodo }, analise: structuredClone(r.analise) }));
+    const limit = opts.limit ?? 12;
     return limit > 0 ? sorted.slice(0, limit) : sorted;
   },
 };

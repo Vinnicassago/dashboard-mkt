@@ -20,16 +20,20 @@ import type {
   CampaignBudget,
   DataBackend,
   LeadStatusPatch,
+  ListAcoesEstadoOpts,
   ListEventsOpts,
+  ListResumosOpts,
   ListSyncRunsOpts,
   LpDelta,
   StoredUser,
 } from "./backend";
 import type { Role } from "../auth/roles";
 import type {
+  AcaoEstado,
   AdDaily,
   AuditEntry,
   Meta,
+  ResumoSemanal,
   SyncRun,
   Creative,
   Goal,
@@ -116,6 +120,14 @@ export const listAuditEntries = (limit = 20) => backend().listAuditEntries(limit
 
 export const addSyncRun = (run: SyncRun) => backend().addSyncRun(run);
 export const listSyncRuns = (opts?: ListSyncRunsOpts) => backend().listSyncRuns(opts);
+
+// ---- Bússola (Fase 5) -----------------------------------------------
+
+/** Decisão sobre uma ação da semana — só insere (ver DataBackend). */
+export const addAcaoEstado = (e: AcaoEstado) => backend().addAcaoEstado(e);
+export const listAcoesEstado = (opts: ListAcoesEstadoOpts) => backend().listAcoesEstado(opts);
+export const addResumoSemanal = (r: ResumoSemanal) => backend().addResumoSemanal(r);
+export const listResumosSemanais = (opts: ListResumosOpts) => backend().listResumosSemanais(opts);
 
 // ---- state bag (last sync, tokens) ---------------------------------
 

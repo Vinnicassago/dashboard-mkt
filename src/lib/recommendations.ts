@@ -1,23 +1,16 @@
 import type { DashboardData } from "./types";
 import {
-  adsetPerformance,
   aggregatePostPerformance,
   awarenessKpis,
   bucketOfAd,
-  campaignPacing,
-  creativePerformance,
   filterAds,
   formatPerformance,
   postPerformance,
   inRange,
   postingCadence,
   previousRange,
-  rotuloCriativo,
   type DateRange,
 } from "./metrics";
-import { MIN_REUNIOES } from "./trust";
-import { custoExibivel, kpisDoPeriodo } from "./kpis";
-import { metaVigente } from "./metas";
 import { isAwareness } from "./brands";
 // A régua editorial mora no playbook (o guia como código) — nunca hardcode aqui.
 import {
@@ -40,18 +33,15 @@ import {
 } from "./format";
 
 /**
- * Motor de "Próximas ações": transforma os números em decisões priorizadas
- * (escalar, pausar, realocar, ajustar ritmo). Puro — recebe os dados e a hora
- * (nowIso) e devolve uma lista ordenada por severidade. É o núcleo da bússola.
+ * Ações de CONTEÚDO e de crescimento — o que sobrou do motor v1.
+ *
+ * O funil pago (gente parada, CPL, custo por reunião, fadiga, conjuntos, ritmo)
+ * mora no motor v2 (`lib/motor.ts`), com regra, dono, amostra, impacto e estado
+ * por semana. Aqui ficam as regras de conteúdo orgânico (cadência, formato,
+ * CTA, grade), que aparecem em Conteúdo — e, para a marca de awareness, as de
+ * crescimento de perfil, que são o funil dela. Puro.
  */
 
-/**
- * `agora` existe acima de `alta` por um motivo concreto: sem ela, um SLA
- * estourado em 24× empatava com "criativo fadigando", e o motor propunha
- * otimizar a mídia — que está barata — enquanto pessoas já pagas esperavam
- * dias por um telefonema. Reserve `agora` para o que já custou dinheiro e
- * ainda dá para recuperar sem gastar mais.
- */
 export type Severity = "agora" | "alta" | "media" | "baixa";
 
 export interface Recommendation {
@@ -69,176 +59,15 @@ export interface Recommendation {
 
 const ORDER: Record<Severity, number> = { agora: -1, alta: 0, media: 1, baixa: 2 };
 
-/**
- * Pessoas paradas no funil, vindas da Fila. É o insumo que faltava: até aqui
- * `buildRecommendations` só recebia o store do painel — nenhuma linha sobre
- * robô, fila ou atendimento — e por isso era estruturalmente incapaz de
- * sugerir "ligue para quem está esperando".
- */
-export interface FilaParaRecs {
-  /** Uma entrada por junta com gente parada. */
-  grupos: {
-    etapa: string;
-    label: string;
-    pessoas: number;
-    /** Mídia já paga por essas pessoas. */
-    midiaParada: number;
-    slaHoras: number;
-    dono: "MKT" | "COM" | "BOT";
-  }[];
-}
-
 export function buildRecommendations(
   data: DashboardData,
   range: DateRange | undefined,
   nowIso: string,
-  fila?: FilaParaRecs,
 ): Recommendation[] {
   // Marca de awareness (só seguidores): ações de crescimento, não de CPR/CPL.
   if (isAwareness(data.campaign.brand)) return buildAwarenessRecommendations(data, range, nowIso);
-
-  const recs: Recommendation[] = [];
-
-  /*
-   * 0. GENTE PARADA — antes de qualquer coisa de mídia.
-   *
-   * Estas pessoas já foram pagas: destravá-las não custa verba nova e é a única
-   * alavanca da tela que muda o custo por reunião esta semana. Enquanto elas
-   * existirem, nenhuma otimização de criativo é a ação número 1.
-   */
-  for (const g of (fila?.grupos ?? []).sort((a, b) => b.midiaParada - a.midiaParada)) {
-    if (g.pessoas <= 0) continue;
-    recs.push({
-      id: `fila-${g.etapa}`,
-      severity: "agora",
-      dono: g.dono,
-      href: `/fila?etapa=${g.etapa}`,
-      midiaParada: g.midiaParada,
-      title: `Falar com ${g.pessoas} ${g.pessoas > 1 ? "pessoas" : "pessoa"} · ${g.label.toLowerCase()}`,
-      detail: `${formatCurrency0(g.midiaParada)} de mídia já paga esperando um contato. O prazo desta etapa é ${g.slaHoras}h. Não custa verba nova.`,
-    });
-  }
-
-  // Os MESMOS números do placar (kpisDoPeriodo): o motor não decide com um CPL
-  // ou um custo por reunião que a tela não mostra.
-  const kp = kpisDoPeriodo(data, range);
-  const k = kp.overview;
-  const creatives = creativePerformance(data, range);
-  const convAdsets = adsetPerformance(data, range).filter((a) => a.bucket === "conversao");
-  // As metas que valem HOJE (com vigência) — a régua de Ajustes → Metas.
-  const hoje = nowIso.slice(0, 10);
-  const goalCpl = metaVigente(data.metas, "cpl", hoje)?.alvo ?? undefined;
-  const goalCpr = metaVigente(data.metas, "custo_por_reuniao", hoje)?.alvo ?? undefined;
-
-  // 1. Criativos fadigando — um verbo por regra. "Renove ou pause" com o CPL
-  //    abaixo da média oferecia dois gestos opostos para um anúncio que ainda traz
-  //    lead barato; e o nome sozinho não dizia QUAL anúncio (há dois "Carrossel -").
-  const fatigued = creatives
-    .filter((c) => c.fatigue.level === "fadigado" && c.spend > 0)
-    .sort((a, b) => b.spend - a.spend);
-  for (const c of fatigued.slice(0, 2)) {
-    const rotulo = rotuloCriativo(c, creatives);
-    // CPL do PAINEL contra o CPL do painel — o do Pixel conta eventos, não pessoas.
-    const caro = c.leadsPainel >= 5 && custoExibivel(kp.cpl) && c.cplPainel >= k.cpl * 1.5;
-    const cpl = c.leadsPainel > 0 ? `CPL ${formatCurrency(c.cplPainel)}` : "nenhum lead no período";
-    recs.push({
-      id: `fatigue-${c.adId}`,
-      severity: caro ? "alta" : "media",
-      dono: "MKT",
-      href: "/dinheiro#criativos",
-      title: caro ? `Pause "${rotulo}"` : `Renove a arte de "${rotulo}"`,
-      detail: caro
-        ? `${cpl} em ${formatInt(c.leadsPainel)} leads — ${formatDecimal(c.cplPainel / k.cpl, 1)}× a média da conta (${formatCurrency(k.cpl)}) — e fadigando (${c.fatigue.reason}). Pause no Ads Manager e suba uma variação.`
-        : `Fadigando (${c.fatigue.reason}). ${cpl}${custoExibivel(kp.cpl) && c.leadsPainel > 0 ? `, ${c.cplPainel <= k.cpl ? "ainda abaixo" : "acima"} da média da conta (${formatCurrency(k.cpl)})` : ""}. Suba uma variação nova no mesmo conjunto antes que o custo dispare.`,
-    });
-  }
-
-  // 2. CPR/CPL acima da meta (alta). Com menos de MIN_REUNIOES o custo por
-  //    reunião está em quarentena: julgar por ele mandaria pausar conjuntos por
-  //    causa de uma reunião — o motor não pode decidir com o que a tela esconde.
-  const cprConfiavel = custoExibivel(kp.custoPorReuniao);
-  if (goalCpr && cprConfiavel && k.cpr > goalCpr) {
-    recs.push({
-      id: "cpr-over",
-      severity: "alta",
-      dono: "MKT",
-      href: "/dinheiro#conjuntos",
-      title: "Custo por reunião acima da meta",
-      detail: `CPR ${formatCurrency(k.cpr)} vs meta ${formatCurrency0(goalCpr)}. Pause os conjuntos de pior CPR e concentre no que agenda barato.`,
-    });
-  } else if (goalCpl && custoExibivel(kp.cpl) && k.cpl > goalCpl) {
-    recs.push({
-      id: "cpl-over",
-      severity: "alta",
-      dono: "MKT",
-      href: "/dinheiro#criativos",
-      title: "CPL acima da meta",
-      detail: `CPL ${formatCurrency(k.cpl)} vs meta ${formatCurrency0(goalCpl)}. Corte os criativos mais caros e realoque para os vencedores.`,
-    });
-  }
-
-  // 3. Realocar budget entre conjuntos por CPR (média). A régua vale LINHA A
-  //    LINHA: conjunto com 1 reunião não tem custo por reunião, tem sorte.
-  const withCpr = cprConfiavel ? convAdsets.filter((a) => a.meetings >= MIN_REUNIOES && a.spend > 0) : [];
-  if (withCpr.length >= 2) {
-    const best = withCpr.reduce((m, a) => (a.cpr < m.cpr ? a : m));
-    const worst = withCpr.reduce((m, a) => (a.cpr > m.cpr ? a : m));
-    if (worst.adset !== best.adset && worst.cpr > best.cpr * 1.5) {
-      recs.push({
-        id: "realloc",
-        severity: "media",
-        dono: "MKT",
-        href: "/dinheiro#conjuntos",
-        title: `Realoque budget para "${best.adset}"`,
-        detail: `"${worst.adset}" tem CPR ${formatCurrency(worst.cpr)} (${(worst.cpr / best.cpr).toFixed(1)}× o de "${best.adset}", ${formatCurrency(best.cpr)}). Mova aos poucos — 10–20% a cada 2–3 dias, para não resetar o aprendizado.`,
-      });
-    }
-  }
-
-  // 4. Escalar o vencedor por CPR, com amostra mínima e sem estar fadigado (média).
-  const winner = creatives
-    .filter((c) => cprConfiavel && c.meetings >= MIN_REUNIOES && c.spend > 0 && c.fatigue.level !== "fadigado")
-    .sort((a, b) => a.cpr - b.cpr)[0];
-  if (winner) {
-    recs.push({
-      id: `scale-${winner.adId}`,
-      severity: "media",
-      dono: "MKT",
-      href: "/dinheiro#criativos",
-      title: `Escale "${rotuloCriativo(winner, creatives)}"`,
-      detail: `Melhor CPR ${formatCurrency(winner.cpr)} com ${winner.meetings} reuniões e ${formatInt(winner.leadsPainel)} leads. Aumente o budget 10–20% e observe 48–72h.`,
-    });
-  }
-
-  // 5. Ritmo de gasto (média).
-  const pacing = campaignPacing(data, nowIso);
-  if (pacing.status === "over" && pacing.projectedSpend) {
-    recs.push({
-      id: "pace-over",
-      severity: "media",
-      dono: "MKT",
-      href: "/dinheiro",
-      title: "Ritmo de gasto acima do orçamento",
-      detail: `No ritmo atual, gasto projetado ${formatCurrency0(pacing.projectedSpend)} vs orçamento ${formatCurrency0(pacing.budget)}. Reduza o budget diário para não estourar antes do fim.`,
-    });
-  } else if (pacing.status === "sub" && pacing.projectedSpend && pacing.budget > 0) {
-    recs.push({
-      id: "pace-sub",
-      severity: "baixa",
-      dono: "MKT",
-      href: "/dinheiro",
-      title: "Sobrando orçamento no ritmo atual",
-      detail: `Gasto projetado ${formatCurrency0(pacing.projectedSpend)} de ${formatCurrency0(pacing.budget)}. Há espaço para escalar os vencedores sem estourar.`,
-    });
-  }
-
-  recs.push(...buildOrganicContentRecommendations(data, range, nowIso));
-  // Dentro da mesma severidade, mais dinheiro parado vem primeiro.
-  return recs
-    .sort(
-      (a, b) =>
-        ORDER[a.severity] - ORDER[b.severity] || (b.midiaParada ?? 0) - (a.midiaParada ?? 0),
-    )
+  return buildOrganicContentRecommendations(data, range, nowIso)
+    .sort((a, b) => ORDER[a.severity] - ORDER[b.severity] || (b.midiaParada ?? 0) - (a.midiaParada ?? 0))
     .slice(0, 6);
 }
 

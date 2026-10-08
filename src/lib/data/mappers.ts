@@ -10,7 +10,10 @@
 import { toRole } from "../auth/roles";
 import { normalizeLeadStatus } from "../lead-status";
 import type {
+  AcaoEstado,
+  AcaoEstadoValor,
   AdDaily,
+  AiAnalysis,
   AuditEntry,
   Campaign,
   CampaignStatus,
@@ -31,6 +34,7 @@ import type {
   MetricaComMeta,
   EntradasCalculadora,
   PostDraft,
+  ResumoSemanal,
   SyncFonte,
   SyncRun,
 } from "../types";
@@ -531,4 +535,52 @@ export const fromAudit = (a: AuditEntry): Row => ({
   actor: a.actor,
   action: a.action,
   detail: a.detail ?? null,
+});
+
+// ---- Bússola (Fase 5) ----
+
+export const toAcaoEstado = (r: Row): AcaoEstado => ({
+  id: s(r.id),
+  brand: brandOf(r.brand),
+  semana: day(r.semana),
+  acao: s(r.acao),
+  estado: s(r.estado) as AcaoEstadoValor,
+  motivo: r.motivo ? s(r.motivo) : undefined,
+  titulo: s(r.titulo),
+  por: s(r.por),
+  em: iso(r.em),
+});
+
+export const fromAcaoEstado = (e: AcaoEstado): Row => ({
+  id: e.id,
+  brand: e.brand,
+  semana: e.semana,
+  acao: e.acao,
+  estado: e.estado,
+  motivo: e.motivo ?? null,
+  titulo: e.titulo,
+  por: e.por,
+  em: e.em,
+});
+
+export const toResumoSemanal = (r: Row): ResumoSemanal => ({
+  id: s(r.id),
+  brand: brandOf(r.brand),
+  semana: day(r.semana),
+  periodo: { de: day(r.periodo_de), ate: day(r.periodo_ate) },
+  // jsonb: objeto já parseado nos dois backends SQL; string só se alguém gravou texto.
+  analise: (typeof r.analise === "string" ? JSON.parse(r.analise) : r.analise) as AiAnalysis,
+  origem: r.origem === "manual" ? "manual" : "cron",
+  criadoEm: iso(r.criado_em),
+});
+
+export const fromResumoSemanal = (x: ResumoSemanal): Row => ({
+  id: x.id,
+  brand: x.brand,
+  semana: x.semana,
+  periodo_de: x.periodo.de,
+  periodo_ate: x.periodo.ate,
+  analise: x.analise,
+  origem: x.origem,
+  criado_em: x.criadoEm,
 });

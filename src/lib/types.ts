@@ -582,6 +582,50 @@ export interface Meta {
   criadaPor: string;
 }
 
+// ------------------------- Ações da semana (Fase 5) ------------------
+
+export type AcaoEstadoValor = "feita" | "ignorada" | "reaberta";
+
+/**
+ * O que alguém decidiu sobre uma ação do motor numa semana. Só se INSERE: a
+ * última linha de (marca, semana, ação) é o estado atual e as anteriores são o
+ * histórico. Na semana seguinte a ação volta a ser avaliada do zero — "feita"
+ * não some com o gatilho, só com o fato que o disparou.
+ */
+export interface AcaoEstado {
+  id: string;
+  brand: Brand;
+  /** Segunda-feira da semana (AAAA-MM-DD, Brasília). */
+  semana: string;
+  /** Id estável da ação (regra + alvo), ex. "C1", "M3:120003". */
+  acao: string;
+  estado: AcaoEstadoValor;
+  /** Obrigatório ao ignorar. */
+  motivo?: string;
+  /** O título da ação na hora — o histórico conta a história sem recalcular. */
+  titulo: string;
+  por: string;
+  em: string; // ISO
+}
+
+// ------------------------- Resumo semanal (H7) -----------------------
+
+/**
+ * A leitura da semana escrita pela IA (cron de segunda 08:00, ou regenerada à
+ * mão). Uma linha por geração; a Bússola mostra a mais recente e guarda as 12
+ * últimas como histórico.
+ */
+export interface ResumoSemanal {
+  id: string;
+  brand: Brand;
+  /** Segunda-feira da semana resumida (AAAA-MM-DD). */
+  semana: string;
+  periodo: { de: string; ate: string };
+  analise: AiAnalysis;
+  origem: "cron" | "manual";
+  criadoEm: string; // ISO
+}
+
 // ------------------------- Dataset ----------------------------------
 
 /** The full dataset the dashboard renders from. */

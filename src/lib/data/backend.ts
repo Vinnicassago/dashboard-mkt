@@ -1,4 +1,5 @@
 import type {
+  AcaoEstado,
   AdDaily,
   AuditEntry,
   Creative,
@@ -11,6 +12,7 @@ import type {
   LeadStatus,
   Meta,
   PostDraft,
+  ResumoSemanal,
   SyncFonte,
   SyncRun,
 } from "../types";
@@ -188,6 +190,22 @@ export interface DataBackend {
   /** Mais recentes primeiro (por `finishedAt`). `limit` 0 = sem limite. */
   listSyncRuns(opts?: ListSyncRunsOpts): Promise<SyncRun[]>;
 
+  // ---- Bússola (Fase 5) ----
+  /**
+   * Grava a decisão sobre uma ação da semana. Só INSERE (histórico): a última
+   * linha de (marca, semana, ação) é o estado atual — nada é alterado nem apagado.
+   */
+  addAcaoEstado(e: AcaoEstado): Promise<void>;
+  /**
+   * Mais recentes primeiro (por `em`), da marca e, se dada, da semana. `limit`
+   * 0 = sem limite.
+   */
+  listAcoesEstado(opts: ListAcoesEstadoOpts): Promise<AcaoEstado[]>;
+  /** Grava uma geração do resumo da semana (cron ou manual). Uma linha por geração. */
+  addResumoSemanal(r: ResumoSemanal): Promise<void>;
+  /** Por `semana` desc, depois `criadoEm` desc. `limit` 0 = sem limite. */
+  listResumosSemanais(opts: ListResumosOpts): Promise<ResumoSemanal[]>;
+
   /** Accumulate landing-page counters for a brand's day (read-modify-write). */
   bumpLpDaily(brand: string, date: string, delta: LpDelta): Promise<void>;
 
@@ -231,6 +249,20 @@ export interface ListEventsOpts {
   limit?: number;
 }
 
+export interface ListAcoesEstadoOpts {
+  brand: string;
+  /** Segunda-feira da semana (AAAA-MM-DD). Sem ela, todas as semanas da marca. */
+  semana?: string;
+  /** Padrão 200; 0 = sem limite. */
+  limit?: number;
+}
+
+export interface ListResumosOpts {
+  brand: string;
+  /** Padrão 12 (o histórico que a Bússola guarda); 0 = sem limite. */
+  limit?: number;
+}
+
 /** Deltas applied to a day's landing-page counters. */
 export interface LpDelta {
   visits?: number;
@@ -247,13 +279,6 @@ export const STATE_KEYS = {
    *  Sobrepõem o env (<SLUG>_CAMPAIGN_MATCH) quando presentes. */
   brandCampaignMatch: "brand_campaign_match",
 } as const;
-
-/**
- * Chave da última análise de IA de uma marca. Fica no state bag (não numa tabela
- * própria): é UM registro por marca, sobrescrito a cada rodada — histórico de
- * análises não é requisito, e uma tabela para isso seria peso morto.
- */
-export const aiAnalysisKey = (brand: string) => `ai_analysis_${brand}`;
 
 export interface StoredToken {
   token: string;

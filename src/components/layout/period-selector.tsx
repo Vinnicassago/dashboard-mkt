@@ -4,13 +4,17 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { CalendarRange } from "lucide-react";
 import { RANGE_PRESETS, buildCustomKey, hojeEmBrasilia, parseCustomRange, rangeLabel } from "@/lib/range";
+import { periodoPadraoDe } from "./nav-items";
 import { cn } from "@/lib/utils";
 
 export function PeriodSelector() {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
-  const current = params.get("range") ?? "all";
+  // Sem `?range=`, cada página tem o seu padrão (a Bússola olha a semana): o
+  // preset marcado é o que a página está mostrando, não "Campanha" por reflexo.
+  const padrao = periodoPadraoDe(pathname);
+  const current = params.get("range") ?? padrao;
   const custom = parseCustomRange(current);
 
   const [aberto, setAberto] = useState(false);
@@ -39,7 +43,12 @@ export function PeriodSelector() {
 
   function irPara(key: string | null) {
     const next = new URLSearchParams(params.toString());
-    if (!key || key === "all") next.delete("range");
+    // "Campanha" numa página cujo padrão é outro precisa ir explícito na URL —
+    // sem o parâmetro, a página voltaria ao padrão dela.
+    if (!key || key === "all") {
+      if (padrao === "all") next.delete("range");
+      else next.set("range", "all");
+    } else if (key === padrao) next.delete("range");
     else next.set("range", key);
     const qs = next.toString();
     startTransition(() => router.push(qs ? `${pathname}?${qs}` : pathname, { scroll: false }));

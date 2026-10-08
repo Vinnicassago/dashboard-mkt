@@ -29,6 +29,7 @@ import {
 import { FILA_ETAPAS } from "./fila";
 import { horasUteisEntre, somarHorasUteis } from "./horario-util";
 import { hojeEmBrasilia } from "./range";
+import { ultimasSemanas } from "./semana";
 import {
   META_DEF,
   METRICAS_COM_META,
@@ -205,6 +206,37 @@ export function kpisDoPeriodo(
     trust,
     overview: k,
   };
+}
+
+// ---------------------------------------------------------------- tendência semanal
+
+export interface PontoSemanal {
+  /** Segunda-feira da semana (AAAA-MM-DD). */
+  semana: string;
+  reunioesAgendadas: number;
+  leads: number;
+  investimentoConversao: number;
+  /** A semana de hoje ainda não fechou. */
+  incompleta: boolean;
+}
+
+/**
+ * A tendência das últimas `n` semanas (segunda a domingo), terminando na semana
+ * de `hoje`. Cada ponto é `kpisDoPeriodo` daquela semana — o minigráfico do
+ * placar mostra as MESMAS reuniões agendadas do número ao lado dele, não uma
+ * contagem própria (ADR-03).
+ */
+export function serieSemanal(data: DashboardData, hoje: string, n = 10): PontoSemanal[] {
+  return ultimasSemanas(hoje, n).map((s) => {
+    const k = kpisDoPeriodo(data, { from: s.from, to: s.to }, { hoje });
+    return {
+      semana: s.semana,
+      reunioesAgendadas: k.reunioesAgendadas.valor,
+      leads: k.leads.valor,
+      investimentoConversao: k.investimentoConversao.valor,
+      incompleta: s.to >= hoje,
+    };
+  });
 }
 
 // ---------------------------------------------------------------- exibição

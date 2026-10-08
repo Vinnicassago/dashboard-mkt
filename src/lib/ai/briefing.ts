@@ -68,6 +68,14 @@ export interface BriefingOptions {
   drafts?: PostDraft[];
   /** Avisos de qualidade de dados (vêm de fora: dependem do último sync). */
   warnings: DataWarning[];
+  /**
+   * As ações do motor v2 (`resumoDasAcoes`), quando quem chama já montou a
+   * Bússola — a IA recebe o que a tela decidiu, com dono e estado, e não
+   * reinventa a lista. Ausente, entram só as regras de conteúdo.
+   */
+  acoes?: { regra: string; dono: string; severidade: string; titulo: string; estado?: string }[];
+  /** O veredito do placar e o gargalo, como a Bússola os escreve. */
+  bussola?: { veredito: string; gargalo?: string };
 }
 
 /**
@@ -226,10 +234,25 @@ export function buildBriefing(
     },
 
     metas,
-    alertasJaDetectados: buildRecommendations(data, range, opts.nowIso).map((r) => ({
-      severidade: r.severity,
-      titulo: r.title,
-    })),
+    // O que o painel já decidiu sozinho: as ações do motor (com dono e estado)
+    // e as regras de conteúdo — a IA prioriza ou discorda, não redescobre.
+    alertasJaDetectados: [
+      ...(opts.acoes ?? []).map((a) => ({
+        severidade: a.severidade,
+        titulo: a.titulo,
+        dono: a.dono,
+        regra: a.regra,
+        estado: a.estado,
+      })),
+      ...buildRecommendations(data, range, opts.nowIso).map((r) => ({
+        severidade: r.severity,
+        titulo: r.title,
+        dono: r.dono,
+        regra: "conteudo",
+        estado: undefined,
+      })),
+    ],
+    bussola: opts.bussola ?? null,
     rotinaDePresenca: (() => {
       const r = presenceRoutine(data.igAccountDaily.filter((x) => inRange(x.date, range)));
       if (!r.temDados) return null;

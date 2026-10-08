@@ -3,10 +3,11 @@
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { AlertTriangle, Info, Settings2, TrendingDown, TrendingUp, WifiOff, X } from "lucide-react";
 import { ordenarAlertas, type Alerta, type NivelAlerta } from "@/lib/alertas";
 import { comPeriodo } from "@/lib/range";
+import { periodoPadraoDe } from "./nav-items";
 import { cn } from "@/lib/utils";
 
 /**
@@ -70,7 +71,9 @@ const ESTILO: Record<NivelAlerta, { Icon: typeof AlertTriangle; cor: string; tag
 export function IndicadorAlertas() {
   const ctx = useContext(Ctx);
   const [aberto, setAberto] = useState(false);
-  const rangeKey = useSearchParams().get("range") ?? undefined;
+  // Sem `?range=`, o link leva o período que a página está mostrando (a Bússola: 7 dias).
+  const pathname = usePathname();
+  const rangeKey = useSearchParams().get("range") ?? periodoPadraoDe(pathname);
   const alertas = useMemo(
     () => (ctx ? ordenarAlertas([ctx.globais, ...Object.values(ctx.daPagina)]) : []),
     [ctx],

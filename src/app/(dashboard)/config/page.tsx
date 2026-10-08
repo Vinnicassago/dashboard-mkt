@@ -393,8 +393,17 @@ export default async function ConfigPage({
               ok={isAiConfigured()}
               hint={
                 isAiConfigured()
-                  ? "ANTHROPIC_API_KEY definido — leitura do período e revisão de peças"
-                  : "Defina ANTHROPIC_API_KEY para a leitura do período e a revisão de peças"
+                  ? "ANTHROPIC_API_KEY definido — resumo da semana e revisão de peças"
+                  : "Defina ANTHROPIC_API_KEY para o resumo da semana e a revisão de peças"
+              }
+            />
+            <StatusRow
+              label="Resumo da semana (IA) por cron"
+              ok={isAiConfigured() && status.cronSecret}
+              hint={
+                isAiConfigured() && status.cronSecret
+                  ? "Agende no cron-job.org: segunda 08:00 (Brasília) → GET /api/resumo-semanal?secret=CRON_SECRET (≈ US$ 0,09 por execução)"
+                  : "Precisa de ANTHROPIC_API_KEY e CRON_SECRET; depois agende GET /api/resumo-semanal?secret=… na segunda às 08:00"
               }
             />
             <StatusRow

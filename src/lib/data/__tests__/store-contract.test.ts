@@ -10,7 +10,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { DataBackend } from "../backend";
-import type { AdDaily, Creative, Lead, LeadEvent } from "../../types";
+import type { AdDaily, AiAnalysis, Creative, Lead, LeadEvent } from "../../types";
 
 const ad = (brand: string, date: string, adId: string, spend: number): AdDaily => ({
   brand,
@@ -275,6 +275,53 @@ function contrato(nome: string, abrir: () => Promise<{ backend: DataBackend; fec
       expect(minhas.map((m) => m.id).sort()).toEqual([`MT1-${sfx}`, `MT2-${sfx}`]);
       expect(minhas.find((m) => m.id === `MT1-${sfx}`)).toMatchObject({ alvo: 20, vigenteDesde: "2031-01-01", entradas: { V: 200000, a: 0.1 } });
       expect(minhas.find((m) => m.id === `MT2-${sfx}`)?.alvo).toBeNull();
+    });
+
+    it("estado das ações: só insere, filtra por marca e semana, mais recente primeiro", async () => {
+      const brand = `b-${sfx}`;
+      const base = { brand, semana: "2031-03-02", acao: "C1", titulo: "Pausar o criativo C1", por: "marketing" };
+      await b.addAcaoEstado({ ...base, id: `AE1-${sfx}`, estado: "feita", em: "2031-03-02T10:00:00.000Z" });
+      await b.addAcaoEstado({ ...base, id: `AE2-${sfx}`, estado: "reaberta", motivo: "voltou a gastar", em: "2031-03-02T11:00:00.000Z" });
+      await b.addAcaoEstado({ ...base, id: `AE3-${sfx}`, semana: "2031-03-09", acao: "M1", estado: "ignorada", motivo: "sem verba", em: "2031-03-09T09:00:00.000Z" });
+      await b.addAcaoEstado({ ...base, id: `AE4-${sfx}`, brand: `outra-${sfx}`, estado: "feita", em: "2031-03-02T12:00:00.000Z" });
+
+      const semana = await b.listAcoesEstado({ brand, semana: "2031-03-02", limit: 0 });
+      expect(semana.map((e) => e.id)).toEqual([`AE2-${sfx}`, `AE1-${sfx}`]);
+      expect(semana[0]).toMatchObject({ estado: "reaberta", motivo: "voltou a gastar", acao: "C1", semana: "2031-03-02", em: "2031-03-02T11:00:00.000Z" });
+      expect(semana[1].motivo).toBeUndefined();
+      expect((await b.listAcoesEstado({ brand, limit: 0 })).map((e) => e.id).sort()).toEqual([`AE1-${sfx}`, `AE2-${sfx}`, `AE3-${sfx}`]);
+    });
+
+    it("resumo semanal: guarda a análise inteira (jsonb), lista por semana desc e respeita o limite", async () => {
+      const brand = `r-${sfx}`;
+      const analise = (semana: string): AiAnalysis => ({
+        diagnostico: `Semana de ${semana}.`,
+        acoes: [{ prioridade: "alta", titulo: `Ação da semana ${semana}`, porque: "CPR subiu", comoMedir: "CPR na sexta" }],
+        testarNaSemana: "Trocar o gancho",
+        naoMudou: "Taxa lead → reunião",
+        modelo: "teste",
+        criadoEm: `${semana}T08:00:00.000Z`,
+        periodo: { de: semana, ate: semana },
+      });
+      const resumo = (id: string, semana: string, ate: string) => ({
+        id: `${id}-${sfx}`,
+        brand,
+        semana,
+        periodo: { de: semana, ate },
+        analise: analise(semana),
+        origem: "cron" as const,
+        criadoEm: `${semana}T08:00:00.000Z`,
+      });
+      await b.addResumoSemanal(resumo("RS1", "2031-01-05", "2031-01-11"));
+      await b.addResumoSemanal(resumo("RS2", "2031-01-19", "2031-01-25"));
+      await b.addResumoSemanal(resumo("RS3", "2031-01-12", "2031-01-18"));
+
+      const todos = await b.listResumosSemanais({ brand, limit: 0 });
+      expect(todos.map((r) => r.semana)).toEqual(["2031-01-19", "2031-01-12", "2031-01-05"]);
+      expect(todos[0]).toMatchObject({ id: `RS2-${sfx}`, periodo: { de: "2031-01-19", ate: "2031-01-25" }, origem: "cron" });
+      expect(todos[0].analise.acoes[0].titulo).toBe("Ação da semana 2031-01-19");
+      expect(todos[0].analise.periodo).toEqual({ de: "2031-01-19", ate: "2031-01-19" });
+      expect(await b.listResumosSemanais({ brand, limit: 2 })).toHaveLength(2);
     });
 
     it("registro de auditoria", async () => {
