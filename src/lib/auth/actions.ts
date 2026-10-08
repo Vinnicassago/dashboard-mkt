@@ -126,7 +126,7 @@ export async function addUserAction(
     role,
     createdAt: new Date().toISOString(),
   });
-  revalidatePath("/config");
+  revalidatePath("/configuracoes");
   return { ok: true, message: `Usuário "${username}" criado.` };
 }
 
@@ -143,7 +143,7 @@ export async function deleteUserAction(username: string): Promise<AuthState> {
   }
 
   await deleteUser(target);
-  revalidatePath("/config");
+  revalidatePath("/configuracoes");
   return { ok: true, message: `Usuário "${target}" removido.` };
 }
 
@@ -156,6 +156,6 @@ export async function setUserRoleAction(username: string, role: Role): Promise<A
     return { ok: false, message: "Você não pode alterar o próprio papel." };
   }
   await setUserRole(target, toRole(role));
-  revalidatePath("/config");
+  revalidatePath("/configuracoes");
   return { ok: true, message: `Papel de "${target}" atualizado.` };
 }

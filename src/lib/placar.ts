@@ -113,11 +113,11 @@ export function montarPlacar(e: EntradaPlacar): Placar {
     estado = "sem-dado";
     frase = `não dá para afirmar quantas reuniões foram agendadas ${quando}`;
     motivo = reunioes.confianca.motivo;
-    acao = { label: "Ver as integrações", href: "/config#integracoes" };
+    acao = { label: "Ver as integrações", href: "/configuracoes/integracoes" };
   } else if (!linha?.alvo) {
     estado = "sem-meta";
     frase = `${reun(reunioes.valor)} ${quando} — sem meta para comparar`;
-    acao = { label: "Cadastrar a meta", href: "/config#metas" };
+    acao = { label: "Cadastrar a meta", href: "/configuracoes#metas" };
   } else if (linha.parcial || !linha.avaliacao) {
     estado = "sem-meta";
     frase = `${reun(reunioes.valor)} ${quando}`;

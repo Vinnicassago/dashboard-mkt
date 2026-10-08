@@ -253,7 +253,7 @@ export default async function ConfigPage({
   };
   const preencher = trust.travas.filter((t) => t.nivel === "config");
   const corrigir = trust.travas.filter(
-    (t) => t.nivel !== "config" && (t.cta?.href.startsWith("/config") ?? false),
+    (t) => t.nivel !== "config" && (t.cta?.href.startsWith("/configuracoes") ?? false),
   );
 
   return (
@@ -376,7 +376,7 @@ export default async function ConfigPage({
                   {!roboConfigurado
                     ? "Faltam ROBO_SUPABASE_URL e ROBO_SUPABASE_KEY — o painel funciona sem o robô."
                     : roboOff
-                      ? "Desativado: as etapas do robô não aparecem na cascata, na Fila nem em Pessoas."
+                      ? "Desativado: as etapas do robô não aparecem na cascata, na Fila nem em Leads."
                       : "Ativo: o painel lê o robô. Se a leitura falhar, a Fila avisa que está incompleta."}
                 </p>
               </div>
@@ -851,17 +851,13 @@ export default async function ConfigPage({
               Gerador de UTMs
             </CardTitle>
             <CardDescription>
-              Use estes links nos anúncios para que cada lead chegue com a origem certa.
-              Padronizar agora é o que permite comparar criativos depois — UTM que não foi
-              marcada no anúncio não tem como ser reconstruída.
+              Um link com as macros da Meta ({"{{campaign.id}}"}, {"{{adset.id}}"}, {"{{ad.id}}"}) para
+              todos os anúncios: cada lead chega com campanha › conjunto › anúncio resolvidos. UTM
+              que não foi marcada no anúncio não tem como ser reconstruída depois.
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <UtmBuilder
-              defaultBase={process.env.LP_BASE_URL ?? ""}
-              defaultCampaign={(data.campaign.id || "campanha").toLowerCase()}
-              creatives={creatives}
-            />
+            <UtmBuilder defaultBase={process.env.LP_BASE_URL ?? ""} creatives={creatives} />
           </CardContent>
         </Card>
       ) : null}

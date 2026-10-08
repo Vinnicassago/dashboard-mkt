@@ -24,7 +24,7 @@ import {
   syncNowAction,
   updatePostsMetaAction,
   type ActionState,
-} from "@/app/(dashboard)/config/actions";
+} from "@/app/(dashboard)/configuracoes/actions";
 import { LEAD_STATUS_META, LOST_STATUSES, OPEN_STATUSES, statusLabel } from "@/lib/lead-status";
 import type { DiagnosticoLeads } from "@/lib/diagnostico-leads";
 import { CONFIRMACAO_PERIGO } from "@/lib/perigo";
@@ -689,7 +689,7 @@ export function ResetButton() {
         disabled={pending}
         onClick={() => {
           const digitado = window.prompt(
-            `Isso APAGA anúncios, Instagram e metas e grava o exemplo no lugar. Os leads reais não são apagados: ficam excluídos (dá para restaurar em Pessoas), com o histórico.\n\nPara confirmar, digite ${CONFIRMACAO_PERIGO}:`,
+            `Isso APAGA anúncios, Instagram e metas e grava o exemplo no lugar. Os leads reais não são apagados: ficam excluídos (dá para restaurar em Leads), com o histórico.\n\nPara confirmar, digite ${CONFIRMACAO_PERIGO}:`,
           );
           if (digitado == null) return;
           startTransition(async () => {

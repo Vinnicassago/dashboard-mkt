@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Recommendation, Severity } from "@/lib/recommendations";
 import { DONO_LABEL } from "@/lib/dono";
+import { comPeriodo } from "@/lib/range";
 
 /** Lista priorizada de ações. Cor por severidade. Server component. */
 const TONE: Record<Severity, string> = {
@@ -19,9 +20,12 @@ const SEV_LABEL: Record<Severity, string> = {
 export function RecommendationsCard({
   recs,
   fallback,
+  rangeKey,
 }: {
   recs: Recommendation[];
   fallback?: string[];
+  /** O período da tela: os links levam-no (trocar de página não troca de período). */
+  rangeKey?: string;
 }) {
   if (recs.length === 0) {
     const lines = fallback?.length
@@ -65,7 +69,7 @@ export function RecommendationsCard({
               <>
                 {" "}
                 <Link
-                  href={r.href}
+                  href={comPeriodo(r.href, rangeKey)}
                   className="font-medium text-primary underline-offset-4 hover:underline"
                 >
                   abrir →

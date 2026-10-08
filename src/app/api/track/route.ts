@@ -5,6 +5,7 @@ import { DEFAULT_BRAND, type Lead } from "@/lib/types";
 import { candidatosIdLead, resolverIdLead } from "@/lib/lead-id";
 import { mesmoTelefone } from "@/lib/phone";
 import { acharMesmaPessoa } from "@/lib/identidade";
+import { idsDoUtm } from "@/lib/atribuicao";
 import { isLostStatus } from "@/lib/lead-status";
 import { newEventId } from "@/lib/auth/actor";
 import { avisarLeadNovo } from "@/lib/avisos";
@@ -112,7 +113,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Chave inválida." }, { status: 401, headers });
   }
   // Sem chave o endpoint aceita lead de qualquer origem. Não recusamos (a LP em
-  // produção quebraria e leads reais se perderiam); Ajustes mostra o alerta.
+  // produção quebraria e leads reais se perderiam); Configurações mostra o alerta.
   if (!expectedKey && process.env.NODE_ENV === "production" && !avisouSemChave) {
     avisouSemChave = true;
     console.warn("[track] TRACK_INGEST_KEY não definida: /api/track aceita envios de qualquer origem.");
@@ -181,6 +182,9 @@ export async function POST(request: Request) {
     utmMedium: attr.utm_medium,
     utmTerm: attr.utm_term,
     fbclid: attr.fbclid,
+    // Os ids que o UTM padrão traz ({{campaign.id}}, {{adset.id}}, {{ad.id}}):
+    // guardados resolvidos, para a atribuição não depender de nome (D6).
+    ...idsDoUtm(attr),
     status: "lead",
     // kept so the later Schedule event can still be matched to this person
     fbc: body.fbc || attr.fbc,

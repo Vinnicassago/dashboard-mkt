@@ -47,7 +47,7 @@ export function alertasDeQualidade(warnings: DataWarning[]): Alerta[] {
     nivel: "aviso",
     titulo: w.message.split(" — ")[0],
     detalhe: w.message,
-    cta: { label: "Ver integrações", href: "/config#integracoes" },
+    cta: { label: "Ver integrações", href: "/configuracoes/integracoes" },
   }));
 }
 
@@ -73,7 +73,7 @@ export function alertasDeAtribuicao(data: DashboardData, range?: DateRange): Ale
       titulo: `${macro} ${macro === 1 ? "lead chegou" : "leads chegaram"} com a origem “{{…}}” sem resolver`,
       detalhe:
         "O link do anúncio usa uma macro que a Meta não preencheu (ex.: {{ad.name}} literal no utm_content). Esses leads aparecem com origem “Desconhecida” e ficam fora do custo por criativo e por conjunto. Corrija o utm_content no anúncio — use {{ad.id}}.",
-      cta: { label: "Gerar o link certo", href: "/config#utm" },
+      cta: { label: "Gerar o link certo", href: "/configuracoes/ferramentas#utm" },
     });
   }
   if (ambigua > 0) {
@@ -83,7 +83,7 @@ export function alertasDeAtribuicao(data: DashboardData, range?: DateRange): Ale
       titulo: `${ambigua} ${ambigua === 1 ? "lead tem" : "leads têm"} origem ambígua`,
       detalhe:
         "O utm_content traz só o NOME do anúncio, e mais de um anúncio tem esse nome. Sem o id não dá para dizer qual trouxe o lead — atribuir ao primeiro poderia mandar pausar o errado. Eles ficam fora do custo por criativo; inclua o id do anúncio no link.",
-      cta: { label: "Gerar o link certo", href: "/config#utm" },
+      cta: { label: "Gerar o link certo", href: "/configuracoes/ferramentas#utm" },
     });
   }
   return out;

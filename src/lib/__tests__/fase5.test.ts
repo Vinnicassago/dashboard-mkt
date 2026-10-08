@@ -204,7 +204,7 @@ describe("onde trava: transições com dono e o gargalo", () => {
       taxa: 1 / 113,
       referencia: { taxa: 0.1, origem: "meta" },
       razao: 1 / 113 / 0.1,
-      href: "/jornada",
+      href: "/funil",
     };
     const { impacto } = impactoEstimado([relatorio], relatorio, { from: "2026-07-27", to: "2026-10-06" });
     expect(impacto?.noPeriodo).toBe(10);
@@ -212,8 +212,8 @@ describe("onde trava: transições com dono e o gargalo", () => {
   });
 
   it("o impacto compõe as taxas seguintes até 'agendada' (meta quando a real é 0)", () => {
-    const visita: Transicao = { id: "visita_lead", rotulo: "Visita → Lead", dono: "LP", entradas: 700, saidas: 14, taxa: 0.02, referencia: { taxa: 0.05, origem: "media8s" }, razao: 0.4, href: "/jornada" };
-    const agendada: Transicao = { id: "lead_agendada", rotulo: "Lead → Agendada", dono: "COM", entradas: 14, saidas: 0, taxa: 0, referencia: { taxa: 0.1, origem: "meta" }, razao: 0, href: "/jornada" };
+    const visita: Transicao = { id: "visita_lead", rotulo: "Visita → Lead", dono: "LP", entradas: 700, saidas: 14, taxa: 0.02, referencia: { taxa: 0.05, origem: "media8s" }, razao: 0.4, href: "/funil" };
+    const agendada: Transicao = { id: "lead_agendada", rotulo: "Lead → Agendada", dono: "COM", entradas: 14, saidas: 0, taxa: 0, referencia: { taxa: 0.1, origem: "meta" }, razao: 0, href: "/funil" };
     // 700 × 0,03 × 0,10 (a meta, porque a real é 0) = 2,1 reuniões na semana.
     expect(impactoEstimado([visita, agendada], visita, SEMANA).impacto).toMatchObject({ porSemana: 2 });
     expect(impactoEstimado([visita, agendada], visita, SEMANA).impacto?.unidade).toBe("reunioes_agendadas");
@@ -447,7 +447,7 @@ describe("motor v2 — cada regra dispara pelo seu gatilho, com dono e amostra",
   });
 
   it("G1: sem metas (alta) ou sem orçamento de conversão (média)", () => {
-    expect(regra(rodar(base()), "G1")).toMatchObject({ severidade: "alta", href: "/config#metas", dono: "GESTAO" });
+    expect(regra(rodar(base()), "G1")).toMatchObject({ severidade: "alta", href: "/configuracoes#metas", dono: "GESTAO" });
     const comMeta = base({ metas: [meta("reunioes_agendadas", 7)], campaign: { ...base().campaign, budgetTotal: 0 } });
     expect(regra(rodar(comMeta), "G1")?.severidade).toBe("media");
     const completo = base({ metas: [meta("reunioes_agendadas", 7), meta("investimento_conversao", 1000)] });
@@ -569,7 +569,7 @@ describe("placar — o veredito contra a meta, e o custo como fato", () => {
 
   it("sem meta: SEM META com o link para cadastrar; meta que começa no meio do período não julga", () => {
     const semMeta = placarDe(base());
-    expect(semMeta).toMatchObject({ estado: "sem-meta", verbo: "SEM META", acao: { href: "/config#metas" } });
+    expect(semMeta).toMatchObject({ estado: "sem-meta", verbo: "SEM META", acao: { href: "/configuracoes#metas" } });
     expect(semMeta.frase).toMatch(/sem meta para comparar/);
     const parcial = placarDe(base({ metas: [meta("reunioes_agendadas", 7, "2026-10-05")] }));
     expect(parcial.estado).toBe("sem-meta");
@@ -593,7 +593,7 @@ describe("placar — o veredito contra a meta, e o custo como fato", () => {
   it("o gargalo e o impacto entram no placar com o dono e a origem da régua", () => {
     const leads = [...leadsEncerrados(49, "2026-10-05"), lead("2026-10-05", { status: "agendado", bookedAt: "2026-10-06T12:00:00.000Z", meetingFor: "2026-11-01T12:00:00.000Z" })];
     const p = placarDe(base({ leads, metas: [meta("taxa_lead_agendada", 0.1), meta("reunioes_agendadas", 7)] }));
-    expect(p.gargalo).toMatchObject({ rotulo: "Lead → Agendada", dono: "COM", origem: "meta", href: "/jornada" });
+    expect(p.gargalo).toMatchObject({ rotulo: "Lead → Agendada", dono: "COM", origem: "meta", href: "/funil" });
     expect(p.gargalo?.impactoTexto).toBe("+4 reuniões por semana se batesse a meta");
   });
 

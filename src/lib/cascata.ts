@@ -121,7 +121,7 @@ const FRASE_PERDA: Record<string, string> = {
 /**
  * A maior perda em PESSOAS depois do lead, descontando quem está parado na junta
  * (esses são fila, não vazamento). Com toda junta abaixo de 50% pintada de
- * vermelho, a Jornada acendia quatro alarmes do mesmo tamanho — dois deles
+ * vermelho, o Funil acendia quatro alarmes do mesmo tamanho — dois deles
  * artefatos de medição — e não respondia à própria pergunta. Função pura.
  */
 export function maiorVazamento(degraus: Degrau[]): Vazamento | null {
@@ -153,7 +153,7 @@ export function maiorVazamento(degraus: Degrau[]): Vazamento | null {
  * do bloco era o menos acionável. As taxas são RECALCULADAS entre os que sobraram,
  * senão o percentual apontaria para um degrau que não está mais na tela.
  *
- * A versão completa continua em /jornada.
+ * A versão completa continua em /funil.
  */
 export function resumirCascata(degraus: Degrau[]): Degrau[] {
   const base = degraus.slice(Math.max(0, degraus.findIndex((d) => d.key === "leads")));

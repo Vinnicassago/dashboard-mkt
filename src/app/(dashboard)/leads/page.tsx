@@ -29,7 +29,7 @@ export const dynamic = "force-dynamic";
 const duracao = (min: number | null) => formatarEspera(min == null ? null : min / 60);
 
 /**
- * Pessoas — quem é essa pessoa e o que já aconteceu com ela.
+ * Leads — quem é essa pessoa e o que já aconteceu com ela.
  *
  * Funde Leads (o cadastro do painel) e Atendimento Comercial (quem o robô passou
  * ao especialista). Saíram daqui as duas filas que as páginas antigas tinham —

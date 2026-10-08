@@ -276,6 +276,11 @@ export interface AdDaily {
   /** Id da campanha na Meta. Ausente em linha de CSV e nas anteriores a 0016. */
   campaignId?: string;
   /**
+   * Id do conjunto na Meta (0019). Conjuntos homônimos em campanhas diferentes
+   * viravam uma linha só quando o agrupamento era pelo nome (S20).
+   */
+  adsetId?: string;
+  /**
    * Raw Meta objective of the campaign this ad belongs to, e.g. `OUTCOME_LEADS`
    * (conversão) or `OUTCOME_ENGAGEMENT` (descoberta/seguidores). Comes from the
    * insights `objective` field; may be undefined for legacy rows or CSVs that
@@ -298,6 +303,12 @@ export interface Creative {
   brand: Brand;
   name: string;
   format: CreativeFormat;
+  /**
+   * Id do CRIATIVO na Meta (`creative{id}`, 0019). O mesmo criativo roda em
+   * vários anúncios (um por conjunto): a Mídia agrega por ele, e detalha por
+   * conjunto ao expandir.
+   */
+  creativeId?: string;
   thumbnailUrl?: string;
   // video engagement (for hook rate / retention study)
   videoPlays?: number; // 3s plays
@@ -355,6 +366,15 @@ export interface Lead {
   utmTerm?: string;
   /** Id do clique do anúncio (cru, como chegou na URL da LP). */
   fbclid?: string;
+  /**
+   * Ids resolvidos na entrada (0019, D6): o gerador de UTM emite
+   * `utm_campaign={{campaign.id}}&utm_term={{adset.id}}&utm_content={{ad.id}}`,
+   * e a ingestão guarda os ids quando vêm numéricos. Macro literal (`{{…}}`)
+   * ou nome em vez de id → ficam vazios e a atribuição cai no `utm_content`.
+   */
+  adId?: string;
+  adsetId?: string;
+  campaignId?: string;
   status: LeadStatus;
   /**
    * LEGADO: até out/2026 guardava o MOMENTO em que o status virou "Agendado",

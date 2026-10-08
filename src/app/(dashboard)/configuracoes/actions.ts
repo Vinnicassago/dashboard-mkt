@@ -140,7 +140,7 @@ export async function importLeadsCsv(
         : "");
     const jaHavia =
       existentes > 0
-        ? ` ${existentes} já existia(m) e foram mantido(s) como estão — status muda pela Fila ou por Pessoas.`
+        ? ` ${existentes} já existia(m) e foram mantido(s) como estão — status muda pela Fila ou por Leads.`
         : "";
     return { ok: true, message: `${novos} lead(s) novo(s) importado(s).${jaHavia}${extra}` };
   } catch (e) {
@@ -428,7 +428,7 @@ export async function setBudgetAction(
 /**
  * Troca os dados de campanha pelo exemplo. Só administrador, com a palavra de
  * confirmação conferida AQUI (não só no navegador). Nenhum lead é apagado: os
- * que não são do exemplo ficam excluídos (reversível, em Pessoas) em nome de
+ * que não são do exemplo ficam excluídos (reversível, em Leads) em nome de
  * quem apertou. O histórico dos leads e o registro de auditoria sobrevivem.
  */
 export async function resetSeedAction(confirmacao: string): Promise<ActionState> {
@@ -447,7 +447,7 @@ export async function resetSeedAction(confirmacao: string): Promise<ActionState>
   return {
     ok: true,
     message:
-      "Dados de exemplo restaurados. Os leads reais não foram apagados: estão em Pessoas → Excluídos e podem ser restaurados.",
+      "Dados de exemplo restaurados. Os leads reais não foram apagados: estão em Leads → Excluídos e podem ser restaurados.",
   };
 }
 
@@ -675,7 +675,7 @@ export async function setRoboAtivoAction(ativo: boolean): Promise<ActionState> {
   return {
     ok: true,
     message: ativo
-      ? "Robô ativado: as etapas dele voltam para a cascata, a Fila e Pessoas."
+      ? "Robô ativado: as etapas dele voltam para a cascata, a Fila e Leads."
       : "Robô desativado: as etapas dele saem do painel até você religar.",
   };
 }

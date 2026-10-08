@@ -143,7 +143,7 @@ export function formatDuration(seconds: number | null | undefined): string {
 
 /**
  * Espera / tempo decorrido, em horas, na língua de quem vai ligar: "35 min",
- * "5 h 20 min", "1 d 5 h", "32 d". Fonte ÚNICA (Fila, Pessoas, Jornada).
+ * "5 h 20 min", "1 d 5 h", "32 d". Fonte ÚNICA (Fila, Leads, Funil).
  *
  * Arredonda o TOTAL antes de fatiar — senão 31 d 23 h 41 min vira "31 d 24 h"
  * (era o bug da Fila). Abaixo de um dia mostra minutos; a partir de um dia,

@@ -119,7 +119,7 @@ const columns: Column<LeadEvent>[] = [
     sortable: true,
     sortValue: (r) => r.leadName,
     render: (r) => (
-      <Link href={`/pessoas/${encodeURIComponent(r.leadId)}`} className="hover:underline">
+      <Link href={`/leads/${encodeURIComponent(r.leadId)}`} className="hover:underline">
         {r.leadName}
       </Link>
     ),

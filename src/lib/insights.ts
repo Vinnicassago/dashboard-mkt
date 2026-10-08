@@ -7,7 +7,7 @@ import {
 } from "./metrics";
 import { custoExibivel, kpisDoPeriodo } from "./kpis";
 
-/** Abaixo disto, "melhor criativo por CPL" é sorte, não ranking (mesma régua do Dinheiro). */
+/** Abaixo disto, "melhor criativo por CPL" é sorte, não ranking (mesma régua da Mídia). */
 const MIN_LEADS_RANKING = 5;
 import { isAwareness } from "./brands";
 import {

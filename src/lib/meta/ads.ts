@@ -98,6 +98,8 @@ interface AdCreativeRow {
   id: string;
   name?: string;
   creative?: {
+    /** Id do CRIATIVO (o mesmo em vários anúncios) — a Mídia agrega por ele. */
+    id?: string;
     thumbnail_url?: string;
     object_type?: string;
     effective_instagram_media_id?: string;
@@ -159,7 +161,7 @@ async function fetchAdsetMeta(account: string, token: string) {
 async function fetchAdCreatives(account: string, token: string) {
   const url = graphUrl(GRAPH_FB, `/${account}/ads`, {
     fields:
-      "id,name,creative{thumbnail_url,object_type,effective_instagram_media_id,instagram_permalink_url}",
+      "id,name,creative{id,thumbnail_url,object_type,effective_instagram_media_id,instagram_permalink_url}",
     limit: 500,
     access_token: token,
   });
@@ -179,6 +181,7 @@ async function fetchAdCreatives(account: string, token: string) {
         r.id,
         {
           name: r.name ?? r.id,
+          creativeId: r.creative?.id,
           thumbnailUrl: r.creative?.thumbnail_url,
           format: FORMAT_BY_OBJECT_TYPE[r.creative?.object_type ?? ""] ?? undefined,
           // id da mídia pode divergir entre superfícies (Business vs Instagram
@@ -300,6 +303,7 @@ export async function fetchAdsAccount({
       string,
       {
         name: string;
+        creativeId?: string;
         thumbnailUrl?: string;
         format?: CreativeFormat;
         instagramMediaId?: string;
@@ -342,6 +346,8 @@ export async function fetchAdsAccount({
       campaign: r.campaign_name ?? "",
       campaignId: r.campaign_id || undefined,
       adset: r.adset_name ?? "",
+      // Conjuntos homônimos em campanhas diferentes viravam uma linha só (S20).
+      adsetId: r.adset_id || undefined,
       adId,
       objective,
       spend: num(r.spend),
@@ -362,6 +368,7 @@ export async function fetchAdsAccount({
       adId,
       brand,
       name: info?.name ?? r.ad_name ?? adId,
+      creativeId: info?.creativeId ?? prev?.creativeId ?? stored?.creativeId,
       format: info?.format ?? (plays > 0 ? "video" : (prev?.format ?? "imagem")),
       thumbnailUrl: info?.thumbnailUrl ?? prev?.thumbnailUrl ?? stored?.thumbnailUrl,
       videoPlays: (prev?.videoPlays ?? 0) + plays,

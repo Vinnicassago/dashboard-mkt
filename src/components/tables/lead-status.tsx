@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
-import { changeLeadStatus, reabrirLead } from "@/app/(dashboard)/pessoas/actions";
+import { changeLeadStatus, reabrirLead } from "@/app/(dashboard)/leads/actions";
 import {
   LEAD_STATUS_META,
   MOTIVOS_CONTATO_INVALIDO,
@@ -49,7 +49,7 @@ function rotuloDestino(atual: LeadStatus, para: LeadStatus): string {
 }
 
 /**
- * Registrar o desfecho de um lead — o MESMO controle em Pessoas (`modo="select"`,
+ * Registrar o desfecho de um lead — o MESMO controle em Leads (`modo="select"`,
  * na linha da tabela) e na Fila (`modo="botoes"`). Só oferece destinos que a
  * máquina de estados permite (`destinosPermitidos`); pede o dado que a transição
  * exige (data, valor, motivo, confirmação) antes de gravar. O servidor confere

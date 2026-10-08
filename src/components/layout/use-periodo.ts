@@ -8,7 +8,7 @@ import { periodoPadraoDe } from "./nav-items";
  * O período escolhido acompanha a navegação.
  *
  * Os links da barra lateral apontavam para a rota pura: escolher "7 dias" na
- * home e clicar em Jornada voltava para a campanha inteira sem aviso — duas
+ * home e clicar em Funil voltava para a campanha inteira sem aviso — duas
  * páginas seguidas contando o mesmo fato em janelas diferentes.
  *
  * Sem `?range=`, vale o padrão da página (a Bússola olha a semana): o link leva

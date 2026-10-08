@@ -34,7 +34,7 @@ const data = (iso?: string) => (iso ? formatDateTime(iso) : "—");
 /**
  * Ficha do lead — tudo o que aconteceu com UMA pessoa, numa tela: de onde veio,
  * cada tentativa, cada mudança de status, a reunião, as anotações; e as mesmas
- * ações da Fila. Não é página de menu: abre pelo nome em Pessoas, na Fila e no
+ * ações da Fila. Não é página de menu: abre pelo nome em Leads, na Fila e no
  * histórico (e pelo link do aviso de lead novo).
  */
 export default async function FichaDoLead({ params }: { params: Promise<{ id: string }> }) {
@@ -63,7 +63,7 @@ export default async function FichaDoLead({ params }: { params: Promise<{ id: st
   );
 
   const contato = resumoContato(proprios);
-  const origem = rotuladorDeOrigem(dados)(lead.utmContent);
+  const origem = rotuladorDeOrigem(dados)(lead);
   const naFila = lead.deletedAt ? null : etapaDoLead(lead, proprios, new Date().toISOString());
   const teste = pareceTeste(lead);
   const problemas = problemasDeContato(lead);
@@ -75,7 +75,7 @@ export default async function FichaDoLead({ params }: { params: Promise<{ id: st
   return (
     <div className="space-y-6">
       <Link
-        href="/pessoas"
+        href="/leads"
         className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
       >
         <ArrowLeft className="size-4" />
@@ -140,12 +140,12 @@ export default async function FichaDoLead({ params }: { params: Promise<{ id: st
                   {outros.map((o, i) => (
                     <span key={o.id}>
                       {i > 0 ? ", " : ""}
-                      <Link href={`/pessoas/${encodeURIComponent(o.id)}`} className="underline-offset-4 hover:underline">
+                      <Link href={`/leads/${encodeURIComponent(o.id)}`} className="underline-offset-4 hover:underline">
                         {o.name}
                       </Link>
                     </span>
                   ))}
-                  . Dá para mesclar em Pessoas → Revisar.
+                  . Dá para mesclar em Leads → Revisar.
                 </li>
               ) : null}
             </ul>

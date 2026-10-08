@@ -119,13 +119,13 @@ export async function salvarComercial(
 
   // Reunião e venda alimentam o funil, as metas e o aprendizado da campanha.
   if (!DECIDE_STATUS.has(campo)) {
-    revalidatePath("/pessoas");
+    revalidatePath("/leads");
     return { ok: true, message: "Salvo." };
   }
 
   const lead = await acharLead(telefone ?? null, sessionId);
   if (!lead) {
-    revalidatePath("/pessoas");
+    revalidatePath("/leads");
     revalidatePath("/fila");
     return {
       ok: true,
@@ -142,7 +142,7 @@ export async function salvarComercial(
 
   const novoStatus = statusDaDecisao(campo, valor, everBooked(lead));
   if (!novoStatus) {
-    revalidatePath("/pessoas");
+    revalidatePath("/leads");
     revalidatePath("/fila");
     return { ok: true, message: "Salvo." };
   }
@@ -153,14 +153,14 @@ export async function salvarComercial(
   // migração de marcos isso não apaga mais a reunião do CPR: `booked_at` fica
   // gravado e `isBooked` lê o fato, não o status atual.
   if (!isLostStatus(novoStatus) && statusRank(novoStatus) <= statusRank(lead.status)) {
-    revalidatePath("/pessoas");
+    revalidatePath("/leads");
     revalidatePath("/fila");
     return { ok: true, message: "Salvo." };
   }
 
   // Regras do robô (acima), não as da tela: o robô não sabe a data da reunião.
   const r = await aplicarStatus(lead, novoStatus, { value: valorNegocio });
-  revalidatePath("/pessoas");
+  revalidatePath("/leads");
   revalidatePath("/fila");
   return { ok: true, message: r.message };
 }

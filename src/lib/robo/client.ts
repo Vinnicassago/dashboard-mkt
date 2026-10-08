@@ -19,7 +19,7 @@ export function isRoboConfigured(): boolean {
 }
 
 /**
- * Credencial presente E não desativado em Ajustes. Desativado devolve
+ * Credencial presente E não desativado em Configurações. Desativado devolve
  * "desligado" em toda leitura — as etapas do robô somem, sem erro (D5).
  */
 async function roboLigado(): Promise<boolean> {

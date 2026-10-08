@@ -41,7 +41,7 @@ function media(v: number | null | undefined): string {
 const horas = (n: number | null) => formatarEspera(n);
 
 /**
- * Jornada — onde exatamente o dinheiro vaza.
+ * Funil — onde exatamente estamos perdendo reuniões.
  *
  * Absorveu Funil & LP e Robô. As três desenhavam o mesmo funil em três recortes
  * (painel, robô, cascata) com números que não somavam entre si. Ficou a cascata
@@ -52,7 +52,7 @@ const horas = (n: number | null) => formatarEspera(n);
  * A página abre com a resposta escrita — o maior vazamento depois do lead —, não
  * com o método nem com o alerta de gente parada, que já mora no farol e na Fila.
  */
-export default async function JornadaPage({
+export default async function FunilPage({
   searchParams,
 }: {
   searchParams: Promise<{ range?: string }>;
@@ -61,7 +61,7 @@ export default async function JornadaPage({
   const data = await getData(brand);
   const { range } = pageRange(data, (await searchParams).range);
 
-  // Os MESMOS números da home e do Dinheiro (kpisDoPeriodo).
+  // Os MESMOS números da home e da Mídia (kpisDoPeriodo).
   const kp = kpisDoPeriodo(data, range, {
     brandRules: await resolveMetaBrands(),
     cobertura: await coberturaDeAnuncios(brand),

@@ -8,7 +8,7 @@ import {
   corrigirDesistenciaSemReuniao,
   deleteLeadAction,
   mesclarLeads,
-} from "@/app/(dashboard)/pessoas/actions";
+} from "@/app/(dashboard)/leads/actions";
 import { StatusBadge } from "@/components/tables/lead-status";
 import { statusLabel } from "@/lib/lead-status";
 import { formatDateTime } from "@/lib/format";
@@ -34,7 +34,7 @@ export interface RevisarDados {
 
 function Nome({ l }: { l: RevisarLead }) {
   return (
-    <Link href={`/pessoas/${encodeURIComponent(l.id)}`} className="font-medium hover:underline">
+    <Link href={`/leads/${encodeURIComponent(l.id)}`} className="font-medium hover:underline">
       {l.name}
     </Link>
   );

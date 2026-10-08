@@ -89,7 +89,7 @@ export interface KpisDoPeriodo {
 }
 
 export interface OpcoesKpis {
-  /** Regras de marca resolvidas (env + Ajustes) — sem elas, as travas de marca não rodam. */
+  /** Regras de marca resolvidas (env + Configurações) — sem elas, as travas de marca não rodam. */
   brandRules?: TrustInput["brandRules"];
   /** Reuniões que o atendimento registrou no período; `null` = sem leitura. */
   roboReunioes?: number | null;

@@ -57,7 +57,7 @@ export function OndeTrava({ transicoes, gargalo, rangeKey }: { transicoes: Trans
       <CardContent className="space-y-2.5 p-5">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <p className="text-sm font-medium">Onde trava</p>
-          <Link href={comPeriodo("/jornada", rangeKey)} className="text-xs font-medium text-primary underline-offset-4 hover:underline">
+          <Link href={comPeriodo("/funil", rangeKey)} className="text-xs font-medium text-primary underline-offset-4 hover:underline">
             Funil completo →
           </Link>
         </div>

@@ -68,11 +68,12 @@ export default async function OverviewPage({
   if (brand.type === "awareness") {
     const data = await getData(brand.slug);
     // O mesmo padrão da Bússola (a semana): o seletor marca "7 dias" para as duas marcas.
-    const { range } = pageRange(data, rangeParam ?? PERIODO_PADRAO_DA_BUSSOLA);
+    const { range, rangeKey } = pageRange(data, rangeParam ?? PERIODO_PADRAO_DA_BUSSOLA);
     return (
       <AwarenessOverview
         data={data}
         range={range}
+        rangeKey={rangeKey}
         recs={buildRecommendations(data, range, new Date().toISOString())}
         insights={buildInsights(data, range)}
         alertas={alertasDeQualidade(dataQualityChecks(data))}
@@ -112,10 +113,10 @@ export default async function OverviewPage({
       {/* 5. RODAPÉ — o resumo da semana (recolhido) e os links. */}
       <ResumoSemanalCard resumos={b.resumos} canWrite={canWrite} aiEnabled={aiEnabled} />
       <p className="flex flex-wrap gap-x-5 gap-y-1 border-t pt-4 text-xs text-muted-foreground" data-bloco="rodape">
-        <Link href={comPeriodo("/jornada", b.rangeKey)} className="hover:text-foreground">
+        <Link href={comPeriodo("/funil", b.rangeKey)} className="hover:text-foreground">
           Funil completo →
         </Link>
-        <Link href={comPeriodo("/dinheiro", b.rangeKey)} className="hover:text-foreground">
+        <Link href={comPeriodo("/midia", b.rangeKey)} className="hover:text-foreground">
           Verba por conjunto e por criativo →
         </Link>
         <Link href={comPeriodo("/conteudo", b.rangeKey)} className="hover:text-foreground">
@@ -140,6 +141,7 @@ function AwarenessOverview({
   insights,
   alertas,
   hint,
+  rangeKey,
   resumoCard,
 }: {
   data: DashboardData;
@@ -148,6 +150,7 @@ function AwarenessOverview({
   insights: string[];
   alertas: Alerta[];
   hint: string;
+  rangeKey: string;
   resumoCard: React.ReactNode;
 }) {
   const a = awarenessKpis(data, range);
@@ -259,7 +262,7 @@ function AwarenessOverview({
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <RecommendationsCard recs={recs} fallback={insights} />
+          <RecommendationsCard recs={recs} fallback={insights} rangeKey={rangeKey} />
         </CardContent>
       </Card>
     </div>

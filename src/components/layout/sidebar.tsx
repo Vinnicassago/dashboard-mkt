@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { isActive, navForBrand } from "./nav-items";
+import { NAV_GRUPOS, isActive, navForBrand } from "./nav-items";
 import { useComPeriodo } from "./use-periodo";
 import type { BrandDef } from "@/lib/brands";
 import { cn } from "@/lib/utils";
@@ -16,27 +16,40 @@ function brandSubtitle(brand: BrandDef): string {
   return brand.type === "awareness" ? "Ganho de seguidores" : "Campanha de Leads";
 }
 
+/** As 7 entradas, em grupos (Visão geral · Diagnóstico · Operação · Configurações). */
 function SideLinks({ brand, hrefFor }: { brand: BrandDef; hrefFor: HrefFor }) {
   const pathname = usePathname();
+  const itens = navForBrand(brand);
   return (
     <>
-      {navForBrand(brand).map((item) => {
-        const active = isActive(pathname, item.href);
+      {NAV_GRUPOS.map((grupo) => {
+        const doGrupo = itens.filter((i) => i.grupo === grupo);
+        if (doGrupo.length === 0) return null;
         return (
-          <Link
-            key={item.href}
-            href={hrefFor(item.href)}
-            aria-current={active ? "page" : undefined}
-            className={cn(
-              "relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-              active
-                ? "bg-primary/10 text-primary before:absolute before:top-1/2 before:left-0 before:h-5 before:w-1 before:-translate-y-1/2 before:rounded-r before:bg-primary before:content-['']"
-                : "text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
-            )}
-          >
-            <item.Icon className="size-4 shrink-0" />
-            {item.label}
-          </Link>
+          <div key={grupo} className="flex flex-col gap-0.5 pb-3">
+            <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/70">
+              {grupo}
+            </p>
+            {doGrupo.map((item) => {
+              const active = isActive(pathname, item.href);
+              return (
+                <Link
+                  key={item.href}
+                  href={hrefFor(item.href)}
+                  aria-current={active ? "page" : undefined}
+                  className={cn(
+                    "relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                    active
+                      ? "bg-primary/10 text-primary before:absolute before:top-1/2 before:left-0 before:h-5 before:w-1 before:-translate-y-1/2 before:rounded-r before:bg-primary before:content-['']"
+                      : "text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
+                  )}
+                >
+                  <item.Icon className="size-4 shrink-0" />
+                  {item.label}
+                </Link>
+              );
+            })}
+          </div>
         );
       })}
     </>

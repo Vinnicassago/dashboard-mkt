@@ -308,7 +308,7 @@ function regraC3(c: Contexto): Acao | null {
       `Lead → agendada em ${pct(o.a)} contra meta de ${pct(meta.alvo)}` +
       (inteiro >= 1 ? `: cerca de ${formatInt(inteiro)} ${plural(inteiro, "reunião", "reuniões")} a menos por semana` : ""),
     detalhe: `Nas últimas 8 semanas: ${formatInt(o.amostra.leads)} leads, ${formatInt(o.amostra.agendadas)} agendadas. ${meta.provisoria ? "A meta é provisória (sem amostra quando foi calculada). " : ""}Olhe a cadência de tentativas e o roteiro do 1º contato antes de mexer na mídia.`,
-    href: "/jornada",
+    href: "/funil",
     impacto: inteiro >= 1 ? { valor: inteiro, unidade: "reunioes_semana", texto: `≈ ${formatInt(inteiro)} ${plural(inteiro, "reunião", "reuniões")} a mais por semana` } : undefined,
     semImpacto: inteiro >= 1 ? undefined : "estimativa indisponível (menos de uma reunião por semana)",
     confianca: meta.provisoria && conf.confianca === "alta" ? "media" : conf.confianca,
@@ -381,7 +381,7 @@ function regraC5(c: Omit<Contexto, "registroEmLote" | "taxaAgendada">): Acao | n
       (emLote ? `, ${formatInt(lote)} delas pelo mesmo usuário em ${LOTE_JANELA_MIN} minutos` : "") +
       (share > 0 ? `; ${pct(share)} com mais de 72 h de atraso` : "") +
       ". Registro tardio distorce o 1º contato, a taxa lead → reunião e a comparação entre semanas. Combine o registro no mesmo dia.",
-    href: "/pessoas#historico",
+    href: "/leads#historico",
     semImpacto: "estimativa indisponível (é qualidade de registro, não conversão)",
     confianca: "alta",
     amostra: { n: mudancas.length, minimo: AMOSTRA_MIN.C5 },
@@ -420,7 +420,7 @@ function regraM1(c: Contexto): Acao | null {
         ? `CPL de ${formatCurrency(cpl.valor)} contra alvo de ${formatCurrency(ref.valor)} (+${pct(razao - 1)})`
         : `CPL de ${formatCurrency(cpl.valor)} (+${pct(razao - 1)} contra a média de 4 semanas)`,
     detalhe: `${formatInt(cpl.n)} leads de conversão no período. Corte os criativos mais caros e realoque para os que trazem lead barato; o CPL do Pixel não entra nesta conta.`,
-    href: "/dinheiro#criativos",
+    href: "/midia#criativos",
     impacto:
       aMais >= 1
         ? { valor: Math.round(aMais), unidade: "reais_semana", texto: `≈ ${formatCurrency0(aMais)} por semana a mais do que a régua` }
@@ -452,7 +452,7 @@ function regraM2(c: Contexto): Acao | null {
       (pior
         ? `O conjunto mais caro é “${pior.adset}” (${formatCurrency(pior.cpr)} por reunião, ${formatInt(pior.meetings)} reuniões): pause-o ou reduza a verba dele.`
         : "Nenhum conjunto tem 3 reuniões sozinho — compare pelo CPL do painel antes de pausar."),
-    href: "/dinheiro#conjuntos",
+    href: "/midia#conjuntos",
     impacto:
       aMais >= 1
         ? { valor: Math.round(aMais), unidade: "reais_semana", texto: `≈ ${formatCurrency0(aMais)} por semana acima do alvo` }
@@ -480,7 +480,7 @@ function regrasM3(c: Contexto): Acao[] {
       severidade: caro ? "alta" : "media",
       titulo: caro ? `Pause “${rotulo}”: fadigado e ${formatCurrency(x.cplPainel)} por lead` : `Renove a arte de “${rotulo}” (fadigando)`,
       detalhe: `${x.fatigue.reason}. ${cpl}. ${caro ? "Pause no Ads Manager e suba uma variação." : "Suba uma variação nova no mesmo conjunto antes que o custo dispare."}`,
-      href: "/dinheiro#criativos",
+      href: "/midia#criativos",
       semImpacto: "estimativa indisponível (fadiga antecipa custo, não o mede)",
       confianca: conf.confianca,
       confiancaMotivo: conf.motivo,
@@ -520,7 +520,7 @@ function regrasM4(c: Contexto): Acao[] {
       severidade: "alta",
       titulo: `Conjunto “${adset}”: ${pct(v.invalidos / v.n)} de contatos inválidos — revisar formulário e segmentação`,
       detalhe: `${formatInt(v.invalidos)} de ${formatInt(v.n)} leads do período com telefone ou e-mail inválido. Lead que não existe custa como lead e nunca vira reunião.`,
-      href: "/dinheiro#conjuntos",
+      href: "/midia#conjuntos",
       semImpacto: "estimativa indisponível",
       confianca: "alta",
       amostra: { n: v.n, minimo: AMOSTRA_MIN.M4 },
@@ -540,7 +540,7 @@ function regrasM4(c: Contexto): Acao[] {
       severidade: "alta",
       titulo: `Criativo “${nome}”: ${pct(v.invalidos / v.n)} de contatos inválidos — revisar formulário e segmentação`,
       detalhe: `${formatInt(v.invalidos)} de ${formatInt(v.n)} leads do período com telefone ou e-mail inválido.`,
-      href: "/dinheiro#criativos",
+      href: "/midia#criativos",
       semImpacto: "estimativa indisponível",
       confianca: "alta",
       amostra: { n: v.n, minimo: AMOSTRA_MIN.M4 },
@@ -564,7 +564,7 @@ function regraM5(c: Contexto): Acao | null {
     severidade: "media",
     titulo: `${pct(desc / total)} da verba (${formatCurrency0(desc)}) em descoberta, sem meta de seguidores ou alcance`,
     detalhe: "Verba de descoberta não gera lead e sai do CPL — sem uma meta própria, não há como dizer se está valendo. Cadastre a meta de seguidores (ou de alcance) ou reduza a fatia.",
-    href: "/config#metas-conteudo",
+    href: "/configuracoes#metas-conteudo",
     semImpacto: "estimativa indisponível",
     confianca: conf.confianca,
     confiancaMotivo: conf.motivo,
@@ -589,7 +589,7 @@ function regraM6(c: Contexto): Acao | null {
     severidade: "baixa",
     titulo: `Escale “${rotuloCriativo(vencedor, criativos)}”: ${formatCurrency(vencedor.cpr)} por reunião`,
     detalhe: `${formatInt(vencedor.meetings)} reuniões e ${formatInt(vencedor.leadsPainel)} leads no período. Aumente o orçamento 10–20% e observe 48–72 h.`,
-    href: "/dinheiro#criativos",
+    href: "/midia#criativos",
     semImpacto: "estimativa indisponível",
     confianca: conf.confianca,
     confiancaMotivo: conf.motivo,
@@ -613,7 +613,7 @@ function regraM7(c: Contexto): Acao | null {
     detalhe: abaixo
       ? "Verba parada não gera lead: confira se a campanha está entregando (pausa, aprendizado, limite diário)."
       : "Acima do previsto o orçamento acaba antes da semana: reduza o limite diário ou revise a meta.",
-    href: "/dinheiro",
+    href: "/midia",
     semImpacto: "estimativa indisponível",
     confianca: conf.confianca,
     confiancaMotivo: conf.motivo,
@@ -639,7 +639,7 @@ function regraL1(c: Contexto): Acao | null {
     severidade: "media",
     titulo: `Visita → lead caiu para ${pct(agora.visitToLead)} (média de 4 semanas: ${pct(antes.visitToLead)})`,
     detalhe: `${formatInt(agora.visits)} visitas e ${formatInt(agora.formSubmits)} envios no período. Confira o formulário, a velocidade da página e se o anúncio promete o que a página entrega.`,
-    href: "/jornada",
+    href: "/funil",
     impacto: inteiro >= 1 ? { valor: inteiro, unidade: "reunioes_semana", texto: `≈ ${formatInt(inteiro)} ${plural(inteiro, "reunião", "reuniões")} a mais por semana` } : undefined,
     semImpacto: inteiro >= 1 ? undefined : "estimativa indisponível (menos de uma reunião por semana)",
     confianca: "alta",
@@ -662,7 +662,7 @@ function regraL2(c: Contexto): Acao | null {
     titulo: `A landing page registrou ${formatInt(lp.formSubmits)} envios e o painel ${formatInt(leads)} leads (${diff > 0 ? "+" : "−"}${pct(Math.abs(diff))})`,
     detalhe:
       "Reenvios da mesma pessoa viram um lead só, então alguma diferença é normal. Acima de 15%, confira o rastreio (/api/track), a chave TRACK_INGEST_KEY e se a LP manda todos os campos.",
-    href: "/config#integracoes",
+    href: "/configuracoes/integracoes",
     semImpacto: "estimativa indisponível",
     confianca: "alta",
     amostra: { n: Math.max(lp.formSubmits, leads), minimo: AMOSTRA_MIN.L2 },
@@ -679,7 +679,7 @@ function regraD1(c: Contexto): Acao | null {
       severidade: "alta",
       titulo: `A sincronização da Meta está falhando desde ${formatDateShort(c.fontes.adsFalha.desde)}`,
       detalhe: `${c.fontes.adsFalha.erro} Enquanto isso, investimento, CPL e custo por reunião param no último sync que deu certo.`,
-      href: "/config#integracoes",
+      href: "/configuracoes/integracoes",
       semImpacto: "estimativa indisponível",
       confianca: "alta",
       amostra: { n: 1, minimo: 1 },
@@ -695,7 +695,7 @@ function regraD1(c: Contexto): Acao | null {
       severidade: "media",
       titulo: trava.titulo,
       detalhe: trava.detalhe,
-      href: trava.cta?.href ?? "/config#integracoes",
+      href: trava.cta?.href ?? "/configuracoes/integracoes",
       semImpacto: "estimativa indisponível",
       confianca: "alta",
       amostra: { n: 1, minimo: 1 },
@@ -715,7 +715,7 @@ function regraD1(c: Contexto): Acao | null {
     titulo: `${formatInt(parados)} dias do período sem nenhum gasto, com a campanha ativa`,
     detalhe:
       "O sync cobriu esses dias e não veio linha de anúncio: a Meta não entregou (conjunto pausado, anúncio reprovado, limite da conta). Confira no Ads Manager — verba parada não gera lead.",
-    href: "/dinheiro",
+    href: "/midia",
     semImpacto: "estimativa indisponível",
     confianca: "alta",
     amostra: { n: parados, minimo: DIAS_SEM_GASTO_MIN },
@@ -733,7 +733,7 @@ function regraD2(c: Contexto): Acao | null {
     severidade: "media",
     titulo: `${formatCurrency0(gasto)} de gasto sem marca classificada (30 dias)`,
     detalhe: "Nenhuma regra de marca reivindica essas campanhas: o gasto está fora do investimento, do CPL e do custo por reunião de todas as marcas. Diga de quem são e reclassifique.",
-    href: "/config#marcas",
+    href: "/configuracoes/marcas",
     semImpacto: "estimativa indisponível",
     confianca: "alta",
     amostra: { n: Math.round(gasto), minimo: 1 },
@@ -751,8 +751,8 @@ function regraG1(c: Contexto): Acao | null {
       dono: "GESTAO",
       severidade: "alta",
       titulo: "Sem metas, o painel não colore nada — cadastre pela calculadora",
-      detalhe: "Reuniões, CPL e custo por reunião ficam sem verde nem vermelho, e metade das ações desta lista não tem régua para disparar. Leva 2 minutos em Ajustes → Metas.",
-      href: "/config#metas",
+      detalhe: "Reuniões, CPL e custo por reunião ficam sem verde nem vermelho, e metade das ações desta lista não tem régua para disparar. Leva 2 minutos em Configurações → Metas.",
+      href: "/configuracoes#metas",
       semImpacto: "estimativa indisponível",
       confianca: "alta",
       amostra: { n: 0, minimo: 0 },
@@ -767,7 +767,7 @@ function regraG1(c: Contexto): Acao | null {
       severidade: "media",
       titulo: "Sem orçamento de conversão cadastrado, o ritmo da verba não tem régua",
       detalhe: "Cadastre o orçamento semanal de conversão (a calculadora sugere um) para o painel dizer se a verba está no ritmo.",
-      href: "/config#metas",
+      href: "/configuracoes#metas",
       semImpacto: "estimativa indisponível",
       confianca: "alta",
       amostra: { n: 0, minimo: 0 },

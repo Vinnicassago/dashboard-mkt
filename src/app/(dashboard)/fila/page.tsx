@@ -68,7 +68,7 @@ export default async function FilaPage({
     comercial: comercial.rows,
   });
 
-  // Robô desligado (sem credencial ou desativado em Ajustes): as etapas dele
+  // Robô desligado (sem credencial ou desativado em Configurações): as etapas dele
   // não existem. Leitura que QUEBROU é outra coisa — aí a fila está incompleta.
   const roboLigado = comercial.falha?.tipo !== "desligado" || convites.falha?.tipo !== "desligado";
   const parcial = comercial.falha?.tipo === "erro" || convites.falha?.tipo === "erro";
@@ -110,7 +110,7 @@ export default async function FilaPage({
             <p className="text-sm text-muted-foreground">
               <span className="font-medium text-foreground">Esta fila está incompleta.</span>{" "}
               Não consegui ler o robô, então só aparecem os leads do painel. Se o robô está
-              parado, desative-o em Ajustes → Integrações e este aviso some.
+              parado, desative-o em Configurações → Integrações e este aviso some.
             </p>
           </CardContent>
         </Card>

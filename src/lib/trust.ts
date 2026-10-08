@@ -43,7 +43,7 @@ export type MetricKey =
  */
 /**
  * Abaixo disto o custo por reunião não é medida: a próxima reunião muda o número
- * pela metade. Régua ÚNICA da quarentena — o motor de ações, a IA, o Dinheiro e a
+ * pela metade. Régua ÚNICA da quarentena — o motor de ações, a IA, o Mídia e a
  * cascata leem daqui para não imprimir nem decidir com uma reunião só.
  */
 export const MIN_REUNIOES = 3;
@@ -258,7 +258,7 @@ export function assessTrust(input: TrustInput): TrustReport {
       titulo: "As fontes discordam sobre reuniões",
       detalhe: `O atendimento registra ${input.roboReunioes} ${input.roboReunioes === 1 ? "reunião" : "reuniões"} e o funil do painel conta 0. Enquanto discordarem, o custo por reunião não é exibido — um dos dois lados está com o lead sem parear.`,
       afeta: ["cpr", "meetings"],
-      cta: { label: "Ver atendimento", href: "/pessoas#especialista" },
+      cta: { label: "Ver atendimento", href: "/leads#especialista" },
     });
   }
 
@@ -274,7 +274,7 @@ export function assessTrust(input: TrustInput): TrustReport {
           : "Nenhuma reunião registrada no período",
       detalhe: `Houve R$ ${Math.round(kpis.spendConversao)} de investimento em conversão e nenhuma reunião marcada. O custo por reunião fica sem denominador: "R$ 0,00" seria lido como custo baixo, quando é ausência de resultado.`,
       afeta: ["cpr"],
-      cta: { label: "Ver a jornada", href: "/jornada" },
+      cta: { label: "Ver a jornada", href: "/funil" },
     });
   }
 
@@ -305,7 +305,7 @@ export function assessTrust(input: TrustInput): TrustReport {
       detalhe:
         "Houve investimento em conversão e nenhum cadastro. O custo por lead fica sem denominador — e vale checar o rastreio da landing page antes de concluir que a mídia não performou.",
       afeta: ["cpl", "cplBlended"],
-      cta: { label: "Ver integrações", href: "/config#integracoes" },
+      cta: { label: "Ver integrações", href: "/configuracoes/integracoes" },
     });
   }
 
@@ -332,7 +332,7 @@ export function assessTrust(input: TrustInput): TrustReport {
       titulo: `R$ ${Math.round(contaminacao.valor)} de outra marca neste total`,
       detalhe: `${Math.round(pctContaminado * 100)}% do investimento vem de campanhas que casam com "${contaminacao.tokens.join('", "')}". Investimento, split por objetivo, CPL e custo por seguidor estão inflados — o valor real é menor.`,
       afeta: AFETA_CUSTO,
-      cta: { label: "Reclassificar marcas", href: "/config#marcas" },
+      cta: { label: "Reclassificar marcas", href: "/configuracoes/marcas" },
     });
   }
 
@@ -358,7 +358,7 @@ export function assessTrust(input: TrustInput): TrustReport {
         detalhe:
           "Há mais de uma marca no mesmo ad account e nenhuma regra que diga quais campanhas são de qual. Sem ela, tudo que não casa cai nesta marca por padrão — e um erro de atribuição fica indistinguível de um acerto.",
         afeta: AFETA_CUSTO,
-        cta: { label: "Definir a regra", href: "/config#marcas" },
+        cta: { label: "Definir a regra", href: "/configuracoes/marcas" },
       });
     } else if (contaminacao.regraInerte && orfaos.length === 0) {
       // Com prefixo órfão detectado, a regra inerte vira parte daquele cartão —
@@ -370,7 +370,7 @@ export function assessTrust(input: TrustInput): TrustReport {
         detalhe:
           "Existe uma regra salva, mas ela não casou com NENHUMA campanha do período. O match é uma substring literal do nome — um token quase certo pega zero. Enquanto isso, tudo continua caindo nesta marca.",
         afeta: AFETA_CUSTO,
-        cta: { label: "Conferir a regra", href: "/config#marcas" },
+        cta: { label: "Conferir a regra", href: "/configuracoes/marcas" },
       });
     }
 
@@ -388,7 +388,7 @@ export function assessTrust(input: TrustInput): TrustReport {
             : "") +
           ` Use ${orfao.prefixo} como token da outra marca e reclassifique.`,
         afeta: AFETA_CUSTO,
-        cta: { label: "Corrigir a atribuição", href: "/config#marcas" },
+        cta: { label: "Corrigir a atribuição", href: "/configuracoes/marcas" },
       });
     }
   }
@@ -404,7 +404,7 @@ export function assessTrust(input: TrustInput): TrustReport {
         ? `${Math.round((faltando / total) * 100)}% do período não tem linha de gasto e nenhuma sincronização que deu certo cobriu esses dias — pode ter havido gasto que o painel não viu. O investimento real pode ser maior: todo custo por lead e por reunião aqui é um piso. Dias de campanha parada confirmados pelo sync não entram nesta conta.`
         : `${Math.round((faltando / total) * 100)}% do período não tem linha de gasto — por pausa de campanha ou por falha de sincronização. Se for falha, o investimento real é maior e todo custo por lead e por reunião aqui é um piso.`,
       afeta: ["spend", "cpl", "cplBlended", "cpr", "cpm"],
-      cta: { label: "Sincronizar ou importar", href: "/config#integracoes" },
+      cta: { label: "Sincronizar ou importar", href: "/configuracoes/integracoes" },
     });
   }
 
@@ -423,7 +423,7 @@ export function assessTrust(input: TrustInput): TrustReport {
       detalhe:
         "Sem meta, nenhum número desta tela fica verde ou vermelho — só dá para comparar com a semana passada. E as regras de severidade alta do motor de ações (CPL e custo por reunião acima do alvo) nunca disparam. A calculadora em Ajustes monta as metas a partir do valor da carta.",
       afeta: [],
-      cta: { label: "Montar as metas", href: "/config#metas" },
+      cta: { label: "Montar as metas", href: "/configuracoes#metas" },
     });
   }
 
@@ -435,7 +435,7 @@ export function assessTrust(input: TrustInput): TrustReport {
       detalhe:
         "Sem ele, o painel não mostra quanto da verba já foi consumido nem projeta se ela acaba antes do fim da campanha.",
       afeta: [],
-      cta: { label: "Cadastrar orçamento", href: "/config#orcamento" },
+      cta: { label: "Cadastrar orçamento", href: "/configuracoes#orcamento" },
     });
   }
 

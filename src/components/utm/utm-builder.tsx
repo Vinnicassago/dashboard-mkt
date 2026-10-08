@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { Check, Copy } from "lucide-react";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { UTM_PADRAO, urlComUtm } from "@/lib/utm";
 import { cn } from "@/lib/utils";
 
 const inputCls =
@@ -12,23 +13,6 @@ const labelCls = "text-xs font-medium text-muted-foreground";
 export interface CreativeOption {
   adId: string;
   name: string;
-}
-
-function buildUrl(
-  base: string,
-  params: Record<string, string | undefined>,
-): string {
-  if (!base.trim()) return "";
-  let url: URL;
-  try {
-    url = new URL(base.trim());
-  } catch {
-    return "URL base inválida";
-  }
-  for (const [k, v] of Object.entries(params)) {
-    if (v && v.trim()) url.searchParams.set(k, v.trim());
-  }
-  return url.toString();
 }
 
 function CopyButton({ value }: { value: string }) {
@@ -53,32 +37,44 @@ function CopyButton({ value }: { value: string }) {
   );
 }
 
+/**
+ * Gerador de UTM no padrão D6: UM link com as macros da Meta
+ * (`{{campaign.id}}`, `{{adset.id}}`, `{{ad.id}}`), que a própria Meta
+ * preenche na hora do clique — serve para todos os anúncios da conta. O painel
+ * grava os ids na entrada e resolve os nomes pelas linhas de anúncio.
+ *
+ * Os links por anúncio (id fixo) ficam como alternativa recolhida, para quem
+ * cola o link num lugar sem macro.
+ */
 export function UtmBuilder({
   defaultBase,
-  defaultCampaign,
   creatives,
 }: {
   defaultBase: string;
-  defaultCampaign: string;
   creatives: CreativeOption[];
 }) {
   const [base, setBase] = useState(defaultBase);
-  const [source, setSource] = useState("instagram");
-  const [medium, setMedium] = useState("paid_social");
-  const [campaign, setCampaign] = useState(defaultCampaign);
+  const [source, setSource] = useState<string>(UTM_PADRAO.utm_source);
+  const [medium, setMedium] = useState<string>(UTM_PADRAO.utm_medium);
 
+  const universal = useMemo(
+    () =>
+      urlComUtm(base, {
+        utm_source: source,
+        utm_medium: medium,
+        utm_campaign: UTM_PADRAO.utm_campaign,
+        utm_term: UTM_PADRAO.utm_term,
+        utm_content: UTM_PADRAO.utm_content,
+      }),
+    [base, source, medium],
+  );
   const rows = useMemo(
     () =>
       creatives.map((c) => ({
         ...c,
-        url: buildUrl(base, {
-          utm_source: source,
-          utm_medium: medium,
-          utm_campaign: campaign,
-          utm_content: c.adId,
-        }),
+        url: urlComUtm(base, { utm_source: source, utm_medium: medium, utm_content: c.adId }),
       })),
-    [base, source, medium, campaign, creatives],
+    [base, source, medium, creatives],
   );
 
   return (
@@ -101,56 +97,65 @@ export function UtmBuilder({
           <span className={labelCls}>utm_medium</span>
           <input value={medium} onChange={(e) => setMedium(e.target.value)} className={inputCls} />
         </label>
-        <label className="flex flex-col gap-1 sm:col-span-2">
-          <span className={labelCls}>utm_campaign</span>
-          <input
-            value={campaign}
-            onChange={(e) => setCampaign(e.target.value)}
-            className={inputCls}
-          />
-        </label>
       </div>
 
-      <div className="rounded-lg border bg-foreground/[0.03] p-3 text-xs text-muted-foreground">
-        <strong className="text-foreground">utm_content = ID do anúncio.</strong> É esse
-        campo que liga o lead de volta ao criativo no funil — se ele vier errado ou
-        vazio, a origem do lead se perde e não dá para recuperar depois.
-      </div>
-
-      {rows.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          Nenhum criativo cadastrado ainda. Importe o CSV do Ads Manager ou conecte a
-          Marketing API para os links aparecerem aqui.
+      <div className="space-y-2 rounded-lg border bg-foreground/[0.03] p-3">
+        <p className="text-xs text-muted-foreground">
+          <strong className="text-foreground">Um link para todos os anúncios.</strong> Cole-o no campo
+          “Parâmetros de URL” da campanha (ou do anúncio) no Ads Manager: a Meta troca{" "}
+          <code className="font-mono">{"{{campaign.id}}"}</code>, <code className="font-mono">{"{{adset.id}}"}</code> e{" "}
+          <code className="font-mono">{"{{ad.id}}"}</code> pelos ids reais a cada clique, e o lead chega com
+          campanha › conjunto › anúncio resolvidos. Macro que chegar sem resolver vira “Desconhecida” com alerta.
         </p>
-      ) : (
-        <Table>
-          <THead>
-            <TR className="hover:bg-transparent">
-              <TH>Criativo</TH>
-              <TH>Link com UTM</TH>
-              <TH className="text-right">Ação</TH>
-            </TR>
-          </THead>
-          <TBody>
-            {rows.map((r) => (
-              <TR key={r.adId}>
-                <TD>
-                  <span className="font-medium">{r.name}</span>
-                  <span className="block text-xs text-muted-foreground">{r.adId}</span>
-                </TD>
-                <TD>
-                  <code className={cn("block max-w-[420px] truncate font-mono text-xs")}>
-                    {r.url}
-                  </code>
-                </TD>
-                <TD className="text-right">
-                  <CopyButton value={r.url} />
-                </TD>
-              </TR>
-            ))}
-          </TBody>
-        </Table>
-      )}
+        {universal ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <code className="block min-w-0 flex-1 truncate font-mono text-xs">{universal}</code>
+            <CopyButton value={universal} />
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">Preencha a URL da landing page.</p>
+        )}
+      </div>
+
+      <details>
+        <summary className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">
+          links por anúncio, com id fixo ({rows.length}) — para onde a macro não funciona
+        </summary>
+        {rows.length === 0 ? (
+          <p className="pt-3 text-sm text-muted-foreground">
+            Nenhum criativo cadastrado ainda. Importe o CSV do Ads Manager ou conecte a Marketing API
+            para os links aparecerem aqui.
+          </p>
+        ) : (
+          <div className="pt-3">
+            <Table>
+              <THead>
+                <TR className="hover:bg-transparent">
+                  <TH>Criativo</TH>
+                  <TH>Link com UTM</TH>
+                  <TH className="text-right">Ação</TH>
+                </TR>
+              </THead>
+              <TBody>
+                {rows.map((r) => (
+                  <TR key={r.adId}>
+                    <TD>
+                      <span className="font-medium">{r.name}</span>
+                      <span className="block text-xs text-muted-foreground">{r.adId}</span>
+                    </TD>
+                    <TD>
+                      <code className={cn("block max-w-[420px] truncate font-mono text-xs")}>{r.url}</code>
+                    </TD>
+                    <TD className="text-right">
+                      <CopyButton value={r.url} />
+                    </TD>
+                  </TR>
+                ))}
+              </TBody>
+            </Table>
+          </div>
+        )}
+      </details>
     </div>
   );
 }

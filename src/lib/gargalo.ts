@@ -11,7 +11,7 @@
  * a real é 0). Inteiro, e só com amostra — com 1 lead "+0,3 reunião" é enfeite.
  *
  * As etapas do robô ficam de fora de propósito: o robô está parado (decisão de
- * negócio de out/2026) e a cascata completa, em Jornada, já o mostra quando ele
+ * negócio de out/2026) e a cascata completa, no Funil, já o mostra quando ele
  * volta. Aqui são as transições que o painel mede sozinho.
  */
 
@@ -97,10 +97,10 @@ const METRICA: Partial<Record<TransicaoId, MetricaComMeta>> = {
 };
 
 const HREF: Record<TransicaoId, string> = {
-  impressao_visita: "/dinheiro",
-  visita_lead: "/jornada",
+  impressao_visita: "/midia",
+  visita_lead: "/funil",
   lead_contato: "/fila?etapa=novo",
-  lead_agendada: "/jornada",
+  lead_agendada: "/funil",
   agendada_realizada: "/fila?etapa=sem-desfecho",
 };
 

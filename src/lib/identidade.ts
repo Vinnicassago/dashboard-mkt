@@ -5,7 +5,7 @@
  * cadastros de teste ("nome"/"email") contados como "Contato inválido" (perda
  * de MÍDIA) e a mesma pessoa duas vezes com status conflitantes. Aqui ficam as
  * regras que reconhecem cada caso; quem decide o que fazer é uma pessoa (lista
- * "Revisar" em Pessoas) — nada é excluído ou mesclado sozinho.
+ * "Revisar" em Leads) — nada é excluído ou mesclado sozinho.
  */
 
 import { chaveNome } from "./lead-id";

@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { MessageCircle, Mail, X, FileText } from "lucide-react";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { Badge } from "@/components/ui/badge";
-import { salvarComercial } from "@/app/(dashboard)/pessoas/comercial-actions";
+import { salvarComercial } from "@/app/(dashboard)/leads/comercial-actions";
 import { formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 

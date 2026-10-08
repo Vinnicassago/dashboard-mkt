@@ -86,10 +86,10 @@ export async function carregarBussola(
     agora,
   });
   // O acumulado da campanha com o MESMO contexto (marca, cobertura, robô): é o
-  // número que Dinheiro imprime em "Campanha", com os mesmos "≥"/"≤".
+  // número que a Mídia imprime em "Campanha", com os mesmos "≥"/"≤".
   const campanha = range ? kpisDoPeriodo(data, undefined, { brandRules, cobertura, roboReunioes, hoje, agora }) : kpis;
 
-  // Robô DESLIGADO (sem credencial, ou desativado em Ajustes) é ausência, não
+  // Robô DESLIGADO (sem credencial, ou desativado em Configurações) é ausência, não
   // falha: as filas dele não existem. Leitura que QUEBROU é outra coisa.
   const roboLigado = comercial.falha?.tipo !== "desligado" || convites.falha?.tipo !== "desligado";
   const roboErro = comercial.falha?.tipo === "erro" || convites.falha?.tipo === "erro";
@@ -122,7 +122,7 @@ export async function carregarBussola(
             titulo: "A landing page não registrou visitas no período",
             detalhe:
               "Há histórico da landing page, mas nenhuma linha neste período: o rastreio (/api/track) pode ter parado — chave trocada, script fora da página. Visita → lead fica fora do funil até voltar.",
-            cta: { label: "Ver integrações", href: "/config#integracoes" },
+            cta: { label: "Ver integrações", href: "/configuracoes/integracoes" },
           },
         ]
       : []),
@@ -133,8 +133,8 @@ export async function carregarBussola(
             nivel: "falha" as const,
             titulo: "Não consegui ler o robô nem o atendimento",
             detalhe:
-              "Sem eles, quem espera o 1º contato pelo robô não aparece nas ações — e ausência de leitura não é o mesmo que ninguém esperando. Se o robô está parado, desative-o em Ajustes.",
-            cta: { label: "Ver integrações", href: "/config#integracoes" },
+              "Sem eles, quem espera o 1º contato pelo robô não aparece nas ações — e ausência de leitura não é o mesmo que ninguém esperando. Se o robô está parado, desative-o em Configurações → Integrações.",
+            cta: { label: "Ver integrações", href: "/configuracoes/integracoes" },
           },
         ]
       : []),

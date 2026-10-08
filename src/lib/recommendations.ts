@@ -126,7 +126,7 @@ function buildOrganicContentRecommendations(
           id: "retention-drop",
           severity: "media",
           title: "Tempo assistido dos reels caindo",
-          detail: `Tempo médio assistido caiu vs o período anterior. Preencha a duração dos reels em Ajustes para acompanhar a retenção % real (meta: 40%).`,
+          detail: `Tempo médio assistido caiu vs o período anterior. Preencha a duração dos reels em Conteúdo → Registros para acompanhar a retenção % real (meta: 40%).`,
         });
       }
     }
@@ -245,7 +245,7 @@ function buildOrganicContentRecommendations(
     "grade-composicao": producao,
     "dias-sem-story": producao,
     "pillar-frase": producao,
-    "vanity-objective": "/dinheiro#conjuntos",
+    "vanity-objective": "/midia#conjuntos",
   };
   return recs.map((r) => ({
     ...r,

@@ -10,20 +10,27 @@ const nextConfig: NextConfig = {
   output: "standalone",
   // Keep the pg driver as a normal Node dependency (don't bundle it).
   serverExternalPackages: ["pg"],
-  // As 14 abas viraram 7, nomeadas pela pergunta que respondem. Favoritos e
-  // links salvos continuam chegando — na página que absorveu a antiga.
+  // As 14 abas viraram 7, nomeadas pela pergunta que respondem; em out/2026
+  // ganharam os nomes do relatório (Funil, Mídia, Leads, Configurações).
+  // Favoritos e links salvos continuam chegando — na página que absorveu a
+  // antiga. Rota antiga = redirect, nunca 404.
   async redirects() {
     return [
-      { source: "/trafego", destination: "/dinheiro", permanent: false },
-      { source: "/criativos", destination: "/dinheiro", permanent: false },
-      { source: "/funil", destination: "/jornada", permanent: false },
-      { source: "/robo", destination: "/jornada", permanent: false },
-      { source: "/leads", destination: "/pessoas", permanent: false },
-      { source: "/comercial", destination: "/pessoas", permanent: false },
+      { source: "/trafego", destination: "/midia", permanent: false },
+      { source: "/criativos", destination: "/midia", permanent: false },
+      { source: "/dinheiro", destination: "/midia", permanent: false },
+      { source: "/robo", destination: "/funil", permanent: false },
+      { source: "/jornada", destination: "/funil", permanent: false },
+      { source: "/comercial", destination: "/leads", permanent: false },
+      { source: "/pessoas", destination: "/leads", permanent: false },
+      { source: "/pessoas/:path*", destination: "/leads/:path*", permanent: false },
       { source: "/instagram", destination: "/conteudo", permanent: false },
       { source: "/posts", destination: "/conteudo/posts", permanent: false },
       { source: "/producao", destination: "/conteudo/producao", permanent: false },
-      { source: "/utm", destination: "/config", permanent: false },
+      { source: "/utm", destination: "/configuracoes/ferramentas", permanent: false },
+      { source: "/config", destination: "/configuracoes", permanent: false },
+      { source: "/config/:path*", destination: "/configuracoes/:path*", permanent: false },
+      { source: "/ajustes", destination: "/configuracoes", permanent: false },
     ];
   },
   experimental: {

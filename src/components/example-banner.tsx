@@ -10,8 +10,8 @@ export function ExampleBanner() {
         <span className="font-medium text-foreground">Dados de exemplo.</span> Você
         está vendo um dataset fictício para o dashboard ficar &ldquo;vivo&rdquo;. Importe seus
         números reais em{" "}
-        <Link href="/config" className="font-medium text-primary underline-offset-2 hover:underline">
-          Ajustes
+        <Link href="/configuracoes" className="font-medium text-primary underline-offset-2 hover:underline">
+          Configurações
         </Link>
         .
       </p>

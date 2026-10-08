@@ -4,8 +4,8 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Clock, MessageCircle, Check, ChevronDown, Mail, Undo2 } from "lucide-react";
-import { salvarComercial } from "@/app/(dashboard)/pessoas/comercial-actions";
-import { desfazerTentativa, registrarTentativa } from "@/app/(dashboard)/pessoas/actions";
+import { salvarComercial } from "@/app/(dashboard)/leads/comercial-actions";
+import { desfazerTentativa, registrarTentativa } from "@/app/(dashboard)/leads/actions";
 import { RegistrarStatus } from "@/components/tables/lead-status";
 import {
   ETAPAS_QUENTES,
@@ -124,7 +124,7 @@ function FilaCard({
           <div className="min-w-0">
             {item.leadId ? (
               <Link
-                href={`/pessoas/${encodeURIComponent(item.leadId)}`}
+                href={`/leads/${encodeURIComponent(item.leadId)}`}
                 className="block truncate font-medium hover:underline"
                 title="Abrir a ficha"
               >

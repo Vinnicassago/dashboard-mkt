@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { Download, Mail, MessageCircle, RotateCcw, Search, Trash2 } from "lucide-react";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { LEAD_STATUSES, LEAD_STATUS_META, statusLabel } from "@/lib/lead-status";
-import { deleteLeadAction, restoreLeadAction } from "@/app/(dashboard)/pessoas/actions";
+import { deleteLeadAction, restoreLeadAction } from "@/app/(dashboard)/leads/actions";
 import { RegistrarStatus, StatusBadge } from "@/components/tables/lead-status";
 import type { LeadStatus } from "@/lib/types";
 import { formatDateTime } from "@/lib/format";
@@ -115,7 +115,7 @@ function buildColumns(canEdit: boolean, canDelete: boolean): Column<LeadDirector
       sortable: true,
       sortValue: (r) => r.name,
       render: (r) => (
-        <Link href={`/pessoas/${encodeURIComponent(r.id)}`} className="font-medium hover:underline">
+        <Link href={`/leads/${encodeURIComponent(r.id)}`} className="font-medium hover:underline">
           {r.name}
         </Link>
       ),

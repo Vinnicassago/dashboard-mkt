@@ -44,7 +44,7 @@ import {
 import { cn } from "@/lib/utils";
 
 /**
- * Dinheiro — quanto por conjunto na segunda, e qual criativo escalo ou mato.
+ * Mídia — quanto por conjunto na segunda, e qual criativo escalo ou mato.
  *
  * Funde as antigas Tráfego Pago e Criativos. As duas abriam com fileiras de KPIs
  * do mesmo tamanho (investimento, impressões, cliques, CTR, CPL) que repetiam a
@@ -95,7 +95,7 @@ const BUCKET_DOT: Record<"conversao" | "descoberta", string> = {
 const MIN_LEADS = 5;
 const MIN_IMPRESSOES = 1000;
 
-export default async function DinheiroPage({
+export default async function MidiaPage({
   searchParams,
 }: {
   searchParams: Promise<{ range?: string }>;
@@ -105,7 +105,7 @@ export default async function DinheiroPage({
   const { range } = pageRange(data, (await searchParams).range);
   const cobertura = await coberturaDeAnuncios(brand);
 
-  // Os MESMOS números da home e da Jornada (kpisDoPeriodo), com a mesma
+  // Os MESMOS números da home e do Funil (kpisDoPeriodo), com a mesma
   // confiança. Com menos de 3 reuniões o custo por reunião está em quarentena —
   // e é aqui, onde se decide verba, que ele mais engana: "cj1 · CPR R$ 728" é
   // uma reunião, não um custo.
@@ -227,7 +227,7 @@ export default async function DinheiroPage({
           ) : (
             <p className="mt-3 text-xs text-muted-foreground">
               Sem meta de CPL e de custo por reunião, nada aqui fica vermelho.{" "}
-              <Link href="/config#metas" className="text-primary underline-offset-4 hover:underline">
+              <Link href="/configuracoes#metas" className="text-primary underline-offset-4 hover:underline">
                 Cadastrar metas
               </Link>
             </p>
@@ -248,7 +248,7 @@ export default async function DinheiroPage({
         {perf.length === 0 ? (
           <EmptyState
             title="Sem dados de criativos no período"
-            hint="Sincronize ou importe o relatório de anúncios em Ajustes para comparar os criativos."
+            hint="Sincronize ou importe o relatório de anúncios em Configurações → Importar para comparar os criativos."
           />
         ) : (
           <>
@@ -356,7 +356,7 @@ export default async function DinheiroPage({
               <span className="text-xs">
                 <span className="font-medium">Orçamento não cadastrado</span> ·{" "}
                 <Link
-                  href="/config#orcamento"
+                  href="/configuracoes#orcamento"
                   className="font-medium text-primary underline-offset-4 hover:underline"
                 >
                   cadastrar para ver o ritmo →
@@ -409,7 +409,7 @@ export default async function DinheiroPage({
           ) : (
             <p className="text-xs text-muted-foreground">
               Sem orçamento de conversão semanal, não há ritmo do período.{" "}
-              <Link href="/config#metas" className="text-primary underline-offset-4 hover:underline">
+              <Link href="/configuracoes#metas" className="text-primary underline-offset-4 hover:underline">
                 Montar as metas
               </Link>
             </p>

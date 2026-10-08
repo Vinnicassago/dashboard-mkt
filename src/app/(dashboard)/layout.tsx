@@ -37,7 +37,7 @@ export default async function DashboardLayout({
     nivel: "falha",
     titulo: `A sincronização ${fonte === "Meta" ? "da Meta" : "do Instagram"} está falhando`,
     detalhe: `Falhando desde ${formatDateTime(falha.desde)}: ${falha.erro} Os números dessa fonte param no último sync que deu certo.`,
-    cta: { label: "Ver integrações", href: "/config#integracoes" },
+    cta: { label: "Ver integrações", href: "/configuracoes/integracoes" },
   });
   if (status.ads) {
     const e = await estadoDaFonte("ads", brand.slug);
@@ -62,8 +62,8 @@ export default async function DashboardLayout({
         nivel: "teto",
         titulo: `${formatCurrency0(gasto)} em ${campanhas} ${campanhas === 1 ? "campanha" : "campanhas"} sem marca (30 dias)`,
         detalhe:
-          "Nenhuma regra de marca reivindica essas campanhas: o gasto delas está fora do investimento, do CPL e do custo por reunião de todas as marcas. Diga de quem são em Ajustes e reclassifique.",
-        cta: { label: "Classificar as campanhas", href: "/config#marcas" },
+          "Nenhuma regra de marca reivindica essas campanhas: o gasto delas está fora do investimento, do CPL e do custo por reunião de todas as marcas. Diga de quem são em Configurações → Marcas e reclassifique.",
+        cta: { label: "Classificar as campanhas", href: "/configuracoes/marcas" },
       });
     }
   }
@@ -76,7 +76,7 @@ export default async function DashboardLayout({
       titulo: "O rastreio da landing page aceita envios de qualquer origem",
       detalhe:
         "Sem TRACK_INGEST_KEY, /api/track aceita lead de qualquer site — um lead falso entra nos números. Defina a chave no servidor e na LP.",
-      cta: { label: "Ver integrações", href: "/config#integracoes" },
+      cta: { label: "Ver integrações", href: "/configuracoes/integracoes" },
     });
   }
 

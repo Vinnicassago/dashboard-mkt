@@ -3,7 +3,7 @@
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { MessageCircle, Undo2 } from "lucide-react";
-import { anotarLead, desfazerTentativa, registrarTentativa } from "@/app/(dashboard)/pessoas/actions";
+import { anotarLead, desfazerTentativa, registrarTentativa } from "@/app/(dashboard)/leads/actions";
 import { RegistrarStatus } from "@/components/tables/lead-status";
 import { CANAL_LABEL, linkWhatsapp, type CanalContato } from "@/lib/contato";
 import { encerrado } from "@/lib/lead-status";

@@ -65,9 +65,12 @@ export interface AdScope {
 }
 
 /**
- * Campos de contato que um reenvio pode PREENCHER (nunca sobrescrever). Status,
- * data de entrada, marcos, reunião, valor e pareamento com o robô ficam fora:
- * um reenvio do formulário não muda o que aconteceu com o lead.
+ * Campos de contato e de atribuição que um reenvio pode PREENCHER (nunca
+ * sobrescrever) — inclusive os ids de anúncio, conjunto e campanha que o UTM
+ * traz (0019): um lead que entrou sem id ganha o id no reenvio; o que já tem
+ * fica como está. Status, data de entrada, marcos, reunião, valor e pareamento
+ * com o robô ficam fora: um reenvio do formulário não muda o que aconteceu com
+ * o lead.
  */
 export const LEAD_CONTACT_FIELDS = [
   "email",
@@ -78,6 +81,9 @@ export const LEAD_CONTACT_FIELDS = [
   "utmMedium",
   "utmTerm",
   "fbclid",
+  "adId",
+  "adsetId",
+  "campaignId",
   "fbc",
   "fbp",
   "gaClientId",
@@ -117,7 +123,7 @@ export interface DataBackend {
    * Volta os dados de campanha ao exemplo. Nenhum lead é apagado: quem não é do
    * exemplo e ainda estava ativo é excluído de forma reversível
    * (`MOTIVO_EXCLUSAO_RESET`, por `by`, com o evento `excluido` de
-   * `eventoExclusaoReset`) e aparece em Pessoas → Excluídos; os
+   * `eventoExclusaoReset`) e aparece em Leads → Excluídos; os
    * leads do exemplo (ids `LEAD-0001`…, que nenhuma entrada real usa) voltam ao
    * estado do exemplo. `lead_events` e o registro de auditoria ficam intactos.
    */

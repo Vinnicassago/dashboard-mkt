@@ -74,7 +74,7 @@ export async function restoreLeadAction(leadId: string): Promise<StatusResult> {
 }
 
 /**
- * Muda o status de um lead pela tela (Pessoas, Fila). Confere a permissão e a
+ * Muda o status de um lead pela tela (Leads, Fila). Confere a permissão e a
  * transição AQUI, no servidor — a lista de opções da tela é só conveniência —
  * e aplica com `aplicarStatus` (marcos, histórico, Meta/GA4).
  */

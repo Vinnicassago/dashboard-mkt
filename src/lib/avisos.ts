@@ -39,7 +39,7 @@ export async function avisarLeadNovo(
         campanha: lead.utmCampaign ?? null,
         criadoEm: lead.createdAt,
         fila: painel ? `${painel}/fila?etapa=novo` : null,
-        ficha: painel ? `${painel}/pessoas/${encodeURIComponent(lead.id)}` : null,
+        ficha: painel ? `${painel}/leads/${encodeURIComponent(lead.id)}` : null,
       }),
       signal: AbortSignal.timeout(3_000),
     });

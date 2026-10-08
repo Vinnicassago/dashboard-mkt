@@ -175,17 +175,23 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   seg–sex 9h–18h Brasília, UTC−3 fixo, sem feriados) — "novo" é 1 hora útil. Lead
   reaberto recomeça o relógio no `reaberto`. Robô desligado em Ajustes
   (`robo_desativado`, `roboLigado()`) some com as etapas dele — desligado não é erro.
-  A ficha (`/pessoas/[id]`) não é página de menu: abre pelo nome em Pessoas, Fila,
+  A ficha (`/leads/[id]`) não é página de menu: abre pelo nome em Pessoas, Fila,
   histórico e no link do aviso. Aviso de lead novo = webhook do n8n (`lib/avisos.ts`,
   `N8N_LEAD_WEBHOOK_URL`); falha no aviso nunca derruba a entrada do lead.
 - **Navegação** (`components/layout/nav-items.ts`): 7 páginas nomeadas pela PERGUNTA
-  que respondem (Hoje, Dinheiro, Jornada, Fila, Pessoas, Conteúdo, Ajustes), não pela
-  fonte do dado — eram 14, uma por sistema, e a mesma pessoa aparecia contada em três
-  com números diferentes. Página nova = fundir outra; sub-vista (`vistas`) só onde o
-  trabalho é outro (Produção). Um fato mora num lugar só: se duas páginas precisam
+  que respondem ou pelo DONO do trabalho — Bússola (`/`), Funil (`/funil`), Mídia
+  (`/midia`), Conteúdo, Fila de contato, Leads (`/leads`), Configurações
+  (`/configuracoes`) —, agrupadas na sidebar (Visão geral · Diagnóstico · Operação ·
+  Configurações), não pela fonte do dado — eram 14, uma por sistema, e a mesma pessoa
+  aparecia contada em três com números diferentes. Página nova = fundir outra;
+  sub-vista (`vistas`) só onde o trabalho é outro (Conteúdo: Conta · Posts · Registros ·
+  Produção; Configurações: Metas · Integrações · Marcas · Usuários · Importar ·
+  Ferramentas · Zona de perigo). Um fato mora num lugar só: se duas páginas precisam
   dele, uma mostra e a outra linka — e o número do link é o da página que ele abre.
-  O período viaja nos links (`comPeriodo`, `lib/range.ts`). Rota antiga = redirect em
-  `next.config.ts`, nunca 404.
+  O período viaja em TODOS os links (`comPeriodo`, `lib/range.ts`; sem `?range=` vale o
+  `periodoPadrao` da página — `useComPeriodo`, `periodoPadraoDe`). Rota antiga
+  (`/jornada`, `/dinheiro`, `/pessoas`, `/config`…) = redirect em `next.config.ts`, nunca
+  404.
 - **Régua editorial** (`src/lib/content/playbook.ts`): o "Guia de Produção" como código
   — grade semanal, ≤25s, gancho de 7 palavras, ciclo de CTA, "Nunca mais", metas de
   90 dias. Fonte ÚNICA: `validator.ts` (pré-publicação) e `recommendations.ts`

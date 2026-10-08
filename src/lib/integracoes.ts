@@ -7,8 +7,8 @@ import { getState, setState } from "./data/store";
  * O robô de WhatsApp e o atendimento do especialista estão parados. Com as
  * credenciais ainda no servidor, o painel tentava ler, falhava ("fetch failed")
  * e tratava a ausência como erro: "SEM LEITURA" na home, "fila incompleta" na
- * Fila, detalhe técnico em Pessoas. Desativado é outra coisa — as etapas dele
- * simplesmente não existem. Religar é uma chave em Ajustes.
+ * Fila, detalhe técnico em Leads. Desativado é outra coisa — as etapas dele
+ * simplesmente não existem. Religar é uma chave em Configurações.
  */
 
 const CHAVE_ROBO_DESATIVADO = "robo_desativado";

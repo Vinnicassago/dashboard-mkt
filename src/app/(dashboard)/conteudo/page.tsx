@@ -36,7 +36,7 @@ export default async function InstagramPage({
 }) {
   const brand = brandDef(await activeBrandSlug());
   const data = await getData(brand.slug);
-  const { range } = pageRange(data, (await searchParams).range);
+  const { range, rangeKey } = pageRange(data, (await searchParams).range);
 
   const rows = data.igAccountDaily.filter((r) => inRange(r.date, range));
   const series = followerSeries(data.igAccountDaily, range);
@@ -45,7 +45,7 @@ export default async function InstagramPage({
     return (
       <EmptyState
         title="Sem dados do Instagram no período"
-        hint="A conta foi criada há pouco — insights podem levar até 48h para consolidar. Registre snapshots diários em Ajustes."
+        hint="A conta foi criada há pouco — insights podem levar até 48h para consolidar. Registre snapshots diários em Conteúdo → Registros."
       />
     );
   }
@@ -210,7 +210,7 @@ export default async function InstagramPage({
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <RecommendationsCard recs={acoesDeConteudo} />
+            <RecommendationsCard recs={acoesDeConteudo} rangeKey={rangeKey} />
           </CardContent>
         </Card>
       ) : null}

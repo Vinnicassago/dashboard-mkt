@@ -29,7 +29,7 @@ export interface EntradaBussola extends Omit<EntradaMotor, "kpis"> {
   /**
    * O acumulado da campanha (`kpisDoPeriodo(data, undefined, …)`) calculado com
    * as MESMAS opções do período (regras de marca, cobertura do sync, robô) —
-   * senão o "Campanha:" do placar sai com "≥"/"≤" diferentes dos de Dinheiro.
+   * senão o "Campanha:" do placar sai com "≥"/"≤" diferentes dos da Mídia.
    * Ausente (testes), calcula-se aqui sem contexto.
    */
   campanha?: KpisDoPeriodo;

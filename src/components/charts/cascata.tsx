@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { FONTE_META, type Degrau } from "@/lib/cascata";
 import { DONO_LABEL } from "@/lib/dono";
+import { comPeriodo } from "@/lib/range";
 import { formatCurrency, formatInt, formatPercent } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -39,7 +40,7 @@ function pct(v: number): string {
   return formatPercent(v);
 }
 
-function Junta({ degrau, destaque }: { degrau: Degrau; destaque?: Tom }) {
+function Junta({ degrau, destaque, rangeKey }: { degrau: Degrau; destaque?: Tom; rangeKey?: string }) {
   const perda = degrau.perda ?? 0;
   const cor = destaque ? TOM[destaque] : "text-muted-foreground";
   const parados = degrau.parados
@@ -77,7 +78,7 @@ function Junta({ degrau, destaque }: { degrau: Degrau; destaque?: Tom }) {
             desta etapa, com o mesmo número. */}
         {parados && degrau.etapaFila ? (
           <Link
-            href={`/fila?etapa=${degrau.etapaFila}`}
+            href={comPeriodo(`/fila?etapa=${degrau.etapaFila}`, rangeKey)}
             className="font-medium text-[var(--danger-text)] underline-offset-4 hover:underline"
           >
             {parados}
@@ -95,13 +96,16 @@ export function Cascata({
   ancoraLabel = "do topo",
   vazamentoKey,
   tomVazamento = "perigo",
+  rangeKey,
 }: {
   degraus: Degrau[];
+  /** O período da tela, para os links da Fila. */
+  rangeKey?: string;
   /** Como nomear a fração da primeira âncora. */
   ancoraLabel?: string;
   /** Degrau do maior vazamento — a única junta com cor. */
   vazamentoKey?: string;
-  /** "perigo" na Jornada; "alerta" na home, onde o vermelho é só do farol. */
+  /** "perigo" no Funil; "alerta" onde o vermelho é de outro bloco. */
   tomVazamento?: Tom;
 }) {
   /*
@@ -125,7 +129,7 @@ export function Cascata({
         return (
           <div key={d.key}>
             {i > 0 ? (
-              <Junta degrau={d} destaque={d.key === vazamentoKey ? tomVazamento : undefined} />
+              <Junta degrau={d} destaque={d.key === vazamentoKey ? tomVazamento : undefined} rangeKey={rangeKey} />
             ) : null}
 
             <div className="flex items-start gap-3">

@@ -84,10 +84,10 @@ import {
 const CAMPAIGN_COLS = ["id", "brand", "name", "objective", "status", "start_date", "end_date", "budget_total", "daily_budget"];
 const IG_DAILY_COLS = ["brand", "date", "followers", "reach", "views", "profile_link_taps", "accounts_engaged", "total_interactions", "profile_views", "reach_followers", "reach_non_followers", "dm_conversations", "follows_day", "unfollows_day", "link_taps_website", "link_taps_whatsapp", "stories_posted", "stories_interactive", "niche_comments", "accounts_followed", "replied_all"];
 const POST_COLS = ["id", "brand", "published_at", "type", "caption", "permalink", "reach", "views", "likes", "comments", "saved", "shares", "avg_watch_time", "total_watch_time", "duration_sec", "pillar", "cta_type", "profile_visits", "follows", "media_url", "thumbnail_url", "is_test"];
-const CREATIVE_COLS = ["ad_id", "brand", "name", "format", "thumbnail_url", "video_plays", "thru_plays", "instagram_media_id", "instagram_permalink"];
-const AD_COLS = ["brand", "date", "ad_id", "campaign", "campaign_id", "adset", "objective", "spend", "impressions", "reach", "frequency", "clicks", "leads"];
+const CREATIVE_COLS = ["ad_id", "brand", "name", "format", "creative_id", "thumbnail_url", "video_plays", "thru_plays", "instagram_media_id", "instagram_permalink"];
+const AD_COLS = ["brand", "date", "ad_id", "campaign", "campaign_id", "adset", "adset_id", "objective", "spend", "impressions", "reach", "frequency", "clicks", "leads"];
 const LP_COLS = ["brand", "date", "visits", "clicks", "form_submits"];
-const LEAD_COLS = ["id", "brand", "created_at", "name", "email", "phone", "utm_source", "utm_campaign", "utm_content", "utm_medium", "utm_term", "fbclid", "status", "meeting_at", "meeting_for", "first_contact_at", "lost_reason_detail", "value", "booked_at", "attended_at", "closed_at", "lost_at", "robo_session_id", "fbc", "fbp", "ga_client_id", "ga_session_id", "deleted_at", "deleted_by", "deleted_reason"];
+const LEAD_COLS = ["id", "brand", "created_at", "name", "email", "phone", "utm_source", "utm_campaign", "utm_content", "utm_medium", "utm_term", "fbclid", "ad_id", "adset_id", "campaign_id", "status", "meeting_at", "meeting_for", "first_contact_at", "lost_reason_detail", "value", "booked_at", "attended_at", "closed_at", "lost_at", "robo_session_id", "fbc", "fbp", "ga_client_id", "ga_session_id", "deleted_at", "deleted_by", "deleted_reason"];
 const GOAL_COLS = ["brand", "metric", "period", "target", "lower_is_better"];
 const META_COLS = ["id", "brand", "metrica", "periodo", "alvo", "vigente_desde", "provisoria", "origem", "entradas", "criada_em", "criada_por"];
 const EVENT_COLS = ["id", "lead_id", "brand", "lead_name", "actor", "action", "from_status", "to_status", "payload", "occurred_at", "created_at"];

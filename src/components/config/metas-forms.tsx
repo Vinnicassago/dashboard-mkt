@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useMemo, useState } from "react";
-import { salvarMetaManualAction, salvarMetasDaCalculadoraAction } from "@/app/(dashboard)/config/metas-actions";
+import { salvarMetaManualAction, salvarMetasDaCalculadoraAction } from "@/app/(dashboard)/configuracoes/metas-actions";
 import { Field, Message, SubmitButton, inputCls } from "./config-forms";
 import { META_DEF, METRICAS_COM_META, calcularMetas, errosDaCalculadora, formatarAlvo } from "@/lib/metas";
 import type { EntradasCalculadora, MetricaComMeta } from "@/lib/types";

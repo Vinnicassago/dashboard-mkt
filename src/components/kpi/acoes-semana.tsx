@@ -210,7 +210,7 @@ export function AcoesSemana({
         {erro ? <p className="text-sm text-[var(--danger-text)]">{erro}</p> : null}
         {roboErro ? (
           <p className="text-sm text-[var(--warning-text)]">
-            Não consegui ler o robô: quem espera o 1º contato por ele não está nesta lista. Se o robô está parado, desative-o em Ajustes.
+            Não consegui ler o robô: quem espera o 1º contato por ele não está nesta lista. Se o robô está parado, desative-o em Configurações → Integrações.
           </p>
         ) : null}
         {topo.length === 0 ? (

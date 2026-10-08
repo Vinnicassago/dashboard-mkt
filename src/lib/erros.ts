@@ -1,8 +1,8 @@
 /**
  * Erro técnico → frase para a tela. Fonte ÚNICA (B14/S19).
  *
- * "TypeError: fetch failed" aparecia cru em Pessoas; erros da Graph API, em
- * Ajustes. Quem lê a tela precisa saber O QUE fazer, não o stack. O texto
+ * "TypeError: fetch failed" aparecia cru em Leads; erros da Graph API, em
+ * Configurações. Quem lê a tela precisa saber O QUE fazer, não o stack. O texto
  * original vai para o log do servidor (quem chama decide se loga — esta função
  * é pura e roda no cliente também).
  */

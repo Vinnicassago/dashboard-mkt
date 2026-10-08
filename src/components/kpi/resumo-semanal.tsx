@@ -125,7 +125,7 @@ export function ResumoSemanalCard({
         ) : (
           <p className="text-sm text-muted-foreground">
             {aiEnabled
-              ? "Sem leitura ainda. O cron chama /api/resumo-semanal toda segunda às 08:00 (veja Ajustes → Integrações); ou gere agora."
+              ? "Sem leitura ainda. O cron chama /api/resumo-semanal toda segunda às 08:00 (veja Configurações → Integrações); ou gere agora."
               : "Defina ANTHROPIC_API_KEY no servidor para ligar o resumo semanal."}
           </p>
         )}

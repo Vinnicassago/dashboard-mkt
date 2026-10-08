@@ -44,10 +44,38 @@ export function adIdFromUtmContent(utmContent?: string | null): string | undefin
   return last && /^\d{5,}$/.test(last) ? last : undefined;
 }
 
-/** Monta a função de atribuição para os criativos de UMA marca. */
+/** Id numérico da Meta (anúncio, conjunto, campanha): só dígitos, 5 ou mais. */
+const ID_META = /^\d{5,}$/;
+
+/**
+ * Os ids que o UTM padrão (D6) traz: `utm_campaign={{campaign.id}}`,
+ * `utm_term={{adset.id}}`, `utm_content={{ad.id}}`. Só vira id o que é número
+ * (macro literal ou nome ficam de fora); `utm_content` aceita também o formato
+ * antigo "nome|id".
+ */
+export function idsDoUtm(attr: {
+  utm_campaign?: string | null;
+  utm_term?: string | null;
+  utm_content?: string | null;
+}): { adId?: string; adsetId?: string; campaignId?: string } {
+  const id = (v?: string | null) => {
+    const s = v?.trim();
+    return s && ID_META.test(s) ? s : undefined;
+  };
+  return {
+    adId: id(attr.utm_content) ?? adIdFromUtmContent(attr.utm_content),
+    adsetId: id(attr.utm_term),
+    campaignId: id(attr.utm_campaign),
+  };
+}
+
+/**
+ * Monta a função de atribuição para os criativos de UMA marca. O id gravado na
+ * entrada (`lead.adId`, D6) vence; sem ele, vale o `utm_content`.
+ */
 export function atribuidor(
   creatives: Pick<Creative, "adId" | "name">[],
-): (lead: Pick<Lead, "utmContent">) => Atribuicao {
+): (lead: Pick<Lead, "utmContent"> & { adId?: string }) => Atribuicao {
   const ids = new Set(creatives.map((c) => c.adId));
   const porNome = new Map<string, string[]>();
   for (const c of creatives) {
@@ -56,6 +84,7 @@ export function atribuidor(
     porNome.set(k, [...(porNome.get(k) ?? []), c.adId]);
   }
   return (lead) => {
+    if (lead.adId) return { adId: lead.adId, tipo: "id" };
     const uc = lead.utmContent?.trim();
     if (!uc) return { tipo: "sem-origem" };
     if (temMacro(uc)) return { tipo: "macro" };

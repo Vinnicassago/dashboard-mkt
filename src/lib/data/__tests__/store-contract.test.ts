@@ -25,7 +25,13 @@ const ad = (brand: string, date: string, adId: string, spend: number): AdDaily =
   clicks: 10,
   leads: 1,
 });
-const criativo = (brand: string, adId: string): Creative => ({ adId, brand, name: `Anúncio ${adId}`, format: "imagem" });
+const criativo = (brand: string, adId: string): Creative => ({
+  adId,
+  brand,
+  name: `Anúncio ${adId}`,
+  format: "imagem",
+  creativeId: `cr-${adId}`,
+});
 const evento = (leadId: string, id: string, action: LeadEvent["action"], brand = "consorcio"): LeadEvent => ({
   id,
   leadId,
@@ -69,6 +75,7 @@ function contrato(nome: string, abrir: () => Promise<{ backend: DataBackend; fec
         name: "Outro Nome",
         phone: "21988887777",
         email: "pessoa@teste.invalid",
+        adId: "100001",
         status: "lead",
       });
       expect(reenvio).toEqual({ created: false });
@@ -81,6 +88,7 @@ function contrato(nome: string, abrir: () => Promise<{ backend: DataBackend; fec
       expect(l?.name).toBe("Pessoa Teste"); // nome gravado não é trocado
       expect(l?.phone).toBe("11999990000"); // contato gravado não é trocado
       expect(l?.email).toBe("pessoa@teste.invalid"); // contato vazio é preenchido
+      expect(l?.adId).toBe("100001"); // id de atribuição vazio é preenchido (0019)
     });
 
     it("exclusão é reversível e o histórico do lead fica", async () => {
@@ -136,14 +144,18 @@ function contrato(nome: string, abrir: () => Promise<{ backend: DataBackend; fec
         [criativo("consorcio", "100"), criativo("consorcio", "200"), criativo("krone", "300"), criativo("consorcio", "csv-nome")],
       );
       // refaz setembro do consórcio: a linha de agosto e a da krone ficam
-      await b.replaceAdData([ad("consorcio", "2026-09-01", "201", 21)], [criativo("consorcio", "201")], {
-        brands: ["consorcio"],
-        since: "2026-09-01",
-        until: "2026-09-30",
-      });
+      await b.replaceAdData(
+        [{ ...ad("consorcio", "2026-09-01", "201", 21), adsetId: `set-${sfx}` }],
+        [criativo("consorcio", "201")],
+        { brands: ["consorcio"], since: "2026-09-01", until: "2026-09-30" },
+      );
       const c = await b.getData("consorcio");
       expect(c.adDaily.map((r) => `${r.date}:${r.adId}`).sort()).toEqual(["2026-08-01:100", "2026-09-01:201"]);
       expect(c.creatives.map((x) => x.adId).sort()).toEqual(["100", "201"]); // "200" e "csv-nome" sem linha
+      // ids de atribuição (0019) vão e voltam inteiros
+      expect(c.adDaily.find((r) => r.adId === "201")?.adsetId).toBe(`set-${sfx}`);
+      expect(c.adDaily.find((r) => r.adId === "100")?.adsetId).toBeUndefined();
+      expect(c.creatives.find((x) => x.adId === "201")?.creativeId).toBe("cr-201");
       const k = await b.getData("krone");
       expect(k.adDaily.map((r) => r.adId)).toEqual(["300"]);
     });
