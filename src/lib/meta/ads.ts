@@ -340,6 +340,7 @@ export async function fetchAdsAccount({
       brand,
       date: r.date_start.slice(0, 10),
       campaign: r.campaign_name ?? "",
+      campaignId: r.campaign_id || undefined,
       adset: r.adset_name ?? "",
       adId,
       objective,

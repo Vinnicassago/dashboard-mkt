@@ -273,6 +273,8 @@ export interface AdDaily {
   campaign: string;
   adset: string;
   adId: string; // FK -> Creative.adId
+  /** Id da campanha na Meta. Ausente em linha de CSV e nas anteriores a 0016. */
+  campaignId?: string;
   /**
    * Raw Meta objective of the campaign this ad belongs to, e.g. `OUTCOME_LEADS`
    * (conversão) or `OUTCOME_ENGAGEMENT` (descoberta/seguidores). Comes from the
@@ -349,6 +351,10 @@ export interface Lead {
   utmSource?: string;
   utmCampaign?: string;
   utmContent?: string; // maps to the creative/ad
+  utmMedium?: string;
+  utmTerm?: string;
+  /** Id do clique do anúncio (cru, como chegou na URL da LP). */
+  fbclid?: string;
   status: LeadStatus;
   /**
    * LEGADO: até out/2026 guardava o MOMENTO em que o status virou "Agendado",
@@ -466,6 +472,33 @@ export interface AuditEntry {
   actor: string;
   action: string;
   detail?: string;
+}
+
+// ------------------------- Sincronizações (ADR-04) --------------------
+
+export type SyncFonte = "ads" | "instagram";
+
+/**
+ * Uma execução de sincronização, por fonte e marca — tenha dado certo ou não.
+ * O último sucesso diz de quando é o dado (cabeçalho). A JANELA de cada sucesso
+ * (`dateFrom`–`dateTo`) separa o dia SEM VEICULAÇÃO (um sync cobriu e não veio
+ * linha: a campanha estava parada) do dia SEM DADOS (nenhum sync cobriu: falha
+ * ou nunca buscado) — ADR-06. O erro guardado é o da tela; o técnico vai ao log.
+ */
+export interface SyncRun {
+  id: string;
+  source: SyncFonte;
+  brand: string;
+  startedAt: string;
+  finishedAt: string;
+  ok: boolean;
+  /** Janela pedida à API (AAAA-MM-DD, inclusiva). */
+  dateFrom?: string;
+  dateTo?: string;
+  /** Linhas gravadas para a marca. */
+  rows?: number;
+  /** Mensagem humana (`mensagemHumana`), nunca o erro cru. */
+  error?: string;
 }
 
 // ------------------------- Goals ------------------------------------

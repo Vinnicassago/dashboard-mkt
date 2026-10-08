@@ -19,6 +19,8 @@ import type {
   LeadStatus,
 } from "./types";
 import { isAwareness } from "./brands";
+import { diaCoberto, type Intervalo } from "./cobertura";
+import { atribuidor, isPaidSource } from "./atribuicao";
 import {
   LEAD_STATUS_META,
   LOST_STATUSES,
@@ -194,34 +196,8 @@ export function objectiveBucket(raw?: string | null): ObjectiveBucket {
 
 export const bucketOfAd = (row: AdDaily): ObjectiveBucket => objectiveBucket(row.objective);
 
-/**
- * Extrai o id do anúncio embutido no utm_content ("nome do criativo|123456789"
- * → "123456789"). Ids da Meta são numéricos longos; sem id embutido, undefined.
- */
-export function adIdFromUtmContent(utmContent?: string | null): string | undefined {
-  if (!utmContent) return undefined;
-  const last = utmContent.split("|").pop()?.trim();
-  return last && /^\d{5,}$/.test(last) ? last : undefined;
-}
-
-/**
- * Chave de junção lead→anúncio: o id extraído do utm_content, senão o próprio
- * utm_content (compat. com dados onde o utm_content já é o adId, ex. seed).
- */
-export function leadAdKey(lead: Lead): string | undefined {
-  return adIdFromUtmContent(lead.utmContent) ?? lead.utmContent ?? undefined;
-}
-
-const PAID_SOURCE_RE = /ads|paid|cpc|ppc|meta|facebook|^fb$/;
-
-/**
- * O utm_source indica tráfego pago? (metaads, facebook, fb, …). Fontes orgânicas
- * como "ig"/"instagram"/"link_in_bio" retornam false — usado para separar leads
- * orgânicos (sem custo) do denominador do CPL pago.
- */
-export function isPaidSource(src?: string | null): boolean {
-  return src ? PAID_SOURCE_RE.test(src.trim().toLowerCase()) : false;
-}
+// A junção lead → anúncio mora em atribuicao.ts (id, nome único, macro, ambígua).
+export { adIdFromUtmContent, isPaidSource } from "./atribuicao";
 
 export interface ObjectiveKpis {
   bucket: ObjectiveBucket;
@@ -229,8 +205,8 @@ export interface ObjectiveKpis {
   impressions: number;
   reach: number;
   clicks: number;
-  leads: number; // leads atribuídos (via utmContent) a anúncios deste balde
-  meetings: number; // reuniões atribuídas a este balde
+  leads: number; // leads que ENTRARAM no período, atribuídos a anúncios deste balde
+  meetings: number; // reuniões AGENDADAS no período (data do agendamento) deste balde
   ctr: number;
   cpm: number; // spend / impressions * 1000
   costPerReach: number; // spend / reach * 1000 (custo por mil alcançados)
@@ -281,15 +257,31 @@ export interface ObjectiveBreakdown {
  * cost-per-follower. This is the faithful budget view: conversion CPL/CPR no
  * longer carry the discovery budget.
  */
+/**
+ * Balde de cada lead: o do anúncio de onde veio; sem anúncio identificado, a
+ * fonte decide (paga → conversão, senão orgânico). O mapa anúncio → balde usa o
+ * histórico INTEIRO: a reunião marcada hoje de um lead que veio de um anúncio
+ * parado no mês passado continua sendo da conversão (antes, fora do período, ela
+ * caía no palpite pela fonte).
+ */
+export function baldeDosLeads(data: DashboardData): (l: Lead) => ObjectiveBucket | "organico" {
+  const adBucket = new Map<string, ObjectiveBucket>();
+  for (const r of data.adDaily) {
+    if (!adBucket.has(r.adId)) adBucket.set(r.adId, bucketOfAd(r));
+  }
+  const atribuir = atribuidor(data.creatives);
+  return (l) => {
+    const adId = atribuir(l).adId;
+    const joined = adId ? adBucket.get(adId) : undefined;
+    return joined ?? (isPaidSource(l.utmSource, l.utmMedium) ? "conversao" : "organico");
+  };
+}
+
 export function objectiveBreakdown(data: DashboardData, range?: DateRange): ObjectiveBreakdown {
   const ads = filterAds(data.adDaily, range);
   const leads = filterLeads(data.leads, range);
-
-  // ad → bucket (o objetivo de um anúncio é estável; usa a primeira linha vista)
-  const adBucket = new Map<string, ObjectiveBucket>();
-  for (const r of ads) {
-    if (!adBucket.has(r.adId)) adBucket.set(r.adId, bucketOfAd(r));
-  }
+  const agendadas = reunioesNoPeriodo(data.leads, range);
+  const baldeDe = baldeDosLeads(data);
 
   const acc: Record<ObjectiveBucket, ObjectiveKpis> = {
     conversao: emptyObjectiveKpis("conversao"),
@@ -302,22 +294,19 @@ export function objectiveBreakdown(data: DashboardData, range?: DateRange): Obje
     a.reach += r.reach;
     a.clicks += r.clicks;
   }
+  // Leads: quem ENTROU no período. Reuniões: as AGENDADAS no período — cada
+  // uma no seu calendário (a north star conta pela data do agendamento).
   let organicLeads = 0;
   let organicMeetings = 0;
   for (const l of leads) {
-    const key = leadAdKey(l);
-    const joined = key ? adBucket.get(key) : undefined;
-    // Junta pelo anúncio; se não junta mas a fonte é paga, assume conversão;
-    // senão é orgânico/direto (sem custo pago) e fica fora do CPL/CPR.
-    const b: ObjectiveBucket | "organico" =
-      joined ?? (isPaidSource(l.utmSource) ? "conversao" : "organico");
-    if (b === "organico") {
-      organicLeads += 1;
-      if (isBooked(l)) organicMeetings += 1;
-    } else {
-      acc[b].leads += 1;
-      if (isBooked(l)) acc[b].meetings += 1;
-    }
+    const b = baldeDe(l);
+    if (b === "organico") organicLeads += 1;
+    else acc[b].leads += 1;
+  }
+  for (const l of agendadas) {
+    const b = baldeDe(l);
+    if (b === "organico") organicMeetings += 1;
+    else acc[b].meetings += 1;
   }
   for (const b of ["conversao", "descoberta"] as ObjectiveBucket[]) {
     const a = acc[b];
@@ -394,6 +383,28 @@ export function countMeetings(leads: Lead[]): number {
   return leads.filter(isBooked).length;
 }
 
+/**
+ * O DIA em que a reunião foi agendada (AAAA-MM-DD), para quem conta como
+ * reunião (`isBooked`). Lê o marco `bookedAt`; linhas anteriores ao marco caem
+ * na hora do clique (`meetingAt`) e, por último, na entrada do lead.
+ */
+export function dataDoAgendamento(l: Lead): string | undefined {
+  if (!isBooked(l)) return undefined;
+  return dayOf(l.bookedAt ?? l.meetingAt ?? l.createdAt);
+}
+
+/**
+ * Reuniões AGENDADAS no período — a north star, pela data do agendamento. Não é
+ * "dos leads que entraram no período, quantos agendaram" (essa é a coorte, que
+ * mede taxa): um lead de setembro que marca em outubro é reunião de outubro.
+ */
+export function reunioesNoPeriodo(leads: Lead[], range?: DateRange): Lead[] {
+  return leads.filter((l) => {
+    const d = dataDoAgendamento(l);
+    return d !== undefined && inRange(d, range);
+  });
+}
+
 export function countAttended(leads: Lead[]): number {
   return leads.filter(isAttended).length;
 }
@@ -459,6 +470,47 @@ export function lossBreakdown(leads: Lead[]): LossRow[] {
   }).sort((a, b) => b.count - a.count);
 }
 
+export interface PerdasDoPeriodo {
+  /** Perdas sem reunião, por motivo (sem os "Sem resposta" sem tentativa). */
+  linhas: LossRow[];
+  porTipo: Record<LossKind, number>;
+  /** qualidade + decisão — o que entra na quebra mídia × oferta. */
+  total: number;
+  /** Encerrados DEPOIS de ter reunião: ficam fora da quebra. */
+  depoisDaReuniao: number;
+  /**
+   * "Sem resposta" sem NENHUMA tentativa registrada. Não é perda de mídia: sem
+   * tentativa, ninguém sabe se a pessoa responderia — é falha de processo.
+   */
+  semTentativa: number;
+}
+
+/**
+ * As perdas dos leads que entraram no período, separadas do jeito que a decisão
+ * precisa (B20 + 2.4): sem reunião × depois da reunião, mídia × oferta, e o
+ * "Sem resposta" que ninguém tentou contatar fora da conta da mídia.
+ * `comTentativa` = ids de leads com pelo menos uma tentativa (lib/contato.ts).
+ */
+export function perdasDoPeriodo(
+  data: DashboardData,
+  range: DateRange | undefined,
+  comTentativa: Set<string>,
+): PerdasDoPeriodo {
+  const leads = filterLeads(data.leads, range);
+  const naoTentado = (l: Lead) =>
+    isLostWithoutMeeting(l) && l.status === "sem_resposta" && !comTentativa.has(l.id);
+  const semTentativa = leads.filter(naoTentado).length;
+  const contam = leads.filter((l) => !naoTentado(l));
+  const porTipo = lossByKind(contam);
+  return {
+    linhas: lossBreakdown(contam).filter((r) => r.count > 0),
+    porTipo,
+    total: porTipo.qualidade + porTipo.decisao,
+    depoisDaReuniao: countLostAfterMeeting(leads),
+    semTentativa,
+  };
+}
+
 /** Perdas SEM reunião somadas por origem — mídia (`qualidade`) vs oferta (`decisao`). */
 export function lossByKind(leads: Lead[]): Record<LossKind, number> {
   const out: Record<LossKind, number> = { qualidade: 0, decisao: 0 };
@@ -485,27 +537,6 @@ export interface FunnelStage {
   fromPrev?: number;
 }
 
-export function buildFunnel(data: DashboardData, range?: DateRange): FunnelStage[] {
-  const ads = filterAds(data.adDaily, range);
-  const leads = filterLeads(data.leads, range);
-  const impressions = ads.reduce((s, r) => s + r.impressions, 0);
-  const clicks = ads.reduce((s, r) => s + r.clicks, 0);
-  const leadCount = leads.length;
-  const meetings = countMeetings(leads);
-  const attended = countAttended(leads);
-  const clients = countClients(leads);
-
-  const stages: FunnelStage[] = [
-    { key: "impressoes", label: "Impressões", value: impressions },
-    { key: "cliques", label: "Cliques", value: clicks, fromPrev: div(clicks, impressions) },
-    { key: "leads", label: "Leads", value: leadCount, fromPrev: div(leadCount, clicks) },
-    { key: "reunioes", label: "Reuniões", value: meetings, fromPrev: div(meetings, leadCount) },
-    { key: "compareceu", label: "Reunião realizada", value: attended, fromPrev: div(attended, meetings) },
-    { key: "clientes", label: "Clientes", value: clients, fromPrev: div(clients, attended) },
-  ];
-  return stages;
-}
-
 // ---- headline KPI bundle for the overview --------------------------
 
 export interface OverviewKpis {
@@ -517,17 +548,20 @@ export interface OverviewKpis {
   cplBlended: number; // gasto total ÷ leads (legado, para referência)
   /** Denominador do CPL: leads atribuídos à conversão (não `leads`, que inclui orgânicos). */
   leadsConversao: number;
+  /** Reuniões AGENDADAS no período, pela data do agendamento (a north star). */
   meetings: number;
-  /** Denominador do CPR: reuniões de leads de conversão. A quarentena olha ESTE número. */
+  /** Denominador do CPR: reuniões agendadas no período vindas da conversão. A quarentena olha ESTE número. */
   meetingsConversao: number;
+  /** Coorte: dos leads que ENTRARAM no período, quantos agendaram (em qualquer data). Mede taxa. */
+  meetingsCoorte: number;
   attended: number;
   cpr: number; // FIEL (North Star): gasto de conversão ÷ reuniões de conversão
   cprBlended: number; // gasto total ÷ reuniões (legado, para referência)
   ctr: number;
   clicks: number;
   impressions: number;
-  leadToMeeting: number; // ratio
-  showRate: number; // compareceu / booked
+  leadToMeeting: number; // coorte: agendaram ÷ leads do período
+  showRate: number; // coorte: compareceu ÷ agendaram
   hasDiscovery: boolean; // há orçamento de descoberta no período?
   organicLeads: number; // leads orgânicos/diretos (fora do CPL/CPR pago)
   // ---- do lead à receita (Fase 3) ----
@@ -536,15 +570,16 @@ export interface OverviewKpis {
   cac: number; // custo de aquisição = gasto de conversão ÷ clientes
   roas: number; // receita ÷ gasto total
   ticket: number; // ticket médio = receita ÷ clientes
-  valuePerMeeting: number; // receita ÷ reuniões
-  meetingToClient: number; // clientes ÷ reuniões
+  valuePerMeeting: number; // coorte: receita ÷ agendaram
+  meetingToClient: number; // coorte: clientes ÷ agendaram
 }
 
 export function overviewKpis(data: DashboardData, range?: DateRange): OverviewKpis {
   const ads = filterAds(data.adDaily, range);
   const leads = filterLeads(data.leads, range);
   const k = adKpis(ads);
-  const meetings = countMeetings(leads);
+  const meetings = reunioesNoPeriodo(data.leads, range).length;
+  const meetingsCoorte = countMeetings(leads);
   const attended = countAttended(leads);
   const obj = objectiveBreakdown(data, range);
   const clients = countClients(leads);
@@ -559,14 +594,15 @@ export function overviewKpis(data: DashboardData, range?: DateRange): OverviewKp
     leadsConversao: obj.conversao.leads,
     meetings,
     meetingsConversao: obj.conversao.meetings,
+    meetingsCoorte,
     attended,
     cpr: obj.conversao.cpr,
     cprBlended: cpr(k.spend, meetings),
     ctr: k.ctr,
     clicks: k.clicks,
     impressions: k.impressions,
-    leadToMeeting: div(meetings, leads.length),
-    showRate: div(attended, meetings),
+    leadToMeeting: div(meetingsCoorte, leads.length),
+    showRate: div(attended, meetingsCoorte),
     hasDiscovery: obj.hasDiscovery,
     organicLeads: obj.organicLeads,
     clients,
@@ -574,8 +610,8 @@ export function overviewKpis(data: DashboardData, range?: DateRange): OverviewKp
     cac: div(obj.conversao.spend, clients),
     roas: div(revenue, k.spend),
     ticket: div(revenue, clients),
-    valuePerMeeting: div(revenue, meetings),
-    meetingToClient: div(clients, meetings),
+    valuePerMeeting: div(revenue, meetingsCoorte),
+    meetingToClient: div(clients, meetingsCoorte),
   };
 }
 
@@ -588,8 +624,13 @@ export interface DailyPoint {
   clicks: number;
   leads: number;
   cpl: number;
-  /** Dia sem nenhuma linha de anúncio (pausa ou sync que falhou) — não é "gastou 0". */
+  /**
+   * Dia sem linha de anúncio que NENHUM sync bem-sucedido cobriu — pode ter
+   * havido gasto que o painel não viu (falha). Não é "gastou 0".
+   */
   semDado: boolean;
+  /** Dia sem linha, mas coberto por um sync que deu certo: a campanha estava parada. */
+  semVeiculacao: boolean;
 }
 
 /**
@@ -597,13 +638,18 @@ export interface DailyPoint {
  * os dias com linha entravam, e o eixo do gráfico pulava de 24/08 para 03/09 —
  * semanas sem gasto pareciam continuidade (B12).
  */
-export function dailySeries(data: DashboardData, range?: DateRange): DailyPoint[] {
+export function dailySeries(
+  data: DashboardData,
+  range?: DateRange,
+  /** Janelas cobertas por syncs bem-sucedidos (ADR-06). Ausente = todo dia sem linha é "sem dados". */
+  cobertura?: Intervalo[],
+): DailyPoint[] {
   const ads = filterAds(data.adDaily, range);
   const byDate = new Map<string, DailyPoint>();
   for (const r of ads) {
     const p =
       byDate.get(r.date) ??
-      { date: r.date, spend: 0, impressions: 0, clicks: 0, leads: 0, cpl: 0, semDado: false };
+      { date: r.date, spend: 0, impressions: 0, clicks: 0, leads: 0, cpl: 0, semDado: false, semVeiculacao: false };
     p.spend += r.spend;
     p.impressions += r.impressions;
     p.clicks += r.clicks;
@@ -618,10 +664,11 @@ export function dailySeries(data: DashboardData, range?: DateRange): DailyPoint[
   for (let d = new Date(from + "T00:00:00Z"); d.toISOString().slice(0, 10) <= to; d.setUTCDate(d.getUTCDate() + 1)) {
     const date = d.toISOString().slice(0, 10);
     const p = byDate.get(date);
+    const coberto = Boolean(cobertura && diaCoberto(cobertura, date));
     out.push(
       p
         ? { ...p, cpl: div(p.spend, p.leads) }
-        : { date, spend: 0, impressions: 0, clicks: 0, leads: 0, cpl: 0, semDado: true },
+        : { date, spend: 0, impressions: 0, clicks: 0, leads: 0, cpl: 0, semDado: !coberto, semVeiculacao: coberto },
     );
   }
   return out;
@@ -629,9 +676,18 @@ export function dailySeries(data: DashboardData, range?: DateRange): DailyPoint[
 
 /** Trechos seguidos de dias sem dado, para o gráfico marcar (não esconder). */
 export function trechosSemDado(serie: { date: string; semDado: boolean }[]): { from: string; to: string }[] {
+  return trechos(serie, (p) => p.semDado);
+}
+
+/** Trechos seguidos de dias sem veiculação (campanha parada, confirmada pelo sync). */
+export function trechosSemVeiculacao(serie: DailyPoint[]): { from: string; to: string }[] {
+  return trechos(serie, (p) => p.semVeiculacao);
+}
+
+function trechos<T extends { date: string }>(serie: T[], marca: (p: T) => boolean): { from: string; to: string }[] {
   const out: { from: string; to: string }[] = [];
   for (const p of serie) {
-    if (!p.semDado) continue;
+    if (!marca(p)) continue;
     const ultimo = out.at(-1);
     const anterior = ultimo ? new Date(ultimo.to + "T00:00:00Z") : null;
     if (anterior) anterior.setUTCDate(anterior.getUTCDate() + 1);
@@ -723,14 +779,21 @@ export interface CreativePerf {
   spend: number;
   impressions: number;
   clicks: number;
+  /** Conversões do Pixel (Meta) — número-sombra, não é "lead" do painel. */
   leads: number;
+  /** Leads do PAINEL que entraram no período atribuídos a este anúncio. */
+  leadsPainel: number;
+  /** Reuniões AGENDADAS no período atribuídas a este anúncio. */
   meetings: number;
   clients: number; // reuniões que viraram cliente
   revenue: number; // receita atribuída ao criativo
   cac: number; // gasto ÷ clientes
   ctr: number;
   cpc: number;
+  /** CPL Meta (Pixel): gasto ÷ conversões do Pixel. */
   cpl: number;
+  /** CPL (painel): gasto ÷ leads do painel — o mesmo CPL das outras telas, por anúncio. */
+  cplPainel: number;
   cpr: number;
   fatigue: Fatigue;
   hookRate?: number; // 3s plays / impressions (gancho: prende no 1º instante?)
@@ -779,15 +842,21 @@ export function creativePerformance(
     allByAd.set(r.adId, list);
   }
 
-  // Atribui reuniões/clientes/receita ao criativo pelo id do anúncio embutido no
-  // utm_content (ou pelo utm_content cru, quando ele já é o adId, ex. seed).
+  // Atribui leads, reuniões, clientes e receita ao anúncio pela junção ÚNICA
+  // (atribuicao.ts). Reuniões pela data do agendamento, como o resto do painel.
+  const atribuir = atribuidor(data.creatives);
   const meetingsByAd = new Map<string, number>();
+  const leadsByAd = new Map<string, number>();
   const clientsByAd = new Map<string, number>();
   const revenueByAd = new Map<string, number>();
+  for (const l of reunioesNoPeriodo(data.leads, range)) {
+    const key = atribuir(l).adId;
+    if (key) meetingsByAd.set(key, (meetingsByAd.get(key) ?? 0) + 1);
+  }
   for (const l of leads) {
-    const key = leadAdKey(l);
+    const key = atribuir(l).adId;
     if (!key) continue;
-    if (isBooked(l)) meetingsByAd.set(key, (meetingsByAd.get(key) ?? 0) + 1);
+    leadsByAd.set(key, (leadsByAd.get(key) ?? 0) + 1);
     if (isClient(l)) {
       clientsByAd.set(key, (clientsByAd.get(key) ?? 0) + 1);
       revenueByAd.set(key, (revenueByAd.get(key) ?? 0) + (l.value ?? 0));
@@ -802,6 +871,7 @@ export function creativePerformance(
     }
     const k = adKpis(rows);
     const meetings = meetingsByAd.get(creative.adId) ?? 0;
+    const leadsPainel = leadsByAd.get(creative.adId) ?? 0;
     const clients = clientsByAd.get(creative.adId) ?? 0;
     const revenue = revenueByAd.get(creative.adId) ?? 0;
     const adset = rows[0]?.adset ?? "—";
@@ -814,6 +884,7 @@ export function creativePerformance(
       impressions: k.impressions,
       clicks: k.clicks,
       leads: k.leads,
+      leadsPainel,
       meetings,
       clients,
       revenue,
@@ -821,6 +892,7 @@ export function creativePerformance(
       ctr: k.ctr,
       cpc: k.cpc,
       cpl: k.cpl,
+      cplPainel: div(k.spend, leadsPainel),
       cpr: div(k.spend, meetings),
       fatigue: computeFatigue(allByAd.get(creative.adId) ?? []),
       hookRate: creative.videoPlays ? div(creative.videoPlays, k.impressions) : undefined,
@@ -835,17 +907,6 @@ export function creativePerformance(
 
 // ---- per-adset / per-campaign --------------------------------------
 
-export interface GroupPerf {
-  key: string;
-  bucket: ObjectiveBucket; // balde dominante (por gasto) do grupo
-  spend: number;
-  impressions: number;
-  clicks: number;
-  leads: number;
-  ctr: number;
-  cpl: number;
-}
-
 /** Balde de objetivo dominante (por gasto) de um conjunto de linhas. */
 function dominantBucket(rows: AdDaily[]): ObjectiveBucket {
   let conv = 0;
@@ -857,34 +918,6 @@ function dominantBucket(rows: AdDaily[]): ObjectiveBucket {
   return disc > conv ? "descoberta" : "conversao";
 }
 
-export function groupBy(
-  rows: AdDaily[],
-  pick: (r: AdDaily) => string,
-): GroupPerf[] {
-  const map = new Map<string, AdDaily[]>();
-  for (const r of rows) {
-    const key = pick(r);
-    const list = map.get(key) ?? [];
-    list.push(r);
-    map.set(key, list);
-  }
-  return [...map.entries()]
-    .map(([key, list]) => {
-      const k = adKpis(list);
-      return {
-        key,
-        bucket: dominantBucket(list),
-        spend: k.spend,
-        impressions: k.impressions,
-        clicks: k.clicks,
-        leads: k.leads,
-        ctr: k.ctr,
-        cpl: k.cpl,
-      };
-    })
-    .sort((a, b) => b.spend - a.spend);
-}
-
 // ---- per-adset (com reuniões e CPR reais) --------------------------
 
 export interface AdsetPerf {
@@ -893,12 +926,14 @@ export interface AdsetPerf {
   spend: number;
   impressions: number;
   clicks: number;
-  leads: number; // pixel (AdDaily.leads) — número completo por conjunto
-  meetings: number; // atribuídas pelo id do anúncio → conjunto
+  leads: number; // conversões do Pixel (AdDaily.leads) — número-sombra
+  leadsPainel: number; // leads do painel atribuídos ao conjunto (entraram no período)
+  meetings: number; // agendadas no período, atribuídas pelo anúncio → conjunto
   clients: number;
   revenue: number;
   ctr: number;
-  cpl: number; // spend / leads
+  cpl: number; // CPL Meta (Pixel): spend / leads do Pixel
+  cplPainel: number; // CPL (painel): spend / leads do painel
   cpr: number; // spend / meetings (custo por reunião do conjunto)
 }
 
@@ -921,14 +956,23 @@ export function adsetPerformance(data: DashboardData, range?: DateRange): AdsetP
     byAdset.set(r.adset, list);
   }
 
+  const atribuir = atribuidor(data.creatives);
+  const conjuntoDe = (l: Lead) => {
+    const adId = atribuir(l).adId;
+    return adId ? adToAdset.get(adId) : undefined;
+  };
   const meetingsByAdset = new Map<string, number>();
+  const leadsByAdset = new Map<string, number>();
   const clientsByAdset = new Map<string, number>();
   const revenueByAdset = new Map<string, number>();
+  for (const l of reunioesNoPeriodo(data.leads, range)) {
+    const adset = conjuntoDe(l);
+    if (adset) meetingsByAdset.set(adset, (meetingsByAdset.get(adset) ?? 0) + 1);
+  }
   for (const l of leads) {
-    const adId = leadAdKey(l);
-    const adset = adId ? adToAdset.get(adId) : undefined;
+    const adset = conjuntoDe(l);
     if (!adset) continue;
-    if (isBooked(l)) meetingsByAdset.set(adset, (meetingsByAdset.get(adset) ?? 0) + 1);
+    leadsByAdset.set(adset, (leadsByAdset.get(adset) ?? 0) + 1);
     if (isClient(l)) {
       clientsByAdset.set(adset, (clientsByAdset.get(adset) ?? 0) + 1);
       revenueByAdset.set(adset, (revenueByAdset.get(adset) ?? 0) + (l.value ?? 0));
@@ -939,6 +983,7 @@ export function adsetPerformance(data: DashboardData, range?: DateRange): AdsetP
     .map(([adset, list]) => {
       const k = adKpis(list);
       const meetings = meetingsByAdset.get(adset) ?? 0;
+      const leadsPainel = leadsByAdset.get(adset) ?? 0;
       return {
         adset,
         bucket: dominantBucket(list),
@@ -946,11 +991,13 @@ export function adsetPerformance(data: DashboardData, range?: DateRange): AdsetP
         impressions: k.impressions,
         clicks: k.clicks,
         leads: k.leads,
+        leadsPainel,
         meetings,
         clients: clientsByAdset.get(adset) ?? 0,
         revenue: revenueByAdset.get(adset) ?? 0,
         ctr: k.ctr,
         cpl: k.cpl,
+        cplPainel: div(k.spend, leadsPainel),
         cpr: div(k.spend, meetings),
       };
     })
@@ -2003,25 +2050,18 @@ export interface DataWarning {
 }
 
 /**
- * Checagens de confiança do painel: dado atrasado/quebrado leva a decisão
- * errada. Roda sobre o dataset inteiro (saúde global), não sobre o período.
+ * Checagens de saúde do dado: rastreio quebrado ou linha sem objetivo levam a
+ * decisão errada. Roda sobre o dataset inteiro (saúde global), não sobre o
+ * período. O sync atrasado/falhando é do cabeçalho (frescor por fonte) e os dias
+ * sem dados do período são da confiança (`assessTrust`, com a cobertura do sync)
+ * — cada fato num lugar só.
  */
-export function dataQualityChecks(
-  data: DashboardData,
-  opts: { nowIso: string; lastSyncAds?: string | null },
-): DataWarning[] {
+export function dataQualityChecks(data: DashboardData): DataWarning[] {
   const out: DataWarning[] = [];
   // Marcas de awareness (só seguidores) não têm funil de lead/LP — os checks de
   // "gasto sem lead", "LP sem submit" e "objetivo distorce o CPL" não se aplicam
   // e virariam falso positivo permanente.
   const awareness = isAwareness(data.campaign.brand);
-
-  if (opts.lastSyncAds) {
-    const hrs = (new Date(opts.nowIso).getTime() - new Date(opts.lastSyncAds).getTime()) / 3_600_000;
-    if (hrs > 36) {
-      out.push({ level: "warn", message: `Anúncios sincronizados há ${Math.round(hrs)}h — os números podem estar defasados. Rode "Sincronizar agora".` });
-    }
-  }
 
   if (!awareness) {
     const noObjective = data.adDaily.filter((r) => !r.objective && r.spend > 0).length;
@@ -2038,18 +2078,6 @@ export function dataQualityChecks(
     const totalSubmits = data.lpDaily.reduce((s, r) => s + r.formSubmits, 0);
     if (totalVisits > 0 && totalSubmits === 0) {
       out.push({ level: "warn", message: "A landing page tem visitas mas nenhum envio de formulário registrado — verifique o rastreio de leads (/api/track)." });
-    }
-  }
-
-  // Buracos na série diária de anúncios (dias sem dado dentro do intervalo).
-  const dates = [...new Set(data.adDaily.map((r) => r.date))].sort();
-  if (dates.length >= 2) {
-    const first = new Date(dates[0] + "T00:00:00Z").getTime();
-    const last = new Date(dates.at(-1)! + "T00:00:00Z").getTime();
-    const expected = Math.round((last - first) / 86_400_000) + 1;
-    const missing = expected - dates.length;
-    if (missing > 0) {
-      out.push({ level: "info", message: `${missing} dia(s) sem dados de anúncios no intervalo — a série pode ter lacunas (insights da Meta atrasam até 48h).` });
     }
   }
 

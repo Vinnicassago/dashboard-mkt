@@ -73,17 +73,33 @@ const columns: Column<CreativePerf>[] = [
   { key: "ctr", header: "CTR", align: "right", sortable: true, sortValue: (r) => r.ctr, render: (r) => formatPercent(r.ctr) },
   { key: "cpc", header: "CPC", align: "right", sortable: true, sortValue: (r) => r.cpc, render: (r) => formatCurrency(r.cpc) },
   {
-    key: "cpl",
-    header: "CPL",
+    key: "cplPainel",
+    header: "CPL (painel)",
     align: "right",
     sortable: true,
     // Sem lead não há CPL. Ordenar por CPL crescente — o gesto natural para achar
     // o mais barato — colocava no topo justamente os criativos que não geraram
     // lead nenhum, porque div() devolve 0. Infinity os manda para o fim.
-    sortValue: (r) => (r.leads > 0 ? r.cpl : Number.POSITIVE_INFINITY),
-    render: (r) => (r.leads > 0 ? formatCurrency(r.cpl) : "—"),
+    sortValue: (r) => (r.leadsPainel > 0 ? r.cplPainel : Number.POSITIVE_INFINITY),
+    render: (r) => (r.leadsPainel > 0 ? formatCurrency(r.cplPainel) : "—"),
   },
-  { key: "leads", header: "Leads", align: "right", sortable: true, sortValue: (r) => r.leads, render: (r) => formatInt(r.leads) },
+  {
+    key: "leadsPainel",
+    header: "Leads (painel)",
+    align: "right",
+    sortable: true,
+    sortValue: (r) => r.leadsPainel,
+    render: (r) => formatInt(r.leadsPainel),
+  },
+  {
+    // O número da Meta, rotulado como tal: conta eventos do Pixel, não pessoas.
+    key: "cpl",
+    header: "CPL Meta (Pixel)",
+    align: "right",
+    sortable: true,
+    sortValue: (r) => (r.leads > 0 ? r.cpl : Number.POSITIVE_INFINITY),
+    render: (r) => <span className="text-muted-foreground">{r.leads > 0 ? formatCurrency(r.cpl) : "—"}</span>,
+  },
   { key: "meetings", header: "Reuniões", align: "right", sortable: true, sortValue: (r) => r.meetings, render: (r) => formatInt(r.meetings) },
   {
     key: "cpr",

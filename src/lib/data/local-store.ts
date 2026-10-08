@@ -10,6 +10,7 @@ import {
   type DataBackend,
   type LeadStatusPatch,
   type ListEventsOpts,
+  type ListSyncRunsOpts,
   type LpDelta,
   type PublicUser,
   type StoredUser,
@@ -20,6 +21,7 @@ import { DEFAULT_BRAND } from "../types";
 import type {
   AdDaily,
   AuditEntry,
+  SyncRun,
   Creative,
   DashboardData,
   Goal,
@@ -51,6 +53,8 @@ interface LocalFile {
   drafts: PostDraft[];
   /** Ações administrativas (restaurar exemplo, ressincronizar, reclassificar). */
   audit: AuditEntry[];
+  /** Cada sincronização, com a janela que cobriu (ADR-04/06). */
+  syncRuns: SyncRun[];
 }
 
 let cache: LocalFile | null = null;
@@ -152,6 +156,7 @@ function load(): LocalFile {
         // Arquivos criados antes da Etapa 1 não têm a chave.
         if (!Array.isArray(parsed.drafts)) parsed.drafts = [];
         if (!Array.isArray(parsed.audit)) parsed.audit = [];
+        if (!Array.isArray(parsed.syncRuns)) parsed.syncRuns = [];
         migrateBrand(parsed.data);
         migrateLeadStatus(parsed);
         migrateLeadMilestones(parsed);
@@ -169,6 +174,7 @@ function load(): LocalFile {
     leadEvents: buildSeedLeadEvents(data.leads),
     drafts: [],
     audit: [],
+    syncRuns: [],
   };
   persist(fresh);
   return fresh;
@@ -225,6 +231,7 @@ export const localBackend: DataBackend = {
       leadEvents: [...buildSeedLeadEvents(data.leads).filter((e) => !ids.has(e.id)), ...atuais],
       drafts: file().drafts,
       audit: file().audit,
+      syncRuns: file().syncRuns,
     };
     persist(cache);
     return cache.data;
@@ -525,5 +532,21 @@ export const localBackend: DataBackend = {
 
   async listAuditEntries(limit: number) {
     return [...file().audit].sort((a, b) => b.at.localeCompare(a.at)).slice(0, limit);
+  },
+
+  async addSyncRun(run: SyncRun) {
+    const f = file();
+    f.syncRuns = [run, ...f.syncRuns.filter((r) => r.id !== run.id)];
+    persist(f);
+    cache = f;
+  },
+
+  async listSyncRuns(opts?: ListSyncRunsOpts) {
+    let list = file().syncRuns;
+    if (opts?.source) list = list.filter((r) => r.source === opts.source);
+    if (opts?.brand) list = list.filter((r) => r.brand === opts.brand);
+    const sorted = [...list].sort((a, b) => b.finishedAt.localeCompare(a.finishedAt)).map((r) => ({ ...r }));
+    const limit = opts?.limit ?? 50;
+    return limit > 0 ? sorted.slice(0, limit) : sorted;
   },
 };

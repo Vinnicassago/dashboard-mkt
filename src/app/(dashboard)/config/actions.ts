@@ -24,7 +24,7 @@ import { STATE_KEYS } from "@/lib/data/backend";
 import { parseAdsCsv } from "@/lib/csv";
 import { parseLeadsCsv } from "@/lib/leads-csv";
 import { resyncAdsHistory, runSync, type SyncSource } from "@/lib/meta/sync";
-import { resolveMetaBrands, brandForCampaign } from "@/lib/meta/config";
+import { resolveMetaBrands, brandForCampaign, NAO_CLASSIFICADO } from "@/lib/meta/config";
 import { BRANDS } from "@/lib/brands";
 import { can } from "@/lib/auth/guard";
 import { currentActor, newEventId } from "@/lib/auth/actor";
@@ -37,7 +37,6 @@ import { registrarAuditoria } from "@/lib/auditoria";
 import { setMensagemWhatsapp, setRoboDesativado } from "@/lib/integracoes";
 import { randomUUID } from "node:crypto";
 import {
-  DEFAULT_BRAND,
   type AdDaily,
   type Creative,
   type CtaType,
@@ -472,9 +471,10 @@ export async function resyncAdsCleanAction(): Promise<ActionState> {
 }
 
 /**
- * Salva as regras de "quais campanhas são de cada marca" (por marca não-padrão),
- * guardadas no banco e usadas pelo sync/CSV/reclassificação. A marca padrão
- * (consorcio) é sempre a catch-all: recebe tudo que não casa com outra marca.
+ * Salva as regras de "quais campanhas são de cada marca", guardadas no banco e
+ * usadas pelo sync/CSV/reclassificação. Com regra em todas as marcas, o que não
+ * casa com nenhuma fica "não classificado" (fora dos números, com alerta); `*`
+ * declara uma marca como o resto da conta. Ver `brandForCampaign`.
  */
 export async function setBrandMatchAction(
   _prev: ActionState | null,
@@ -484,7 +484,6 @@ export async function setBrandMatchAction(
   const cur = (await getState<Record<string, string[]>>(STATE_KEYS.brandCampaignMatch)) ?? {};
   const next: Record<string, string[]> = { ...cur };
   for (const b of BRANDS) {
-    if (b.slug === DEFAULT_BRAND) continue;
     const raw = formData.get(`match_${b.slug}`);
     if (raw == null) continue;
     next[b.slug] = String(raw).split(",").map((s) => s.trim()).filter(Boolean);
@@ -510,14 +509,17 @@ export async function reclassifyAdsAction(): Promise<ActionState> {
     const brands = await resolveMetaBrands();
     const ads: AdDaily[] = [];
     const creatives: Creative[] = [];
-    for (const b of BRANDS) {
-      const d = await getData(b.slug);
+    // O balde "não classificado" entra junto: a troca abaixo substitui TUDO, e
+    // linha que ficasse de fora seria apagada.
+    for (const slug of [...BRANDS.map((b) => b.slug), NAO_CLASSIFICADO]) {
+      const d = await getData(slug);
       ads.push(...d.adDaily);
       creatives.push(...d.creatives);
     }
     const retaggedAds = ads.map((r) => ({
       ...r,
-      brand: brandForCampaign(r.campaign, undefined, brands),
+      // O id da campanha (gravado desde a 0016) faz a regra por id valer aqui também.
+      brand: brandForCampaign(r.campaign, r.campaignId, brands),
     }));
     // O criativo não guarda a campanha — herda a marca do seu anúncio.
     const adBrand = new Map<string, string>();

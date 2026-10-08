@@ -167,7 +167,10 @@ export function Cascata({
                     </span>
                   ) : null}
                   {d.custoUnitario !== undefined ? (
-                    <span className="tabular">{formatCurrency(d.custoUnitario)} cada</span>
+                    <span className="tabular">
+                      {d.custoPrefixo ? `${d.custoPrefixo} ` : ""}
+                      {formatCurrency(d.custoUnitario)} cada
+                    </span>
                   ) : null}
                 </div>
 

@@ -16,6 +16,8 @@ export interface Frescor {
   nivel: NivelFrescor;
   /** Frase para o title (passar o mouse). */
   detalhe: string;
+  /** A última tentativa de sincronizar falhou. */
+  falhando?: boolean;
 }
 
 /** Acima disso o dado está velho (o cron é diário; a Meta atrasa até 48 h). */
@@ -30,7 +32,20 @@ const fmt = new Intl.DateTimeFormat("pt-BR", {
   minute: "2-digit",
 });
 
-export function frescorDaFonte(fonte: string, iso: string | null, agora: Date = new Date()): Frescor {
+export function frescorDaFonte(
+  fonte: string,
+  iso: string | null,
+  agora: Date = new Date(),
+  /** O sync está falhando (o dado pode até ser recente — a próxima atualização não vem). */
+  falha?: { desde: string; erro: string } | null,
+): Frescor {
+  const f = frescorBase(fonte, iso, agora);
+  if (!falha) return f;
+  const desde = fmt.format(new Date(falha.desde)).replace(",", "");
+  return { ...f, falhando: true, detalhe: `${f.detalhe} A sincronização está falhando desde ${desde}: ${falha.erro}` };
+}
+
+function frescorBase(fonte: string, iso: string | null, agora: Date): Frescor {
   if (!iso) {
     return { fonte, quando: "nunca", nivel: "muito-velho", detalhe: `${fonte}: nenhuma sincronização deu certo ainda.` };
   }

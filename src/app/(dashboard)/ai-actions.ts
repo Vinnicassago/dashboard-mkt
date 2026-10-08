@@ -6,8 +6,8 @@ import { aiAnalysisKey } from "@/lib/data/backend";
 import { can } from "@/lib/auth/guard";
 import { activeBrandSlug } from "@/lib/active-brand";
 import { pageRange } from "@/lib/page-range";
-import { dataQualityChecks } from "@/lib/metrics";
-import { getLastSync } from "@/lib/meta/sync";
+import { dataQualityChecks, type DataWarning } from "@/lib/metrics";
+import { estadoDaFonte } from "@/lib/sincronizacao";
 import { isAiConfigured } from "@/lib/ai/config";
 import { aiErrorMessage } from "@/lib/ai/client";
 import { buildBriefing } from "@/lib/ai/briefing";
@@ -42,12 +42,20 @@ export async function runAnalysisAction(rangeKey?: string): Promise<ActionState>
   }
 
   try {
-    const lastSync = await getLastSync();
     const nowIso = new Date().toISOString();
+    // A IA precisa saber se o dado está velho — na tela isso é o cabeçalho.
+    const ads = await estadoDaFonte("ads", brand);
+    const horas = ads.ultimoOk ? (Date.parse(nowIso) - Date.parse(ads.ultimoOk)) / 3_600_000 : null;
+    const avisosDeSync: DataWarning[] = [
+      ...(ads.falha ? [{ level: "warn" as const, message: `A sincronização da Meta está falhando: ${ads.falha.erro}` }] : []),
+      ...(horas != null && horas > 36
+        ? [{ level: "warn" as const, message: `Anúncios sincronizados há ${Math.round(horas)}h — os números podem estar defasados.` }]
+        : []),
+    ];
     const briefing = buildBriefing(data, range, {
       nowIso,
       drafts: await listDrafts(brand),
-      warnings: dataQualityChecks(data, { nowIso, lastSyncAds: lastSync.ads }),
+      warnings: [...avisosDeSync, ...dataQualityChecks(data)],
     });
     const analysis = await analyzeBriefing(briefing, brand);
     await setState(aiAnalysisKey(brand), analysis);

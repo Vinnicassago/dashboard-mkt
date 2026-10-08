@@ -58,6 +58,22 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
 - **KPIs:** somente em `src/lib/metrics.ts`, funções **puras** (sem I/O). Reutilize-as.
   Criativo citado em ação, alerta ou IA passa por `rotuloCriativo()` — dois anúncios
   podem ter o mesmo nome ("Carrossel -"), e o nome sozinho manda pausar o errado.
+- **Um número por métrica** (Fase 3, ADR-03): tela lê leads, CPL, reuniões e custo por
+  reunião SÓ de `kpisDoPeriodo` (`lib/kpis.ts`) — valor, amostra `n`, confiança e
+  anterior, e `mostrar()`/`custoExibivel()` para exibir. O lint (`eslint.config.mjs`)
+  proíbe `src/app` e `src/components` de importar `overviewKpis`, `objectiveBreakdown`,
+  `adKpis`, `filterLeads`, `countMeetings`… e `assessTrust`. Cascata, farol, motor de
+  ações, insights e briefing da IA leem o mesmo objeto; `fase3.test.ts` confere 3
+  períodos × 2 marcas. Definições em `lib/dicionario.ts` (o ⓘ das telas e o briefing
+  leem dali). **Reuniões agendadas = PERÍODO** (pela data do agendamento,
+  `dataDoAgendamento`; é a north star e o denominador do custo por reunião);
+  **"Agendaram" = COORTE** (dos leads que entraram no período) e mede a taxa lead →
+  reunião — nomes diferentes de propósito. Um CPL só: investimento de conversão ÷ leads
+  de conversão; o do Pixel aparece rotulado "CPL Meta (Pixel)". O balde do lead vem do
+  anúncio em TODO o histórico (`baldeDosLeads`). Junção lead → anúncio só por
+  `lib/atribuicao.ts` (id, nome único; macro `{{…}}` = desconhecida; nome repetido =
+  ambígua — nenhuma é atribuída). "Sem resposta" sem tentativa sai da conta da mídia
+  (`perdasDoPeriodo`).
 - **Confiança** (`src/lib/trust.ts`): `div()` devolve 0 quando o denominador é 0, então
   "nenhuma reunião" e "reunião de graça" imprimem o mesmo pixel. `assessTrust()` (pura)
   diz o que o número sustenta: `quarentena` (não exiba — vira "—"), `piso` (o real é
@@ -160,7 +176,23 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   nunca vai cru para a tela: `mensagemHumana` (`lib/erros.ts`) e o detalhe no log.
 - **Período** (`lib/range.ts`): os presets contam a partir de HOJE em Brasília
   (`hojeEmBrasilia`), não do último dia com anúncio. O cabeçalho mostra a data do
-  último sync que deu certo POR FONTE (`lib/frescor.ts`), nunca o `updated_at` global.
+  último sync que deu certo POR FONTE e POR MARCA (`lib/sincronizacao.ts`, tabela
+  `sync_runs` — toda execução é gravada, dê certo ou não, com a janela coberta), nunca o
+  `updated_at` global; falha vira "(falhando)" e alerta. Dia sem linha de anúncio coberto
+  por sync bem-sucedido é **sem veiculação** (cinza, sem "≥"); sem cobertura é **sem
+  dados** (âmbar, piso) — `lib/cobertura.ts`, ADR-06; um sync só cobre até 2 dias antes
+  de terminar (a Meta atrasa).
+- **Alertas** (`lib/alertas.ts`, `components/layout/alertas.tsx`): um lugar só, o
+  "⚠ N" do cabeçalho com painel lateral. Globais (sync falhando, gasto sem marca,
+  rastreio sem chave) vêm do layout; os do período (travas de confiança, saúde do dado,
+  atribuição) a página registra com `<RegistrarAlertas>`. Não crie faixa de aviso no
+  meio da tela — o que desqualifica um número fica colado nele ("—", "≥", "≤") e a
+  explicação vai para o painel.
+- **Marca da linha de anúncio** (`brandForCampaign`): regra por token do nome ou id de
+  campanha (`ad_daily.campaign_id`). Sem casar: conta de uma marca só → ela; `*` → o
+  resto declarado; ninguém com regra → a padrão; uma única sem regra → ela; senão
+  `NAO_CLASSIFICADO` — fora de todos os números, com alerta e prévia em Ajustes. A
+  reclassificação inclui esse balde (`replaceAdData` sem escopo troca TUDO).
 - **Charts (client) recebem props serializáveis.** Server Components não podem
   passar funções para Client Components. Cores vêm de CSS vars (`components/charts/colors.ts`),
   da paleta data-viz validada — não invente hex novos sem rodar o validador.

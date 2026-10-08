@@ -606,10 +606,9 @@ export function CleanResyncAdsButton() {
 
 export function BrandMatchForm({ current }: { current: Record<string, string> }) {
   const [state, action] = useActionState(setBrandMatchAction, null);
-  const extra = BRANDS.filter((b) => b.slug !== DEFAULT_BRAND);
   return (
     <form action={action} className="space-y-3">
-      {extra.map((b) => (
+      {BRANDS.map((b) => (
         <Field
           key={b.slug}
           label={`Campanhas de ${b.label} — fragmentos do nome ou IDs (separados por vírgula)`}
@@ -618,15 +617,17 @@ export function BrandMatchForm({ current }: { current: Record<string, string> })
             type="text"
             name={`match_${b.slug}`}
             defaultValue={current[b.slug] ?? ""}
-            placeholder="[KRN]"
+            placeholder={b.slug === DEFAULT_BRAND ? "[BRN]  ou  *  (o resto da conta)" : "[KRN]"}
             className={inputCls}
           />
         </Field>
       ))}
       <p className="text-xs text-muted-foreground">
-        Tudo que não casar com nenhuma marca fica com a {DEFAULT_BRAND} (padrão) — e como
-        não existe um balde de &ldquo;não classificado&rdquo;, um erro de atribuição fica
-        indistinguível de um acerto. Confira a lista acima depois de salvar.
+        Com regra em todas as marcas, a campanha que não casar com nenhuma fica{" "}
+        <strong>não classificada</strong>: fora de todos os números, com alerta, até você dizer
+        de quem é. Para uma marca receber &ldquo;o resto&rdquo;, use{" "}
+        <code className="font-mono">*</code>. Enquanto só uma marca estiver sem regra, ela
+        continua recebendo o resto — confira a prévia acima antes de reclassificar.
       </p>
       <p className="text-xs text-muted-foreground">
         O token é uma <strong>substring</strong> do nome da campanha, não um prefixo. Se as

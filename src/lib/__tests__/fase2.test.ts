@@ -17,6 +17,7 @@ import {
 import { etapaDoLead, montarFila } from "../fila";
 import { contarParados } from "../farol";
 import { montarCascata } from "../cascata";
+import { kpisDoPeriodo } from "../kpis";
 import type { DashboardData, Lead, LeadEvent } from "../types";
 
 // 2026-10-09 é sexta; 10-10 sábado; 10-12 segunda.
@@ -212,7 +213,7 @@ describe("farol sem robô: quem espera o 1º contato é 'gente parada'", () => {
       goals: [],
       updatedAt: agoraIso(),
     };
-    const c = montarCascata({ data, robo: null, comercial: null, investimentoConversao: 0 });
+    const c = montarCascata({ data, robo: null, comercial: null, kpis: kpisDoPeriodo(data, undefined) });
     const p = contarParados(c.degraus);
     expect(p.parados).toBe(2);
     expect(p.filaHref).toBe("/fila?etapa=novo");

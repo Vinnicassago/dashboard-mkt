@@ -176,6 +176,11 @@ export async function POST(request: Request) {
     utmCampaign: attr.utm_campaign,
     // utm_content carries the ad id — this is what ties the lead to a creative
     utmContent: attr.utm_content,
+    // Antes descartados: o meio diz se é mídia paga (o gerador emitia
+    // source=instagram + medium=paid_social) e o fbclid prova o clique.
+    utmMedium: attr.utm_medium,
+    utmTerm: attr.utm_term,
+    fbclid: attr.fbclid,
     status: "lead",
     // kept so the later Schedule event can still be matched to this person
     fbc: body.fbc || attr.fbc,

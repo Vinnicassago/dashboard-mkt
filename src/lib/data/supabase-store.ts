@@ -8,6 +8,7 @@ import {
   type DataBackend,
   type LeadStatusPatch,
   type ListEventsOpts,
+  type ListSyncRunsOpts,
   type LpDelta,
   type PublicUser,
   type StoredUser,
@@ -16,6 +17,7 @@ import { toRole } from "../auth/roles";
 import type {
   AdDaily,
   AuditEntry,
+  SyncRun,
   Creative,
   DashboardData,
   Goal,
@@ -35,6 +37,7 @@ import {
   s,
   toAd,
   toAudit,
+  toSyncRun,
   toCampaign,
   toCreative,
   toDraft,
@@ -46,6 +49,7 @@ import {
   toPost,
   fromAd,
   fromAudit,
+  fromSyncRun,
   fromCampaign,
   fromCreative,
   fromDraft,
@@ -543,5 +547,22 @@ export const supabaseBackend: DataBackend = {
       .limit(limit);
     check(error, "list audit entries");
     return (data ?? []).map(toAudit);
+  },
+
+  async addSyncRun(run: SyncRun) {
+    const { error } = await supabase().from("sync_runs").insert(fromSyncRun(run));
+    check(error, "add sync run");
+  },
+
+  async listSyncRuns(opts?: ListSyncRunsOpts) {
+    let query = supabase().from("sync_runs").select("*");
+    if (opts?.source) query = query.eq("source", opts.source);
+    if (opts?.brand) query = query.eq("brand", opts.brand);
+    query = query.order("finished_at", { ascending: false });
+    const limit = opts?.limit ?? 50;
+    if (limit > 0) query = query.limit(limit);
+    const { data, error } = await query;
+    check(error, "list sync runs");
+    return (data ?? []).map(toSyncRun);
   },
 };

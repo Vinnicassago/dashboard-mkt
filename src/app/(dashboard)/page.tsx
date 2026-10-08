@@ -2,7 +2,6 @@ import { DollarSign, UserPlus, Sparkles, Users, Radio } from "lucide-react";
 import Link from "next/link";
 import { ExampleBanner } from "@/components/example-banner";
 import { KpiCard } from "@/components/kpi/kpi-card";
-import { DataQualityCard } from "@/components/kpi/data-quality";
 import { GoalBar } from "@/components/kpi/goal-bar";
 import { absDelta, pctDelta } from "@/components/kpi/delta";
 import { TimeSeriesChart } from "@/components/charts/time-series-chart";
@@ -20,20 +19,26 @@ import { FILA_ETAPAS } from "@/lib/fila";
 import { FarolCard } from "@/components/kpi/farol-card";
 import { Cascata } from "@/components/charts/cascata";
 import { resolveMetaBrands } from "@/lib/meta/config";
-import { assessTrust, aplicarConfianca } from "@/lib/trust";
-import { TrustBand } from "@/components/kpi/trust-band";
+import { MIN_REUNIOES } from "@/lib/trust";
 import {
   awarenessKpis,
   dataQualityChecks,
   followerSeries,
   goalProgress,
   igAccountTotals,
-  overviewKpis,
   previousRange,
-  type DataWarning,
   type DateRange,
 } from "@/lib/metrics";
-import { getLastSync } from "@/lib/meta/sync";
+import { custoExibivel, kpisDoPeriodo, mostrar } from "@/lib/kpis";
+import { dica } from "@/lib/dicionario";
+import { coberturaDeAnuncios } from "@/lib/sincronizacao";
+import {
+  alertasDeAtribuicao,
+  alertasDeConfianca,
+  alertasDeQualidade,
+  type Alerta,
+} from "@/lib/alertas";
+import { RegistrarAlertas } from "@/components/layout/alertas";
 import { buildInsights } from "@/lib/insights";
 import { buildRecommendations, type Recommendation } from "@/lib/recommendations";
 import type { AiAnalysis, DashboardData } from "@/lib/types";
@@ -45,7 +50,6 @@ import { can } from "@/lib/auth/guard";
 import { comPeriodo, rangeLabel } from "@/lib/range";
 import {
   formatCompact,
-  formatCurrency,
   formatCurrency0,
   formatCurrencyOrDash,
   formatInt,
@@ -80,11 +84,8 @@ export default async function OverviewPage({
   const insights = buildInsights(data, range);
   const hint = range ? "vs. período anterior" : "no período";
 
-  const lastSync = await getLastSync();
-  const warnings = dataQualityChecks(data, {
-    nowIso: new Date().toISOString(),
-    lastSyncAds: lastSync.ads,
-  });
+  // Saúde do dado: antes calculada nas duas homes e exibida só na da Krone (S12).
+  const alertasDeDado = alertasDeQualidade(dataQualityChecks(data));
 
   // Marca de awareness (krone.capital): visão de crescimento de perfil, não de funil.
   if (brand.type === "awareness") {
@@ -94,36 +95,27 @@ export default async function OverviewPage({
         range={range}
         recs={buildRecommendations(data, range, new Date().toISOString())}
         insights={insights}
-        warnings={warnings}
+        alertas={alertasDeDado}
         hint={hint}
         aiCard={aiCard}
       />
     );
   }
 
-  const k = overviewKpis(data, range);
-
   /**
-   * O que dá (e o que não dá) para afirmar com estes números.
+   * Os números do período, com o que dá (e o que não dá) para afirmar com eles.
+   * É a MESMA conta da Jornada, do Dinheiro, do motor de ações e da IA.
    *
    * A comparação com o robô só roda no período "campanha inteira": a view do
    * robô é vitalícia e sem marca, então confrontá-la com um recorte de 7 dias
    * acusaria divergência onde só há janelas diferentes.
    */
-  const trust = assessTrust({
-    data,
-    range,
+  const kp = kpisDoPeriodo(data, range, {
     brandRules: await resolveMetaBrands(),
-    kpis: {
-      meetings: k.meetings,
-      meetingsConversao: k.meetingsConversao,
-      leadsConversao: k.leadsConversao,
-      leads: k.leads,
-      spendConversao: k.spendConversao,
-      spendTotal: k.spend,
-    },
+    cobertura: await coberturaDeAnuncios(brand.slug),
     roboReunioes: range ? null : (await getComercial()).kpis?.reunioes_realizadas ?? null,
   });
+  const trust = kp.trust;
   // A cascata atravessa quatro sistemas, então precisa das fontes do robô —
   // sem elas ela termina no painel, e o card diz isso em vez de fingir completude.
   const fontesCascata = await getCascataFontes();
@@ -132,7 +124,7 @@ export default async function OverviewPage({
     range,
     robo: fontesCascata.robo,
     comercial: fontesCascata.comercial,
-    investimentoConversao: k.spendConversao,
+    kpis: kp,
   });
   const ig = igAccountTotals(data.igAccountDaily, range);
 
@@ -170,7 +162,7 @@ export default async function OverviewPage({
   const farol = montarFarol({
     degraus: cascata.degraus,
     trust,
-    kpis: { cpr: k.cpr, cpl: k.cpl, leads: k.leads, meetings: k.meetings },
+    kpis: kp,
     metaCpr: data.goals.find((g) => g.metric === "cpr")?.target,
     parados,
     midiaParada,
@@ -180,16 +172,32 @@ export default async function OverviewPage({
     fontesOk: fontesCascata.falha?.tipo !== "erro",
   });
 
-  // A faixa "antes de decidir" fica só com o que desqualifica um número.
-  // Campo em branco não é ressalva sobre a campanha — vira link no rodapé.
-  const travasDeNumero = trust.travas.filter(
-    (t) => t.nivel === "quarentena" || t.nivel === "teto",
-  );
-  const pendencias = trust.travas.filter((t) => t.nivel === "config");
-  const temPiso = trust.travas.some((t) => t.nivel === "piso");
+  // Ressalvas, pendências e saúde do dado moram no "⚠ alertas" do cabeçalho —
+  // não numa faixa no meio da página (3.6). O que desqualifica um número fica
+  // TAMBÉM colado nele ("—", "≥", "≤").
+  const alertas: Alerta[] = [
+    ...alertasDeConfianca(trust.travas),
+    ...alertasDeDado,
+    ...alertasDeAtribuicao(data, range),
+    ...(fontesCascata.falha?.tipo === "erro"
+      ? [
+          {
+            id: "robo-leitura",
+            nivel: "falha" as const,
+            titulo: "Não consegui ler o robô nem o atendimento",
+            detalhe:
+              "Sem eles, o fundo do funil fica invisível — e ausência de leitura não é o mesmo que ninguém esperando. A cascata termina no painel até a leitura voltar.",
+            cta: { label: "Ver integrações", href: "/config#integracoes" },
+          },
+        ]
+      : []),
+  ];
+  const temPiso = kp.investimento.confianca?.nivel === "piso";
+  const nConv = kp.reunioesConversao.valor;
 
   return (
     <div className="space-y-6">
+      <RegistrarAlertas alertas={alertas} />
       {data.isSeed ? <ExampleBanner /> : null}
 
       <FarolCard farol={farol} rangeKey={rangeKey} />
@@ -222,42 +230,43 @@ export default async function OverviewPage({
       {/* Placar, não bússola: três números numa tira, sem card por número. */}
       <Card>
         <CardContent className="space-y-2 p-5">
+          {/* Cada número com a definição do dicionário no ⓘ (title): "Reuniões
+              agendadas" aqui é a mesma da Jornada, do Dinheiro e da IA. */}
           <div className="flex flex-wrap gap-x-10 gap-y-3">
-            <div>
+            <div title={dica("investimento")}>
               <p className="text-xs text-muted-foreground">Investimento</p>
-              <p className="tabular text-xl font-semibold">
-                {temPiso ? <span className="text-muted-foreground">≥ </span> : null}
-                {formatCurrency0(k.spend)}
-              </p>
+              <p className="tabular text-xl font-semibold">{mostrar(kp.investimento, "moeda0")}</p>
             </div>
-            <div>
+            <div title={dica("cpl")}>
               <p className="text-xs text-muted-foreground">Leads</p>
               <p className="tabular text-xl font-semibold">
-                {formatInt(k.leads)}
+                {formatInt(kp.leads.valor)}
                 <span className="ml-2 text-sm font-normal text-muted-foreground">
                   {/* O CPL divide pelos leads da campanha de conversão — sem dizer
                       isso, "113 leads a R$ 29,70" parecia uma conta que não fecha. */}
-                  {k.leadsConversao > 0
-                    ? `a ${temPiso ? "≥ " : ""}${formatCurrency(k.cpl)}` +
-                      (k.leadsConversao !== k.leads ? ` (sobre ${formatInt(k.leadsConversao)} de conversão)` : "")
+                  {custoExibivel(kp.cpl)
+                    ? `a ${mostrar(kp.cpl, "moeda")}` +
+                      (kp.leadsConversao.valor !== kp.leads.valor
+                        ? ` (CPL sobre ${formatInt(kp.leadsConversao.valor)} de conversão)`
+                        : "")
                     : ""}
                 </span>
               </p>
             </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Reuniões</p>
+            <div title={dica("reunioes_agendadas")}>
+              <p className="text-xs text-muted-foreground">Reuniões agendadas</p>
               <p className="tabular text-xl font-semibold">
-                {formatInt(k.meetings)}
+                {formatInt(kp.reunioesAgendadas.valor)}
                 <span className="ml-2 text-sm font-normal text-muted-foreground">
-                  {/* Mesma régua do farol: só a QUARENTENA some com o número; teto e
-                      piso o mostram com ≤ / ≥ e dizem por quê. */}
-                  {trust.porMetrica.cpr?.nivel === "quarentena"
-                    ? trust.porMetrica.cpr.motivo.toLowerCase()
-                    : `a ${aplicarConfianca(formatCurrency(k.cpr), trust.porMetrica.cpr)}` +
-                      (k.meetingsConversao !== k.meetings
-                        ? ` (sobre ${formatInt(k.meetingsConversao)} de conversão)`
-                        : "") +
-                      (trust.porMetrica.cpr ? ` — ${trust.porMetrica.cpr.motivo.toLowerCase()}` : "")}
+                  {/* Abaixo da régua o custo por reunião não aparece: no lugar dele,
+                      o FATO (quantas são de conversão), não a razão. */}
+                  {custoExibivel(kp.custoPorReuniao)
+                    ? `a ${mostrar(kp.custoPorReuniao, "moeda")}` +
+                      (nConv !== kp.reunioesAgendadas.valor ? ` (sobre ${formatInt(nConv)} de conversão)` : "")
+                    : kp.custoPorReuniao.confianca?.nivel === "quarentena" &&
+                        !kp.custoPorReuniao.confianca.motivo.startsWith("Só ")
+                      ? kp.custoPorReuniao.confianca.motivo.toLowerCase()
+                      : `${formatInt(nConv)} de conversão — o custo por reunião aparece a partir de ${MIN_REUNIOES}`}
                 </span>
               </p>
             </div>
@@ -271,10 +280,10 @@ export default async function OverviewPage({
               </Link>
             </p>
           ) : null}
-          {k.hasDiscovery ? (
+          {kp.temDescoberta ? (
             <p className="text-xs text-muted-foreground">
-              CPL e custo por reunião usam só os {formatCurrency0(k.spendConversao)} de conversão,
-              de {formatCurrency0(k.spend)} no total.{" "}
+              CPL e custo por reunião usam só os {formatCurrency0(kp.investimentoConversao.valor)} de
+              conversão, de {formatCurrency0(kp.investimento.valor)} no total.{" "}
               <Link
                 href={comPeriodo("/dinheiro", rangeKey)}
                 className="text-primary underline-offset-4 hover:underline"
@@ -305,8 +314,6 @@ export default async function OverviewPage({
         />
       </ChartCard>
 
-      <TrustBand travas={travasDeNumero} rangeKey={rangeKey} />
-
       {aiCard}
 
       <p className="flex flex-wrap gap-x-5 gap-y-1 border-t pt-4 text-xs text-muted-foreground">
@@ -318,13 +325,6 @@ export default async function OverviewPage({
         <Link href={comPeriodo("/dinheiro", rangeKey)} className="hover:text-foreground">
           Verba por conjunto e por criativo →
         </Link>
-        {pendencias.length > 0 ? (
-          <Link href="/config#pendencias" className="hover:text-foreground">
-            {pendencias.length}{" "}
-            {pendencias.length === 1 ? "configuração pendente" : "configurações pendentes"}:{" "}
-            {pendencias.map((p) => p.titulo.toLowerCase()).join(", ")} →
-          </Link>
-        ) : null}
       </p>
     </div>
   );
@@ -340,7 +340,7 @@ function AwarenessOverview({
   range,
   recs,
   insights,
-  warnings,
+  alertas,
   hint,
   aiCard,
 }: {
@@ -348,7 +348,7 @@ function AwarenessOverview({
   range: DateRange | undefined;
   recs: Recommendation[];
   insights: string[];
-  warnings: DataWarning[];
+  alertas: Alerta[];
   hint: string;
   aiCard: React.ReactNode;
 }) {
@@ -360,8 +360,8 @@ function AwarenessOverview({
 
   return (
     <div className="space-y-6">
+      <RegistrarAlertas alertas={alertas} />
       {data.isSeed ? <ExampleBanner /> : null}
-      <DataQualityCard warnings={warnings} />
 
       {/* Hero KPIs de crescimento */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4 xl:grid-cols-5">

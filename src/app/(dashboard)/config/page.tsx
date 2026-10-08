@@ -37,15 +37,23 @@ import { DEFAULT_BRAND } from "@/lib/types";
 import { ADS_CSV_TEMPLATE } from "@/lib/csv";
 import { LEADS_CSV_TEMPLATE } from "@/lib/leads-csv";
 import { LEAD_STATUSES, statusLabel } from "@/lib/lead-status";
-import { integrationStatus, metaBrandConfig, resolveMetaBrands } from "@/lib/meta/config";
-import { getLastSync } from "@/lib/meta/sync";
+import {
+  NAO_CLASSIFICADO,
+  brandForCampaign,
+  integrationStatus,
+  metaBrandConfig,
+  resolveMetaBrands,
+} from "@/lib/meta/config";
+import { cn } from "@/lib/utils";
+import { coberturaDeAnuncios, estadoDaFonte, type EstadoFonte } from "@/lib/sincronizacao";
+import { kpisDoPeriodo } from "@/lib/kpis";
 import { isAuthEnabled } from "@/lib/auth/config";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { can } from "@/lib/auth/guard";
 import { formatCurrency0, formatDateShort, formatDateTime } from "@/lib/format";
-import { CTA_LABEL, detectCta, overviewKpis } from "@/lib/metrics";
+import { CTA_LABEL, detectCta } from "@/lib/metrics";
 import { pageRange } from "@/lib/page-range";
-import { assessTrust, type Trava } from "@/lib/trust";
+import type { Trava } from "@/lib/trust";
 
 // Integration status and last-sync times must reflect runtime, never build time.
 export const dynamic = "force-dynamic";
@@ -106,7 +114,10 @@ export default async function ConfigPage({
   const brand = brandDef(await activeBrandSlug());
   const data = await getData(brand.slug);
   const status = integrationStatus();
-  const lastSync = await getLastSync();
+  // Estado de cada fonte POR MARCA, do registro de sincronizações (ADR-04).
+  const estadoIg = new Map<string, EstadoFonte>();
+  for (const b of BRANDS) estadoIg.set(b.slug, await estadoDaFonte("instagram", b.slug));
+  const estadoAds = await estadoDaFonte("ads", brand.slug);
   const backend = activeBackend();
   const dbConnected = backend !== "local";
   const dbLabel = backend === "postgres" ? "Postgres" : backend === "supabase" ? "Supabase" : "JSON local";
@@ -149,28 +160,44 @@ export default async function ConfigPage({
       };
     });
 
-  // Separação por marca: gasto + campanhas atribuídas a cada marca + regra atual.
+  // Separação por marca: gasto + campanhas atribuídas a cada marca + regra atual,
+  // com a PRÉVIA — para onde cada campanha iria se reclassificasse agora.
   const multiBrand = BRANDS.length > 1;
+  const regrasDeMarca = multiBrand ? await resolveMetaBrands() : [];
+  const nomeDaMarca = (slug: string) =>
+    slug === NAO_CLASSIFICADO ? "não classificado" : (BRANDS.find((b) => b.slug === slug)?.label ?? slug);
   const brandSpend = multiBrand
-    ? await Promise.all(
-        BRANDS.map(async (b) => {
-          const d = await getData(b.slug);
-          const byCamp = new Map<string, number>();
-          for (const r of d.adDaily) {
-            const name = r.campaign || "(sem nome)";
-            byCamp.set(name, (byCamp.get(name) ?? 0) + r.spend);
-          }
-          const campaigns = [...byCamp.entries()]
-            .map(([name, spend]) => ({ name, spend }))
-            .sort((a, b) => b.spend - a.spend);
-          return {
-            slug: b.slug,
-            label: b.label,
-            spend: campaigns.reduce((s, c) => s + c.spend, 0),
-            campaigns,
-          };
-        }),
-      )
+    ? (
+        await Promise.all(
+          [...BRANDS.map((b) => ({ slug: b.slug, label: b.label })), { slug: NAO_CLASSIFICADO, label: "Não classificado" }].map(
+            async (b) => {
+              const d = await getData(b.slug);
+              const byCamp = new Map<string, { spend: number; id?: string }>();
+              for (const r of d.adDaily) {
+                const name = r.campaign || "(sem nome)";
+                const cur = byCamp.get(name) ?? { spend: 0, id: r.campaignId };
+                byCamp.set(name, { spend: cur.spend + r.spend, id: cur.id ?? r.campaignId });
+              }
+              const campaigns = [...byCamp.entries()]
+                .map(([name, c]) => {
+                  const destino = brandForCampaign(name, c.id, regrasDeMarca);
+                  return {
+                    name,
+                    spend: c.spend,
+                    vaiPara: destino !== b.slug ? nomeDaMarca(destino) : undefined,
+                  };
+                })
+                .sort((a, b) => b.spend - a.spend);
+              return {
+                slug: b.slug,
+                label: b.label,
+                spend: campaigns.reduce((s, c) => s + c.spend, 0),
+                campaigns,
+              };
+            },
+          ),
+        )
+      ).filter((b) => b.slug !== NAO_CLASSIFICADO || b.campaigns.length > 0)
     : [];
   const matchState = (await getState<Record<string, string[]>>(STATE_KEYS.brandCampaignMatch)) ?? {};
   const currentMatch: Record<string, string> = {};
@@ -187,8 +214,9 @@ export default async function ConfigPage({
   // ajuda nunca divergir do que o importador realmente reconhece.
   const statusList = LEAD_STATUSES.map(statusLabel).join(", ");
 
-  const syncHint = (iso: string | null) =>
-    iso ? `Última sincronização: ${formatDateTime(iso)}` : "Ainda não sincronizado";
+  const syncHint = (e: EstadoFonte | undefined) =>
+    (e?.ultimoOk ? `Última sincronização que deu certo: ${formatDateTime(e.ultimoOk)}` : "Ainda não sincronizado") +
+    (e?.falha ? ` · falhando desde ${formatDateTime(e.falha.desde)}: ${e.falha.erro}` : "");
 
   /*
    * O que falta aqui — a mesma avaliação de confiança da home, filtrada pelo que
@@ -197,19 +225,9 @@ export default async function ConfigPage({
    * número cujo conserto mora aqui (regra de marca, sincronização).
    */
   const { range } = pageRange(data, (await searchParams).range);
-  const k = overviewKpis(data, range);
-  const trust = assessTrust({
-    data,
-    range,
+  const { trust } = kpisDoPeriodo(data, range, {
     brandRules: await resolveMetaBrands(),
-    kpis: {
-      meetings: k.meetings,
-      meetingsConversao: k.meetingsConversao,
-      leadsConversao: k.leadsConversao,
-      leads: k.leads,
-      spendConversao: k.spendConversao,
-      spendTotal: k.spend,
-    },
+    cobertura: await coberturaDeAnuncios(brand.slug),
   });
   const preencher = trust.travas.filter((t) => t.nivel === "config");
   const corrigir = trust.travas.filter(
@@ -273,7 +291,7 @@ export default async function ConfigPage({
             <StatusRow
               label={brandIg.length ? `Instagram · ${BRANDS[0].label}` : "Instagram (orgânico)"}
               ok={status.instagram}
-              hint={status.instagram ? syncHint(lastSync.instagram) : "Faltam IG_USER_ID e IG_ACCESS_TOKEN"}
+              hint={status.instagram ? syncHint(estadoIg.get(BRANDS[0].slug)) : "Faltam IG_USER_ID e IG_ACCESS_TOKEN"}
             />
             {brandIg.map((b) => (
               <StatusRow
@@ -282,7 +300,7 @@ export default async function ConfigPage({
                 ok={b.configured}
                 hint={
                   b.configured
-                    ? `IG_USER_ID_${b.slug.toUpperCase()} e token reconhecidos${lastSync.instagram ? ` · última sync: ${formatDateTime(lastSync.instagram)}` : ""}`
+                    ? `IG_USER_ID_${b.slug.toUpperCase()} e token reconhecidos · ${syncHint(estadoIg.get(b.slug))}`
                     : `Faltam IG_USER_ID_${b.slug.toUpperCase()} e IG_ACCESS_TOKEN_${b.slug.toUpperCase()} (confira o nome exato e reinicie o serviço)`
                 }
               />
@@ -290,7 +308,7 @@ export default async function ConfigPage({
             <StatusRow
               label="Tráfego pago (Marketing API)"
               ok={status.ads}
-              hint={status.ads ? syncHint(lastSync.ads) : "Faltam META_AD_ACCOUNT_ID e META_ADS_ACCESS_TOKEN"}
+              hint={status.ads ? syncHint(estadoAds) : "Faltam META_AD_ACCOUNT_ID e META_ADS_ACCESS_TOKEN"}
             />
             <StatusRow
               label="Coleta automática diária"
@@ -470,7 +488,10 @@ export default async function ConfigPage({
               <CardContent className="space-y-4">
                 <div className="grid gap-3 sm:grid-cols-2">
                   {brandSpend.map((b) => (
-                    <div key={b.slug} className="rounded-lg border p-3">
+                    <div
+                      key={b.slug}
+                      className={cn("rounded-lg border p-3", b.slug === NAO_CLASSIFICADO && "border-[var(--warning)]/50")}
+                    >
                       <div className="flex items-baseline justify-between gap-2">
                         <p className="text-sm font-medium">{b.label}</p>
                         <p className="tabular text-lg font-semibold">{formatCurrency0(b.spend)}</p>
@@ -482,7 +503,14 @@ export default async function ConfigPage({
                         ) : (
                           b.campaigns.map((c) => (
                             <li key={c.name} className="flex items-baseline justify-between gap-2 text-xs">
-                              <span className="truncate text-muted-foreground" title={c.name}>{c.name}</span>
+                              <span className="min-w-0 truncate text-muted-foreground" title={c.name}>
+                                {c.name}
+                                {c.vaiPara ? (
+                                  <span className="ml-1.5 font-medium text-[var(--warning-text)]">
+                                    → {c.vaiPara} ao reclassificar
+                                  </span>
+                                ) : null}
+                              </span>
                               <span className="tabular shrink-0 text-muted-foreground">{formatCurrency0(c.spend)}</span>
                             </li>
                           ))

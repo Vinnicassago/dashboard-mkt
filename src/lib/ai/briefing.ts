@@ -23,7 +23,6 @@ import {
   igAccountTotals,
   inRange,
   objectiveBreakdown,
-  overviewKpis,
   pillarPerformance,
   postPerformance,
   postingCadence,
@@ -33,6 +32,8 @@ import {
   rotuloCriativo,
 } from "../metrics";
 import { MIN_REUNIOES } from "../trust";
+import { custoExibivel, kpisDoPeriodo } from "../kpis";
+import { DICIONARIO } from "../dicionario";
 import { buildRecommendations } from "../recommendations";
 import { BENCHMARK, ROTINA_DIARIA, WEEKLY_MIX } from "../content/playbook";
 import { buildOutcomeReport, presenceRoutine } from "../content/outcomes";
@@ -293,16 +294,19 @@ export function buildBriefing(
     };
   }
 
-  const k = overviewKpis(data, range);
-  const kPrev = prevRange ? overviewKpis(data, prevRange) : undefined;
+  // Os MESMOS números do placar (kpisDoPeriodo) — a IA não argumenta com um CPL
+  // ou um custo por reunião diferente do que a tela mostra.
+  const kp = kpisDoPeriodo(data, range);
+  const k = kp.overview;
+  const kpPrev = prevRange ? kpisDoPeriodo(data, prevRange) : undefined;
   const obj = objectiveBreakdown(data, range);
   const pacing = campaignPacing(data, opts.nowIso);
   const criativos = creativePerformance(data, range);
   // Com menos de MIN_REUNIOES o custo por reunião está em quarentena na tela: a
   // IA recebe null e o motivo, nunca o valor — senão argumenta com um número que
-  // o painel esconde.
-  const cprConfiavel = k.meetings >= MIN_REUNIOES;
-  const comCpr = cprConfiavel ? criativos.filter((c) => c.meetings > 0) : [];
+  // o painel esconde. A régua vale também por criativo.
+  const cprConfiavel = custoExibivel(kp.custoPorReuniao);
+  const comCpr = cprConfiavel ? criativos.filter((c) => c.meetings >= MIN_REUNIOES) : [];
 
   return {
     ...base,
@@ -312,15 +316,18 @@ export function buildBriefing(
       investimentoDescoberta: money(k.spendDescoberta),
       // O CPL/CPR FIEL exclui o gasto de descoberta — é a leitura do painel.
       leads: k.leads,
+      leadsConversao: k.leadsConversao,
       leadsOrganicos: k.organicLeads,
-      cpl: r2(k.cpl),
-      cplAnterior: kPrev ? r2(kPrev.cpl) : null,
-      reunioes: k.meetings,
+      cpl: custoExibivel(kp.cpl) ? r2(k.cpl) : null,
+      cplAnterior: kpPrev && custoExibivel(kpPrev.cpl) ? r2(kpPrev.overview.cpl) : null,
+      reunioesAgendadasNoPeriodo: k.meetings,
+      reunioesDeConversao: k.meetingsConversao,
+      agendaramDaCoorte: k.meetingsCoorte,
       cpr: cprConfiavel ? r2(k.cpr) : null,
       cprEmQuarentena: cprConfiavel
         ? null
-        : `só ${k.meetings} ${k.meetings === 1 ? "reunião" : "reuniões"} no período — com menos de ${MIN_REUNIOES}, o custo por reunião não é exibido nem usado para decidir`,
-      cprAnterior: kPrev && kPrev.meetings >= MIN_REUNIOES ? r2(kPrev.cpr) : null,
+        : `só ${k.meetingsConversao} ${k.meetingsConversao === 1 ? "reunião" : "reuniões"} de conversão no período — com menos de ${MIN_REUNIOES}, o custo por reunião não é exibido nem usado para decidir`,
+      cprAnterior: kpPrev && custoExibivel(kpPrev.custoPorReuniao) ? r2(kpPrev.overview.cpr) : null,
       compareceram: k.attended,
       taxaComparecimentoPct: pct(k.showRate),
       // Derivadas óbvias, entregues prontas: o modelo tende a calculá-las
@@ -360,6 +367,17 @@ export function buildBriefing(
           .map((c) => ({ nome: rotuloCriativo(c, criativos), motivo: c.fatigue.reason, gasto: money(c.spend) })),
       },
     },
+    // O que cada número quer dizer — a IA lê a mesma definição que o ⓘ da tela.
+    dicionario: [
+      DICIONARIO.leads,
+      DICIONARIO.leads_conversao,
+      DICIONARIO.cpl,
+      DICIONARIO.reunioes_agendadas,
+      DICIONARIO.reunioes_conversao,
+      DICIONARIO.custo_por_reuniao,
+      DICIONARIO.agendaram,
+      DICIONARIO.taxa_lead_agendada,
+    ].map((d) => ({ nome: d.nome, definicao: d.definicao, exclui: d.exclui })),
   };
 }
 

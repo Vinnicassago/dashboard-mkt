@@ -3,22 +3,21 @@ import { Cascata } from "@/components/charts/cascata";
 import { MotivosTable } from "@/components/robo/robo-tables";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
-import { getData } from "@/lib/data/store";
+import { getData, listLeadEvents } from "@/lib/data/store";
 import { activeBrandSlug } from "@/lib/active-brand";
 import { pageRange } from "@/lib/page-range";
+import { resolveMetaBrands } from "@/lib/meta/config";
+import { coberturaDeAnuncios } from "@/lib/sincronizacao";
+import { kpisDoPeriodo } from "@/lib/kpis";
+import { dica } from "@/lib/dicionario";
+import { eventosPorLead, resumoContato } from "@/lib/contato";
+import { alertasDeAtribuicao, alertasDeConfianca } from "@/lib/alertas";
+import { RegistrarAlertas } from "@/components/layout/alertas";
 import { getCascataFontes, getRoboSnapshot } from "@/lib/robo/client";
 import { maiorVazamento, montarCascata } from "@/lib/cascata";
 import { DONO_LABEL } from "@/lib/dono";
 import { LEAD_STATUS_META } from "@/lib/lead-status";
-import {
-  cohortWeekly,
-  filterLeads,
-  countLostAfterMeeting,
-  lossBreakdown,
-  lossByKind,
-  objectiveBreakdown,
-  overviewKpis,
-} from "@/lib/metrics";
+import { cohortWeekly, perdasDoPeriodo } from "@/lib/metrics";
 import {
   formatCurrency0,
   formatDecimal,
@@ -58,19 +57,28 @@ export default async function JornadaPage({
 }: {
   searchParams: Promise<{ range?: string }>;
 }) {
-  const data = await getData(await activeBrandSlug());
+  const brand = await activeBrandSlug();
+  const data = await getData(brand);
   const { range } = pageRange(data, (await searchParams).range);
 
-  const obj = objectiveBreakdown(data, range);
-  const k = overviewKpis(data, range);
-  const [fontes, robo] = await Promise.all([getCascataFontes(), getRoboSnapshot(range?.from)]);
+  // Os MESMOS números da home e do Dinheiro (kpisDoPeriodo).
+  const kp = kpisDoPeriodo(data, range, {
+    brandRules: await resolveMetaBrands(),
+    cobertura: await coberturaDeAnuncios(brand),
+  });
+  const k = kp.overview;
+  const [fontes, robo, eventos] = await Promise.all([
+    getCascataFontes(),
+    getRoboSnapshot(range?.from),
+    listLeadEvents({ brand, limit: 0 }),
+  ]);
 
   const cascata = montarCascata({
     data,
     range,
     robo: fontes.robo,
     comercial: fontes.comercial,
-    investimentoConversao: obj.conversao.spend,
+    kpis: kp,
   });
 
   const parcial = fontes.falha?.tipo === "erro";
@@ -83,12 +91,16 @@ export default async function JornadaPage({
       : DONO_LABEL[vazamento.degrau.dono]
     : null;
 
-  // Perdas do período, pelo motivo registrado.
-  const leads = filterLeads(data.leads, range);
-  const lossRows = lossBreakdown(leads).filter((r) => r.count > 0);
-  const byKind = lossByKind(leads);
-  const lossTotal = byKind.qualidade + byKind.decisao;
-  const perdasDepoisDaReuniao = countLostAfterMeeting(leads);
+  // Perdas do período, pelo motivo registrado. "Sem resposta" sem nenhuma
+  // tentativa registrada sai da conta da mídia (é processo, não anúncio).
+  const comTentativa = new Set(
+    [...eventosPorLead(eventos)].filter(([, evs]) => resumoContato(evs).tentativas > 0).map(([id]) => id),
+  );
+  const perdas = perdasDoPeriodo(data, range, comTentativa);
+  const lossRows = perdas.linhas;
+  const byKind = perdas.porTipo;
+  const lossTotal = perdas.total;
+  const perdasDepoisDaReuniao = perdas.depoisDaReuniao;
   const origem = (row: (typeof lossRows)[number]) =>
     LEAD_STATUS_META[row.status].origemDaPerda ?? "—";
   const leituras = lossRows
@@ -99,6 +111,7 @@ export default async function JornadaPage({
 
   return (
     <div className="space-y-6">
+      <RegistrarAlertas alertas={[...alertasDeConfianca(kp.trust.travas), ...alertasDeAtribuicao(data, range)]} />
       <div className="max-w-3xl space-y-2">
         <p className="text-base leading-relaxed">
           {vazamento ? (
@@ -205,7 +218,7 @@ export default async function JornadaPage({
       ) : null}
 
       {/* Por que as pessoas saem — só faz sentido com perda registrada no período */}
-      {lossTotal > 0 ? (
+      {lossTotal > 0 || perdas.semTentativa > 0 ? (
         <Card>
           <CardHeader>
             <CardTitle>Por que perdemos</CardTitle>
@@ -218,7 +231,7 @@ export default async function JornadaPage({
           </CardHeader>
           <CardContent className="space-y-3">
             {/* Uma tabela de uma linha é uma frase com moldura. */}
-            {lossRows.length === 1 ? (
+            {lossRows.length === 0 ? null : lossRows.length === 1 ? (
               <p className="text-sm">
                 <span className="font-medium">
                   {formatInt(lossRows[0].count)}{" "}
@@ -268,6 +281,15 @@ export default async function JornadaPage({
                 </TBody>
               </Table>
             )}
+            {perdas.semTentativa > 0 ? (
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                <span className="font-medium text-foreground">
+                  {formatInt(perdas.semTentativa)} “Sem resposta” sem nenhuma tentativa registrada
+                </span>{" "}
+                ficam fora desta conta: sem tentativa, não dá para dizer que a pessoa não
+                responderia — é processo, não mídia. Registre as tentativas na Fila de contato.
+              </p>
+            ) : null}
             {leituras.length > 0 || byKind.decisao > 0 ? (
               <p className="text-xs leading-relaxed text-muted-foreground">
                 {leituras.join(" ")}
@@ -363,8 +385,8 @@ export default async function JornadaPage({
                 <TR className="hover:bg-transparent">
                   <TH>Semana</TH>
                   <TH className="text-right">Leads</TH>
-                  <TH className="text-right">Reuniões</TH>
-                  <TH className="text-right">Lead→Reunião</TH>
+                  <TH className="text-right" title={dica("agendaram")}>Agendaram</TH>
+                  <TH className="text-right" title={dica("taxa_lead_agendada")}>Lead→Reunião</TH>
                   <TH className="text-right">Clientes</TH>
                   <TH className="text-right">Receita</TH>
                 </TR>
@@ -412,7 +434,8 @@ export default async function JornadaPage({
           <CardHeader>
             <CardTitle>Receita e retorno</CardTitle>
             <CardDescription>
-              CAC = gasto de conversão ÷ clientes · ROAS = receita ÷ investimento total.
+              Dos leads que entraram no período. CAC = gasto de conversão ÷ clientes · ROAS =
+              receita ÷ investimento total · valor por reunião = receita ÷ quem agendou.
             </CardDescription>
           </CardHeader>
           <CardContent>

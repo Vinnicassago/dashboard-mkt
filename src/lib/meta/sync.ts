@@ -1,12 +1,14 @@
 import "server-only";
+import { randomUUID } from "node:crypto";
 import { mensagemHumana } from "../erros";
 import { fetchAdsAccount, syncAdsAccount, type AdsPull } from "./ads";
 import { isoDaysAgo, isoToday } from "./http";
 import { syncInstagram } from "./instagram";
 import { refreshIgTokenIfNeeded, getIgToken } from "./token";
 import { resolveMetaBrands, type BrandMeta } from "./config";
-import { getData, getState, replaceAdData, setState } from "../data/store";
+import { addSyncRun, getData, getState, replaceAdData, setState } from "../data/store";
 import { STATE_KEYS } from "../data/backend";
+import type { SyncRun } from "../types";
 
 /**
  * Orchestrates the daily collection, MULTIMARCA. Regras:
@@ -33,6 +35,20 @@ export interface SyncReport {
 
 export type SyncSource = "all" | "ads" | "instagram";
 
+/**
+ * Grava cada execução (ADR-04), uma linha por marca. Falha ao gravar o registro
+ * nunca derruba o sync — o dado de anúncio é mais importante que o diário dele.
+ */
+async function registrar(runs: Omit<SyncRun, "id">[]): Promise<void> {
+  for (const r of runs) {
+    try {
+      await addSyncRun({ ...r, id: `SYNC-${randomUUID()}` });
+    } catch (e) {
+      console.error(`[sync] não consegui registrar a execução (${r.source}/${r.brand}):`, e);
+    }
+  }
+}
+
 export async function runSync({
   source = "all",
   days,
@@ -56,6 +72,7 @@ export async function runSync({
       const notes: string[] = [];
       let ok = true;
       for (const [account, brandsOnAccount] of accounts) {
+        const startedAt = new Date().toISOString();
         try {
           const r = await syncAdsAccount({
             account,
@@ -65,10 +82,28 @@ export async function runSync({
           });
           const dist = Object.entries(r.byBrand).map(([s, n]) => `${s}: ${n}`).join(", ") || "0 linhas";
           notes.push(`${account} (${r.since}→${r.until}) → ${dist}`);
+          const finishedAt = new Date().toISOString();
+          await registrar(
+            brandsOnAccount.map((b) => ({
+              source: "ads",
+              brand: b.slug,
+              startedAt,
+              finishedAt,
+              ok: true,
+              dateFrom: r.since,
+              dateTo: r.until,
+              rows: r.byBrand[b.slug] ?? 0,
+            })),
+          );
         } catch (e) {
           ok = false;
           console.error(`[sync] anúncios ${account}:`, e);
-          notes.push(`${account}: ${mensagemHumana("Meta", e)}`);
+          const erro = mensagemHumana("Meta", e);
+          notes.push(`${account}: ${erro}`);
+          const finishedAt = new Date().toISOString();
+          await registrar(
+            brandsOnAccount.map((b) => ({ source: "ads", brand: b.slug, startedAt, finishedAt, ok: false, error: erro })),
+          );
         }
       }
       report.ads = { ok, detail: notes.join(" · ") };
@@ -92,14 +127,31 @@ export async function runSync({
           console.error(`[sync] token do Instagram ${b.slug}:`, e);
           tokenNotes.push(`${b.slug}: ${mensagemHumana("Instagram", e)}`);
         }
+        const startedAt = new Date().toISOString();
+        const janela = days ?? 7;
         try {
           const token = (await getIgToken(b.slug, b.igToken))!;
-          const r = await syncInstagram({ userId: b.igUserId!, token, brand: b.slug, days: days ?? 7 });
+          const r = await syncInstagram({ userId: b.igUserId!, token, brand: b.slug, days: janela });
           notes.push(`${b.slug}: ${r.note}`);
+          await registrar([
+            {
+              source: "instagram",
+              brand: b.slug,
+              startedAt,
+              finishedAt: new Date().toISOString(),
+              ok: true,
+              dateFrom: isoDaysAgo(janela - 1),
+              dateTo: isoToday(),
+            },
+          ]);
         } catch (e) {
           ok = false;
           console.error(`[sync] Instagram ${b.slug}:`, e);
-          notes.push(`${b.slug}: ${mensagemHumana("Instagram", e)}`);
+          const erro = mensagemHumana("Instagram", e);
+          notes.push(`${b.slug}: ${erro}`);
+          await registrar([
+            { source: "instagram", brand: b.slug, startedAt, finishedAt: new Date().toISOString(), ok: false, error: erro },
+          ]);
         }
       }
       report.instagram = { ok, detail: notes.join(" · ") };
@@ -153,11 +205,25 @@ export async function resyncAdsHistory(): Promise<SourceOutcome> {
 
   const notes: string[] = [];
   for (const { brands, pull } of pulls) {
+    const startedAt = new Date().toISOString();
     await replaceAdData(pull.adRows, pull.creatives, {
       brands: brands.map((b) => b.slug),
       since: pull.since,
       until: pull.until,
     });
+    const finishedAt = new Date().toISOString();
+    await registrar(
+      brands.map((b) => ({
+        source: "ads",
+        brand: b.slug,
+        startedAt,
+        finishedAt,
+        ok: true,
+        dateFrom: pull.since,
+        dateTo: pull.until,
+        rows: pull.byBrand[b.slug] ?? 0,
+      })),
+    );
     const dist = Object.entries(pull.byBrand).map(([s, n]) => `${s}: ${n}`).join(", ") || "0 linhas";
     notes.push(`${pull.since}→${pull.until} → ${dist}`);
   }

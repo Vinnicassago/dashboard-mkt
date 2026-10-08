@@ -26,12 +26,13 @@
  * Função PURA: recebe os números dos quatro sistemas já carregados.
  */
 
-import { filterAds, filterLeads, countMeetings, countAttended, countClients } from "./metrics";
+import { bucketOfAd, countAttended, countClients, countMeetings, filterAds, filterLeads } from "./metrics";
 import type { DateRange } from "./metrics";
 import type { DashboardData } from "./types";
 import type { FilaEtapa } from "./fila";
 import type { Dono } from "./dono";
 import { MIN_REUNIOES } from "./trust";
+import { custoExibivel, type KpisDoPeriodo } from "./kpis";
 import { formatDecimal, formatInt } from "./format";
 
 // ---------------------------------------------------------------- vocabulário
@@ -73,6 +74,8 @@ export interface Degrau {
   trocaDeSistema?: boolean;
   /** Quanto da verba de conversão foi gasto por unidade que chegou aqui. */
   custoUnitario?: number;
+  /** "≥" (piso) ou "≤" (teto): a mesma ressalva que o número tem no placar. */
+  custoPrefixo?: "≥" | "≤";
   /** Pessoas perdidas em relação ao degrau anterior. */
   perda?: number;
   /** De quem é a ação nesta junta. */
@@ -229,8 +232,12 @@ export interface CascataInput {
   /** `null` quando o robô está desligado ou a leitura falhou. */
   robo: CascataRobo | null;
   comercial: CascataComercial | null;
-  /** Verba de conversão — vem de `objectiveBreakdown`, não do gasto total. */
-  investimentoConversao: number;
+  /**
+   * Os KPIs do período (`kpisDoPeriodo`). A cascata não recalcula leads, CPL nem
+   * verba: lê daqui, para o degrau "Leads" e o "R$ X cada" dele serem os mesmos
+   * números do resto do painel.
+   */
+  kpis: Pick<KpisDoPeriodo, "leads" | "leadsConversao" | "cpl" | "investimentoConversao">;
 }
 
 // ---------------------------------------------------------------- montagem
@@ -238,26 +245,37 @@ export interface CascataInput {
 const div = (a: number, b: number) => (b > 0 ? a / b : 0);
 
 export function montarCascata(input: CascataInput): CascataResult {
-  const { data, range, robo, comercial } = input;
-  const ads = filterAds(data.adDaily, range);
+  const { data, range, robo, comercial, kpis } = input;
+  const todosAds = filterAds(data.adDaily, range);
+  // Escopo de CONVERSÃO no topo (S16): impressões de alcance/engajamento contra
+  // verba e leads de conversão misturavam dois funis numa coluna só.
+  const ads = todosAds.filter((r) => bucketOfAd(r) === "conversao");
+  const impressoesDescoberta = todosAds
+    .filter((r) => bucketOfAd(r) === "descoberta")
+    .reduce((s, r) => s + r.impressions, 0);
   const leads = filterLeads(data.leads, range);
   const lp = (data.lpDaily ?? []).filter(
     (r) => !range || (r.date >= range.from && r.date <= range.to),
   );
 
   const impressoes = ads.reduce((s, r) => s + r.impressions, 0);
-  const cliquesBrutos = ads.reduce((s, r) => s + r.clicks, 0);
-  const conversoesPixel = ads.reduce((s, r) => s + (r.leads ?? 0), 0);
+  const cliquesBrutos = todosAds.reduce((s, r) => s + r.clicks, 0);
+  const conversoesPixel = todosAds.reduce((s, r) => s + (r.leads ?? 0), 0);
   const visitas = lp.reduce((s, r) => s + r.visits, 0);
   const ctaCliques = lp.reduce((s, r) => s + r.clicks, 0);
   const envios = lp.reduce((s, r) => s + r.formSubmits, 0);
 
-  const leadCount = leads.length;
+  const leadCount = kpis.leads.valor;
+  // Daqui para baixo a cascata é COORTE: dos leads que entraram no período,
+  // quantos agendaram, compareceram, fecharam. As reuniões agendadas NO período
+  // (a north star) são outro número, com outro nome (ver dicionario.ts).
   const reunioesPainel = countMeetings(leads);
   const compareceuPainel = countAttended(leads);
   const clientesPainel = countClients(leads);
 
-  const verba = input.investimentoConversao;
+  const verba = kpis.investimentoConversao.valor;
+  /** O custo de um lead é o CPL do dicionário — não verba ÷ todos os leads. */
+  const custoLead = custoExibivel(kpis.cpl) && kpis.cpl.n >= AMOSTRA_MINIMA ? kpis.cpl.valor : undefined;
 
   const degraus: Degrau[] = [];
   const push = (d: Degrau) => degraus.push(d);
@@ -276,6 +294,10 @@ export function montarCascata(input: CascataInput): CascataResult {
     fonte: "meta",
     ehAncora: true,
     daAncora: 1,
+    nota:
+      impressoesDescoberta > 0
+        ? `só anúncios de conversão — ${formatInt(impressoesDescoberta)} de descoberta ficam fora desta coluna`
+        : undefined,
   });
 
   if (visitas > 0) {
@@ -312,10 +334,19 @@ export function montarCascata(input: CascataInput): CascataResult {
     ehAncora: true,
     daAnterior: div(leadCount, antesDeLeads),
     daAncora: 1,
-    custoUnitario: custo(leadCount),
+    custoUnitario: custoLead,
+    custoPrefixo:
+      custoLead !== undefined && kpis.cpl.confianca
+        ? kpis.cpl.confianca.nivel === "piso"
+          ? "≥"
+          : "≤"
+        : undefined,
     perda: Math.max(0, antesDeLeads - leadCount),
     dono: "MKT",
-    nota: "pessoas cadastradas — é este número que se chama “lead”",
+    nota:
+      custoLead !== undefined && kpis.leadsConversao.valor !== leadCount
+        ? `pessoas cadastradas; o custo é o CPL, sobre os ${formatInt(kpis.leadsConversao.valor)} leads de conversão`
+        : "pessoas cadastradas — é este número que se chama “lead”",
   });
 
   // ---- robô ------------------------------------------------------------
@@ -342,8 +373,10 @@ export function montarCascata(input: CascataInput): CascataResult {
         perda: Math.max(0, anterior - valor),
         dono,
         parados: parados && parados > 0 ? parados : undefined,
-        midiaParada: parados && parados > 0 ? parados * (custo(anterior) ?? 0) : undefined,
+        midiaParada: parados && parados > 0 ? parados * ((anterior === leadCount ? custoLead : custo(anterior)) ?? 0) : undefined,
         etapaFila: key === "transferidos" && parados && parados > 0 ? "convite-pendente" : undefined,
+        // O robô não guarda data: a contagem dele é da campanha inteira.
+        nota: key === "conversas" && range ? "contagem do robô: campanha inteira, não o período" : undefined,
       });
       anterior = valor;
     }
@@ -366,7 +399,7 @@ export function montarCascata(input: CascataInput): CascataResult {
       parados: comercial.aguardandoAbordagem > 0 ? comercial.aguardandoAbordagem : undefined,
       midiaParada:
         comercial.aguardandoAbordagem > 0
-          ? comercial.aguardandoAbordagem * (custo(anteriorCom) ?? 0)
+          ? comercial.aguardandoAbordagem * ((robo ? custo(anteriorCom) : custoLead) ?? 0)
           : undefined,
       etapaFila: comercial.aguardandoAbordagem > 0 ? "aguardando-contato" : undefined,
       nota: comercial.abordados <= 1 ? "n=1 — não é uma taxa" : undefined,
@@ -411,17 +444,20 @@ export function montarCascata(input: CascataInput): CascataResult {
     const semContato = data.leads.filter((l) => l.status === "lead").length;
     push({
       key: "reunioes",
-      label: "Reuniões agendadas",
+      label: "Agendaram reunião",
       valor: reunioesPainel,
       fonte: "crm",
       daAnterior: div(reunioesPainel, leadCount),
       daAncora: div(reunioesPainel, leadCount),
-      custoUnitario: custo(reunioesPainel),
+      // Sem "R$ X cada": o custo por reunião tem definição e régua próprias
+      // (dicionario.ts, MIN_REUNIOES) e mora no placar — um segundo, por coorte,
+      // aqui, era o 5º custo por reunião do painel.
       perda: Math.max(0, leadCount - reunioesPainel),
       dono: "COM",
       parados: semContato > 0 ? semContato : undefined,
-      midiaParada: semContato > 0 ? semContato * (custo(leadCount) ?? 0) : undefined,
+      midiaParada: semContato > 0 ? semContato * (custoLead ?? 0) : undefined,
       etapaFila: semContato > 0 ? "novo" : undefined,
+      nota: "dos leads que entraram no período, em qualquer data",
     });
     push({
       key: "compareceu",
@@ -456,7 +492,7 @@ export function montarCascata(input: CascataInput): CascataResult {
   const naoAgir: NaoAgir[] = [];
 
   if (cliquesBrutos > 0 && visitas > 0 && cliquesBrutos > visitas * 1.5) {
-    const descoberta = ads.filter((r) => r.objective && /ENGAGEMENT|AWARENESS|REACH|VIDEO/i.test(r.objective));
+    const descoberta = todosAds.filter((r) => bucketOfAd(r) === "descoberta");
     naoAgir.push({
       titulo: `${formatInt(cliquesBrutos - visitas)} “cliques” que não viraram visita`,
       detalhe:

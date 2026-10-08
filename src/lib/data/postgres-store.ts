@@ -9,6 +9,7 @@ import {
   type DataBackend,
   type LeadStatusPatch,
   type ListEventsOpts,
+  type ListSyncRunsOpts,
   type LpDelta,
   type PublicUser,
   type StoredUser,
@@ -16,6 +17,7 @@ import {
 import type {
   AdDaily,
   AuditEntry,
+  SyncRun,
   Creative,
   DashboardData,
   Goal,
@@ -32,6 +34,7 @@ import {
   s,
   toAd,
   toAudit,
+  toSyncRun,
   toCampaign,
   toCreative,
   toDraft,
@@ -45,6 +48,7 @@ import {
   toStoredUser,
   fromAd,
   fromAudit,
+  fromSyncRun,
   fromCampaign,
   fromCreative,
   fromDraft,
@@ -68,12 +72,13 @@ const CAMPAIGN_COLS = ["id", "brand", "name", "objective", "status", "start_date
 const IG_DAILY_COLS = ["brand", "date", "followers", "reach", "views", "profile_link_taps", "accounts_engaged", "total_interactions", "profile_views", "reach_followers", "reach_non_followers", "dm_conversations", "follows_day", "unfollows_day", "link_taps_website", "link_taps_whatsapp", "stories_posted", "stories_interactive", "niche_comments", "accounts_followed", "replied_all"];
 const POST_COLS = ["id", "brand", "published_at", "type", "caption", "permalink", "reach", "views", "likes", "comments", "saved", "shares", "avg_watch_time", "total_watch_time", "duration_sec", "pillar", "cta_type", "profile_visits", "follows", "media_url", "thumbnail_url", "is_test"];
 const CREATIVE_COLS = ["ad_id", "brand", "name", "format", "thumbnail_url", "video_plays", "thru_plays", "instagram_media_id", "instagram_permalink"];
-const AD_COLS = ["brand", "date", "ad_id", "campaign", "adset", "objective", "spend", "impressions", "reach", "frequency", "clicks", "leads"];
+const AD_COLS = ["brand", "date", "ad_id", "campaign", "campaign_id", "adset", "objective", "spend", "impressions", "reach", "frequency", "clicks", "leads"];
 const LP_COLS = ["brand", "date", "visits", "clicks", "form_submits"];
-const LEAD_COLS = ["id", "brand", "created_at", "name", "email", "phone", "utm_source", "utm_campaign", "utm_content", "status", "meeting_at", "meeting_for", "first_contact_at", "lost_reason_detail", "value", "booked_at", "attended_at", "closed_at", "lost_at", "robo_session_id", "fbc", "fbp", "ga_client_id", "ga_session_id", "deleted_at", "deleted_by", "deleted_reason"];
+const LEAD_COLS = ["id", "brand", "created_at", "name", "email", "phone", "utm_source", "utm_campaign", "utm_content", "utm_medium", "utm_term", "fbclid", "status", "meeting_at", "meeting_for", "first_contact_at", "lost_reason_detail", "value", "booked_at", "attended_at", "closed_at", "lost_at", "robo_session_id", "fbc", "fbp", "ga_client_id", "ga_session_id", "deleted_at", "deleted_by", "deleted_reason"];
 const GOAL_COLS = ["brand", "metric", "period", "target", "lower_is_better"];
 const EVENT_COLS = ["id", "lead_id", "brand", "lead_name", "actor", "action", "from_status", "to_status", "payload", "occurred_at", "created_at"];
 const AUDIT_COLS = ["id", "at", "actor", "action", "detail"];
+const SYNC_RUN_COLS = ["id", "source", "brand", "started_at", "finished_at", "ok", "date_from", "date_to", "rows", "error"];
 const DRAFT_COLS = ["id", "brand", "status", "created_at", "updated_at", "planned_for", "type", "pillar", "hook_text", "hook_spoken", "promise", "script", "caption", "cta_type", "cta_keyword", "duration_sec", "has_burned_captions", "score", "validated_at", "playbook_version", "published_post_id", "notes", "ai_review", "validation_failed"];
 
 const withoutPk = (cols: string[], pk: string[]) => cols.filter((c) => !pk.includes(c));
@@ -526,5 +531,31 @@ export const postgresBackend: DataBackend = {
   async listAuditEntries(limit: number): Promise<AuditEntry[]> {
     const rows = await q("select * from audit_log order by at desc limit $1", [limit]);
     return rows.map(toAudit);
+  },
+
+  async addSyncRun(run: SyncRun) {
+    await insertMany("sync_runs", SYNC_RUN_COLS, [fromSyncRun(run)]);
+  },
+
+  async listSyncRuns(opts?: ListSyncRunsOpts): Promise<SyncRun[]> {
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (opts?.source) {
+      params.push(opts.source);
+      where.push(`source = $${params.length}`);
+    }
+    if (opts?.brand) {
+      params.push(opts.brand);
+      where.push(`brand = $${params.length}`);
+    }
+    let sql = "select * from sync_runs";
+    if (where.length) sql += ` where ${where.join(" and ")}`;
+    sql += " order by finished_at desc";
+    const limit = opts?.limit ?? 50;
+    if (limit > 0) {
+      params.push(limit);
+      sql += ` limit $${params.length}`;
+    }
+    return (await q(sql, params)).map(toSyncRun);
   },
 };

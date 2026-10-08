@@ -10,6 +10,8 @@ import type {
   LeadEvent,
   LeadStatus,
   PostDraft,
+  SyncFonte,
+  SyncRun,
 } from "../types";
 import type { Role } from "../auth/roles";
 
@@ -70,6 +72,9 @@ export const LEAD_CONTACT_FIELDS = [
   "utmSource",
   "utmCampaign",
   "utmContent",
+  "utmMedium",
+  "utmTerm",
+  "fbclid",
   "fbc",
   "fbp",
   "gaClientId",
@@ -148,6 +153,11 @@ export interface DataBackend {
   addAuditEntry(entry: AuditEntry): Promise<void>;
   listAuditEntries(limit: number): Promise<AuditEntry[]>;
 
+  // ---- sincronizações (ADR-04) ----
+  addSyncRun(run: SyncRun): Promise<void>;
+  /** Mais recentes primeiro (por `finishedAt`). `limit` 0 = sem limite. */
+  listSyncRuns(opts?: ListSyncRunsOpts): Promise<SyncRun[]>;
+
   /** Accumulate landing-page counters for a brand's day (read-modify-write). */
   bumpLpDaily(brand: string, date: string, delta: LpDelta): Promise<void>;
 
@@ -177,6 +187,12 @@ export interface PublicUser {
   username: string;
   role: Role;
   createdAt: string;
+}
+
+export interface ListSyncRunsOpts {
+  source?: SyncFonte;
+  brand?: string;
+  limit?: number;
 }
 
 export interface ListEventsOpts {

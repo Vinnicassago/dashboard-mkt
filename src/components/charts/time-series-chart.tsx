@@ -48,7 +48,11 @@ export function TimeSeriesChart({
   yFormat?: NumFmt;
   valueFormat?: NumFmt;
   /** Trechos marcados em cinza (ex.: dias sem dado). `from`/`to` são valores do eixo X. */
-  faixas?: { from: string; to: string; label: string }[];
+  /**
+   * Trechos marcados no eixo. `pausa` = campanha parada (cinza claro); `falha` =
+   * sem dados, pode ter havido gasto não visto (âmbar).
+   */
+  faixas?: { from: string; to: string; label: string; tom?: "pausa" | "falha" }[];
 }) {
   const showLegend = series.length >= 2;
   const yFn = (v: number) => formatBy(yFormat, v);
@@ -122,8 +126,8 @@ export function TimeSeriesChart({
             key={`${f.from}-${f.to}`}
             x1={f.from}
             x2={f.to}
-            fill="var(--muted-foreground)"
-            fillOpacity={0.12}
+            fill={f.tom === "falha" ? "var(--warning)" : "var(--muted-foreground)"}
+            fillOpacity={f.tom === "pausa" ? 0.07 : 0.12}
             stroke="none"
             label={{ value: f.label, position: "insideTop", fontSize: 10, fill: CHART.axis }}
           />

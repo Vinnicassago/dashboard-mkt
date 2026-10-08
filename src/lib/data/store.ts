@@ -21,6 +21,7 @@ import type {
   DataBackend,
   LeadStatusPatch,
   ListEventsOpts,
+  ListSyncRunsOpts,
   LpDelta,
   StoredUser,
 } from "./backend";
@@ -28,6 +29,7 @@ import type { Role } from "../auth/roles";
 import type {
   AdDaily,
   AuditEntry,
+  SyncRun,
   Creative,
   Goal,
   IgAccountDaily,
@@ -108,6 +110,9 @@ export const listLeadEvents = (opts?: ListEventsOpts) => backend().listLeadEvent
 
 export const addAuditEntry = (entry: AuditEntry) => backend().addAuditEntry(entry);
 export const listAuditEntries = (limit = 20) => backend().listAuditEntries(limit);
+
+export const addSyncRun = (run: SyncRun) => backend().addSyncRun(run);
+export const listSyncRuns = (opts?: ListSyncRunsOpts) => backend().listSyncRuns(opts);
 
 // ---- state bag (last sync, tokens) ---------------------------------
 

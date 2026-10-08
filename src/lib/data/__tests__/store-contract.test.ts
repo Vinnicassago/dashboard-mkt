@@ -194,6 +194,20 @@ function contrato(nome: string, abrir: () => Promise<{ backend: DataBackend; fec
       expect((await b.getLead(id))?.status).toBe("em_contato");
     });
 
+    it("sincronizações: guarda a janela coberta, filtra por fonte e marca, mais recente primeiro", async () => {
+      const base = { source: "ads" as const, startedAt: "2030-02-01T09:00:00.000Z" };
+      await b.addSyncRun({ ...base, id: `SR1-${sfx}`, brand: `m-${sfx}`, finishedAt: "2030-02-01T09:01:00.000Z", ok: true, dateFrom: "2030-01-02", dateTo: "2030-02-01", rows: 12 });
+      await b.addSyncRun({ ...base, id: `SR2-${sfx}`, brand: `m-${sfx}`, finishedAt: "2030-02-02T09:01:00.000Z", ok: false, error: "A Meta recusou o token." });
+      await b.addSyncRun({ ...base, id: `SR3-${sfx}`, brand: `m-${sfx}`, source: "instagram", finishedAt: "2030-02-03T09:01:00.000Z", ok: true });
+      await b.addSyncRun({ ...base, id: `SR4-${sfx}`, brand: `outra-${sfx}`, finishedAt: "2030-02-04T09:01:00.000Z", ok: true });
+
+      const ads = await b.listSyncRuns({ source: "ads", brand: `m-${sfx}`, limit: 0 });
+      expect(ads.map((r) => r.id)).toEqual([`SR2-${sfx}`, `SR1-${sfx}`]);
+      expect(ads[1]).toMatchObject({ ok: true, dateFrom: "2030-01-02", dateTo: "2030-02-01", rows: 12 });
+      expect(ads[0]).toMatchObject({ ok: false, error: "A Meta recusou o token." });
+      expect(ads[0].dateFrom).toBeUndefined();
+    });
+
     it("registro de auditoria", async () => {
       await b.addAuditEntry({ id: `AUD-${sfx}`, at: new Date().toISOString(), actor: "admin", action: "teste", detail: "x" });
       const lista = await b.listAuditEntries(5);

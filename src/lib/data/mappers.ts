@@ -28,6 +28,8 @@ import type {
   LeadEventAction,
   LpDaily,
   PostDraft,
+  SyncFonte,
+  SyncRun,
 } from "../types";
 import { DEFAULT_BRAND } from "../types";
 import type { PublicUser, StoredUser } from "./backend";
@@ -212,6 +214,7 @@ export const toAd = (r: Row): AdDaily => ({
   campaign: s(r.campaign),
   adset: s(r.adset),
   adId: s(r.ad_id),
+  campaignId: r.campaign_id ? s(r.campaign_id) : undefined,
   objective: r.objective ? s(r.objective) : undefined,
   spend: n(r.spend),
   impressions: n(r.impressions),
@@ -226,6 +229,7 @@ export const fromAd = (a: AdDaily): Row => ({
   date: a.date,
   ad_id: a.adId,
   campaign: a.campaign,
+  campaign_id: a.campaignId ?? null,
   adset: a.adset,
   objective: a.objective ?? null,
   spend: a.spend,
@@ -262,6 +266,9 @@ export const toLead = (r: Row): Lead => ({
   utmSource: r.utm_source ? s(r.utm_source) : undefined,
   utmCampaign: r.utm_campaign ? s(r.utm_campaign) : undefined,
   utmContent: r.utm_content ? s(r.utm_content) : undefined,
+  utmMedium: r.utm_medium ? s(r.utm_medium) : undefined,
+  utmTerm: r.utm_term ? s(r.utm_term) : undefined,
+  fbclid: r.fbclid ? s(r.fbclid) : undefined,
   // Linhas gravadas antes da régua nova ("agendou"/"compareceu"/"perdido")
   // entram normalizadas, mesmo que a migração ainda não tenha rodado.
   status: normalizeLeadStatus(s(r.status)),
@@ -294,6 +301,9 @@ export const fromLead = (l: Lead): Row => ({
   utm_source: l.utmSource ?? null,
   utm_campaign: l.utmCampaign ?? null,
   utm_content: l.utmContent ?? null,
+  utm_medium: l.utmMedium ?? null,
+  utm_term: l.utmTerm ?? null,
+  fbclid: l.fbclid ?? null,
   status: l.status,
   meeting_at: l.meetingAt ?? null,
   meeting_for: l.meetingFor ?? null,
@@ -454,6 +464,32 @@ export const toAudit = (r: Row): AuditEntry => ({
   actor: s(r.actor),
   action: s(r.action),
   detail: r.detail ? s(r.detail) : undefined,
+});
+
+export const toSyncRun = (r: Row): SyncRun => ({
+  id: s(r.id),
+  source: s(r.source) as SyncFonte,
+  brand: s(r.brand),
+  startedAt: iso(r.started_at),
+  finishedAt: iso(r.finished_at),
+  ok: Boolean(r.ok),
+  dateFrom: r.date_from ? day(r.date_from) : undefined,
+  dateTo: r.date_to ? day(r.date_to) : undefined,
+  rows: r.rows == null ? undefined : n(r.rows),
+  error: r.error ? s(r.error) : undefined,
+});
+
+export const fromSyncRun = (x: SyncRun): Row => ({
+  id: x.id,
+  source: x.source,
+  brand: x.brand,
+  started_at: x.startedAt,
+  finished_at: x.finishedAt,
+  ok: x.ok,
+  date_from: x.dateFrom ?? null,
+  date_to: x.dateTo ?? null,
+  rows: x.rows ?? null,
+  error: x.error ?? null,
 });
 
 export const fromAudit = (a: AuditEntry): Row => ({

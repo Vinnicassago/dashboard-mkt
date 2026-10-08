@@ -24,6 +24,7 @@
  */
 
 import { formatarEspera } from "./format";
+import { everBooked } from "./metrics";
 import { chaveTelefone } from "./phone";
 import { horasUteisEntre, somarHorasUteis } from "./horario-util";
 import { eventosPorLead, resumoContato, type ResumoContato } from "./contato";
@@ -288,7 +289,7 @@ export function montarFila(input: FilaInput): FilaResult {
       atraso: e === "confirmar" ? etapa.atraso! : calcAtraso(horasUteis, meta.slaHoras),
       leadId: l.id,
       status: l.status,
-      jaAgendou: Boolean(l.bookedAt) || ["agendado", "no_show", "reuniao_realizada"].includes(l.status),
+      jaAgendou: everBooked(l),
       contato,
       reuniao,
       venceEm,

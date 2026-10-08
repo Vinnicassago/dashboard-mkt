@@ -2,11 +2,10 @@ import type { DashboardData } from "./types";
 import {
   awarenessKpis,
   creativePerformance,
-  overviewKpis,
   rotuloCriativo,
   type DateRange,
 } from "./metrics";
-import { MIN_REUNIOES } from "./trust";
+import { custoExibivel, kpisDoPeriodo } from "./kpis";
 
 /** Abaixo disto, "melhor criativo por CPL" é sorte, não ranking (mesma régua do Dinheiro). */
 const MIN_LEADS_RANKING = 5;
@@ -26,8 +25,10 @@ export function buildInsights(data: DashboardData, range?: DateRange): string[] 
 
   const out: string[] = [];
   const perf = creativePerformance(data, range);
-  const creatives = perf.filter((c) => c.leads >= MIN_LEADS_RANKING);
-  const k = overviewKpis(data, range);
+  // Ranking pelo CPL do PAINEL (o mesmo CPL das outras telas), não pelo do Pixel.
+  const creatives = perf.filter((c) => c.leadsPainel >= MIN_LEADS_RANKING);
+  const kp = kpisDoPeriodo(data, range);
+  const k = kp.overview;
 
   if (k.hasDiscovery) {
     const totalSpend = k.spendConversao + k.spendDescoberta;
@@ -43,34 +44,35 @@ export function buildInsights(data: DashboardData, range?: DateRange): string[] 
   }
 
   if (creatives.length >= 2) {
-    const byCpl = [...creatives].sort((a, b) => a.cpl - b.cpl);
+    const byCpl = [...creatives].sort((a, b) => a.cplPainel - b.cplPainel);
     const best = byCpl[0];
     const worst = byCpl[byCpl.length - 1];
-    const ratio = best.cpl > 0 ? worst.cpl / best.cpl : 0;
+    const ratio = best.cplPainel > 0 ? worst.cplPainel / best.cplPainel : 0;
     out.push(
       // rotuloCriativo: dois anúncios podem ter o mesmo nome — o nome sozinho
       // manda escalar (ou pausar) o errado.
-      `Melhor criativo por CPL: "${rotuloCriativo(best, perf)}" a ${formatCurrency(best.cpl)}` +
+      `Melhor criativo por CPL: "${rotuloCriativo(best, perf)}" a ${formatCurrency(best.cplPainel)}` +
         (ratio > 1.2
-          ? ` — ${ratio.toFixed(1)}× mais barato que o pior ("${rotuloCriativo(worst, perf)}", ${formatCurrency(worst.cpl)}). Vale escalar o vencedor e pausar o pior.`
+          ? ` — ${ratio.toFixed(1)}× mais barato que o pior ("${rotuloCriativo(worst, perf)}", ${formatCurrency(worst.cplPainel)}). Vale escalar o vencedor e pausar o pior.`
           : "."),
     );
   }
 
-  // Custo por reunião só com amostra (MIN_REUNIOES de conversão): com menos, o
-  // número existe mas não sustenta decisão — a próxima reunião o corta pela metade.
+  // Duas visões, dois nomes (dicionario.ts): a taxa é da COORTE (dos leads do
+  // período, quantos agendaram); as reuniões agendadas são do PERÍODO. O custo
+  // por reunião só com a régua única (`custoExibivel`).
   out.push(
-    `${formatInt(k.leads)} leads geraram ${formatInt(k.meetings)} reuniões (${formatPercent(
+    `${formatInt(k.leads)} leads no período; ${formatInt(k.meetingsCoorte)} deles agendaram (${formatPercent(
       k.leadToMeeting,
-    )} de conversão lead→reunião)` +
-      (k.meetingsConversao >= MIN_REUNIOES ? `, a ${formatCurrency(k.cpr)} por reunião.` : "."),
+    )} lead→reunião). ${formatInt(k.meetings)} reuniões agendadas no período` +
+      (custoExibivel(kp.custoPorReuniao) ? `, a ${formatCurrency(kp.custoPorReuniao.valor)} por reunião.` : "."),
   );
 
-  if (k.meetings > 0) {
+  if (k.meetingsCoorte > 0) {
     out.push(
-      `Comparecimento: ${formatPercent(k.showRate)} das reuniões agendadas (${formatInt(
+      `Comparecimento: ${formatPercent(k.showRate)} de quem agendou (${formatInt(
         k.attended,
-      )} de ${formatInt(k.meetings)}). Acompanhe no-shows para não inflar o topo do funil.`,
+      )} de ${formatInt(k.meetingsCoorte)}). Acompanhe no-shows para não inflar o topo do funil.`,
     );
   }
 

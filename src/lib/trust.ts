@@ -19,6 +19,7 @@
 import type { DashboardData } from "./types";
 import type { DateRange } from "./metrics";
 import { hojeEmBrasilia } from "./range";
+import { diaCoberto, type Intervalo } from "./cobertura";
 
 // ---------------------------------------------------------------- vocabulário
 
@@ -89,6 +90,12 @@ export interface TrustInput {
   roboReunioes?: number | null;
   /** "Hoje" em Brasília (AAAA-MM-DD). Ausente = o relógio agora. */
   hoje?: string;
+  /**
+   * Dias cobertos por syncs de anúncio que deram certo (ADR-06). Dia sem linha
+   * DENTRO da cobertura é campanha parada, não buraco — não vira piso. Ausente =
+   * todo dia sem linha conta como sem dados (o comportamento anterior).
+   */
+  cobertura?: Intervalo[];
 }
 
 export interface TrustReport {
@@ -121,6 +128,7 @@ function diasSemDado(
   data: DashboardData,
   range: DateRange | undefined,
   hoje: string,
+  cobertura?: Intervalo[],
 ): { faltando: number; total: number } {
   const dates = new Set(data.adDaily.map((r) => r.date));
   let from: string;
@@ -148,7 +156,7 @@ function diasSemDado(
   let faltando = 0;
   for (let i = 0; i < total; i++) {
     const d = new Date(start + i * 86_400_000).toISOString().slice(0, 10);
-    if (!dates.has(d)) faltando += 1;
+    if (!dates.has(d) && !(cobertura && diaCoberto(cobertura, d))) faltando += 1;
   }
   return { faltando, total };
 }
@@ -385,13 +393,15 @@ export function assessTrust(input: TrustInput): TrustReport {
   }
 
   // 4. Buraco na série: o gasto real é maior, então CPL/CPR reais são maiores.
-  const { faltando, total } = diasSemDado(data, input.range, input.hoje ?? hojeEmBrasilia());
+  const { faltando, total } = diasSemDado(data, input.range, input.hoje ?? hojeEmBrasilia(), input.cobertura);
   if (total > 0 && faltando / total > 0.1) {
     travas.push({
       id: "cobertura-de-dias",
       nivel: "piso",
       titulo: `${faltando} de ${total} dias sem dados de anúncio`,
-      detalhe: `${Math.round((faltando / total) * 100)}% do período não tem linha de gasto — por pausa de campanha ou por falha de sincronização. Se for falha, o investimento real é maior e todo custo por lead e por reunião aqui é um piso.`,
+      detalhe: input.cobertura
+        ? `${Math.round((faltando / total) * 100)}% do período não tem linha de gasto e nenhuma sincronização que deu certo cobriu esses dias — pode ter havido gasto que o painel não viu. O investimento real pode ser maior: todo custo por lead e por reunião aqui é um piso. Dias de campanha parada confirmados pelo sync não entram nesta conta.`
+        : `${Math.round((faltando / total) * 100)}% do período não tem linha de gasto — por pausa de campanha ou por falha de sincronização. Se for falha, o investimento real é maior e todo custo por lead e por reunião aqui é um piso.`,
       afeta: ["spend", "cpl", "cplBlended", "cpr", "cpm"],
       cta: { label: "Sincronizar ou importar", href: "/config#integracoes" },
     });

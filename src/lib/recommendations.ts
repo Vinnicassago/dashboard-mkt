@@ -8,7 +8,6 @@ import {
   creativePerformance,
   filterAds,
   formatPerformance,
-  overviewKpis,
   postPerformance,
   inRange,
   postingCadence,
@@ -17,6 +16,7 @@ import {
   type DateRange,
 } from "./metrics";
 import { MIN_REUNIOES } from "./trust";
+import { custoExibivel, kpisDoPeriodo } from "./kpis";
 import { isAwareness } from "./brands";
 // A régua editorial mora no playbook (o guia como código) — nunca hardcode aqui.
 import {
@@ -118,7 +118,10 @@ export function buildRecommendations(
     });
   }
 
-  const k = overviewKpis(data, range);
+  // Os MESMOS números do placar (kpisDoPeriodo): o motor não decide com um CPL
+  // ou um custo por reunião que a tela não mostra.
+  const kp = kpisDoPeriodo(data, range);
+  const k = kp.overview;
   const creatives = creativePerformance(data, range);
   const convAdsets = adsetPerformance(data, range).filter((a) => a.bucket === "conversao");
   const goalCpl = data.goals.find((g) => g.metric === "cpl")?.target;
@@ -132,8 +135,9 @@ export function buildRecommendations(
     .sort((a, b) => b.spend - a.spend);
   for (const c of fatigued.slice(0, 2)) {
     const rotulo = rotuloCriativo(c, creatives);
-    const caro = c.leads >= 5 && k.cpl > 0 && c.cpl >= k.cpl * 1.5;
-    const cpl = c.leads > 0 ? `CPL ${formatCurrency(c.cpl)}` : "nenhum lead no período";
+    // CPL do PAINEL contra o CPL do painel — o do Pixel conta eventos, não pessoas.
+    const caro = c.leadsPainel >= 5 && custoExibivel(kp.cpl) && c.cplPainel >= k.cpl * 1.5;
+    const cpl = c.leadsPainel > 0 ? `CPL ${formatCurrency(c.cplPainel)}` : "nenhum lead no período";
     recs.push({
       id: `fatigue-${c.adId}`,
       severity: caro ? "alta" : "media",
@@ -141,15 +145,15 @@ export function buildRecommendations(
       href: "/dinheiro#criativos",
       title: caro ? `Pause "${rotulo}"` : `Renove a arte de "${rotulo}"`,
       detail: caro
-        ? `${cpl} em ${formatInt(c.leads)} leads — ${formatDecimal(c.cpl / k.cpl, 1)}× a média da conta (${formatCurrency(k.cpl)}) — e fadigando (${c.fatigue.reason}). Pause no Ads Manager e suba uma variação.`
-        : `Fadigando (${c.fatigue.reason}). ${cpl}${k.cpl > 0 && c.leads > 0 ? `, ${c.cpl <= k.cpl ? "ainda abaixo" : "acima"} da média da conta (${formatCurrency(k.cpl)})` : ""}. Suba uma variação nova no mesmo conjunto antes que o custo dispare.`,
+        ? `${cpl} em ${formatInt(c.leadsPainel)} leads — ${formatDecimal(c.cplPainel / k.cpl, 1)}× a média da conta (${formatCurrency(k.cpl)}) — e fadigando (${c.fatigue.reason}). Pause no Ads Manager e suba uma variação.`
+        : `Fadigando (${c.fatigue.reason}). ${cpl}${custoExibivel(kp.cpl) && c.leadsPainel > 0 ? `, ${c.cplPainel <= k.cpl ? "ainda abaixo" : "acima"} da média da conta (${formatCurrency(k.cpl)})` : ""}. Suba uma variação nova no mesmo conjunto antes que o custo dispare.`,
     });
   }
 
   // 2. CPR/CPL acima da meta (alta). Com menos de MIN_REUNIOES o custo por
   //    reunião está em quarentena: julgar por ele mandaria pausar conjuntos por
   //    causa de uma reunião — o motor não pode decidir com o que a tela esconde.
-  const cprConfiavel = k.meetings >= MIN_REUNIOES;
+  const cprConfiavel = custoExibivel(kp.custoPorReuniao);
   if (goalCpr && cprConfiavel && k.cpr > goalCpr) {
     recs.push({
       id: "cpr-over",
@@ -159,7 +163,7 @@ export function buildRecommendations(
       title: "Custo por reunião acima da meta",
       detail: `CPR ${formatCurrency(k.cpr)} vs meta ${formatCurrency0(goalCpr)}. Pause os conjuntos de pior CPR e concentre no que agenda barato.`,
     });
-  } else if (goalCpl && k.leads > 0 && k.cpl > goalCpl) {
+  } else if (goalCpl && custoExibivel(kp.cpl) && k.cpl > goalCpl) {
     recs.push({
       id: "cpl-over",
       severity: "alta",
@@ -170,8 +174,9 @@ export function buildRecommendations(
     });
   }
 
-  // 3. Realocar budget entre conjuntos por CPR (média).
-  const withCpr = cprConfiavel ? convAdsets.filter((a) => a.meetings > 0 && a.spend > 0) : [];
+  // 3. Realocar budget entre conjuntos por CPR (média). A régua vale LINHA A
+  //    LINHA: conjunto com 1 reunião não tem custo por reunião, tem sorte.
+  const withCpr = cprConfiavel ? convAdsets.filter((a) => a.meetings >= MIN_REUNIOES && a.spend > 0) : [];
   if (withCpr.length >= 2) {
     const best = withCpr.reduce((m, a) => (a.cpr < m.cpr ? a : m));
     const worst = withCpr.reduce((m, a) => (a.cpr > m.cpr ? a : m));
@@ -189,7 +194,7 @@ export function buildRecommendations(
 
   // 4. Escalar o vencedor por CPR, com amostra mínima e sem estar fadigado (média).
   const winner = creatives
-    .filter((c) => cprConfiavel && c.meetings >= 2 && c.spend > 0 && c.fatigue.level !== "fadigado")
+    .filter((c) => cprConfiavel && c.meetings >= MIN_REUNIOES && c.spend > 0 && c.fatigue.level !== "fadigado")
     .sort((a, b) => a.cpr - b.cpr)[0];
   if (winner) {
     recs.push({
@@ -198,7 +203,7 @@ export function buildRecommendations(
       dono: "MKT",
       href: "/dinheiro#criativos",
       title: `Escale "${rotuloCriativo(winner, creatives)}"`,
-      detail: `Melhor CPR ${formatCurrency(winner.cpr)} com ${winner.meetings} reuniões e ${formatInt(winner.leads)} leads. Aumente o budget 10–20% e observe 48–72h.`,
+      detail: `Melhor CPR ${formatCurrency(winner.cpr)} com ${winner.meetings} reuniões e ${formatInt(winner.leadsPainel)} leads. Aumente o budget 10–20% e observe 48–72h.`,
     });
   }
 

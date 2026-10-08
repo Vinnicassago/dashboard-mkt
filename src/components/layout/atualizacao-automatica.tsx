@@ -28,7 +28,6 @@ export function AtualizacaoAutomatica({
   const [agora, setAgora] = useState(() => Date.parse(geradoEm));
 
   useEffect(() => {
-    setAgora(Date.now());
     const relogio = setInterval(() => setAgora(Date.now()), 5_000);
     const recarga = setInterval(() => {
       if (document.visibilityState === "visible") router.refresh();

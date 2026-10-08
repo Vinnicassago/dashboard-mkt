@@ -24,6 +24,7 @@
 
 import type { Degrau } from "./cascata";
 import type { TrustReport } from "./trust";
+import { custoExibivel, type KpisDoPeriodo } from "./kpis";
 
 export type FarolEstado = "pare" | "atencao" | "ok" | "sem-dado";
 
@@ -56,7 +57,11 @@ export interface FarolInput {
   /** Degraus da cascata, na ordem. */
   degraus: Degrau[];
   trust: TrustReport;
-  kpis: { cpr: number; cpl: number; leads: number; meetings: number };
+  /** Os KPIs do período — o farol imprime ESTES números, não os seus. */
+  kpis: Pick<
+    KpisDoPeriodo,
+    "leads" | "leadsConversao" | "cpl" | "custoPorReuniao" | "reunioesConversao" | "investimentoConversao"
+  >;
   /** Meta de custo por reunião, se cadastrada. */
   metaCpr?: number;
   /** Pessoas paradas agora, somadas de todas as juntas. */
@@ -100,13 +105,35 @@ const brl = (n: number) => `R$ ${Math.round(n).toLocaleString("pt-BR")}`;
  * que o dinheiro está empacando depois da mídia, não antes.
  */
 function fraseDaMidia(kpis: FarolInput["kpis"]): string | null {
-  if (kpis.leads <= 0 || kpis.cpl <= 0) return null;
-  return `A mídia está entregando: ${kpis.leads} leads a ${brl(kpis.cpl)}`;
+  if (kpis.leads.valor <= 0 || !custoExibivel(kpis.cpl)) return null;
+  const sobre =
+    kpis.leadsConversao.valor !== kpis.leads.valor ? ` (CPL sobre os ${kpis.leadsConversao.valor} de conversão)` : "";
+  return `A mídia está entregando: ${kpis.leads.valor} leads a ${brl(kpis.cpl.valor)}${sobre}`;
+}
+
+/** O FATO, quando a razão não pode ser impressa (decisão 4.2): verba e reuniões, sem dividir. */
+function fatoDoCusto(kpis: FarolInput["kpis"]): string {
+  const n = kpis.reunioesConversao.valor;
+  return `${brl(kpis.investimentoConversao.valor)} investidos em conversão para ${n} ${n === 1 ? "reunião" : "reuniões"} no período`;
 }
 
 export function montarFarol(input: FarolInput): Farol {
   const { trust, kpis } = input;
-  const cprQuarentena = trust.porMetrica.cpr;
+  // A régua é a do custo por reunião em TODA a tela (`custoExibivel`): trava de
+  // confiança OU menos de MIN_REUNIOES reuniões de conversão. Um piso/teto não
+  // pode mascarar a falta de amostra — senão "R$ 0 por reunião" volta ao farol.
+  const nConv = kpis.reunioesConversao.valor;
+  const cprQuarentena = custoExibivel(kpis.custoPorReuniao)
+    ? trust.porMetrica.cpr
+    : trust.porMetrica.cpr?.nivel === "quarentena"
+      ? trust.porMetrica.cpr
+      : {
+          nivel: "quarentena" as const,
+          motivo:
+            nConv === 0
+              ? "Nenhuma reunião de conversão no período"
+              : `Só ${nConv} ${nConv === 1 ? "reunião" : "reuniões"} de conversão no período`,
+        };
   const piso =
     trust.porMetrica.cpr?.nivel === "piso" || trust.porMetrica.spend?.nivel === "piso";
 
@@ -128,9 +155,10 @@ export function montarFarol(input: FarolInput): Farol {
     );
     // Com menos de 3 reuniões o custo por reunião está em quarentena em toda a
     // tela — o farol, o bloco mais lido, não pode ser a exceção que imprime o valor.
-    if (kpis.meetings > 0 && kpis.meetings < MIN_AMOSTRA) {
+    const n = kpis.reunioesConversao.valor;
+    if (n > 0 && !custoExibivel(kpis.custoPorReuniao)) {
       partes.push(
-        `Com ${kpis.meetings} ${kpis.meetings === 1 ? "reunião" : "reuniões"}, o custo por reunião ainda não é medida — ` +
+        `Com ${n} ${n === 1 ? "reunião" : "reuniões"} de conversão, o custo por reunião ainda não é medida — ` +
           "ele só cai atendendo essas pessoas, não trocando o anúncio",
       );
     }
@@ -163,22 +191,27 @@ export function montarFarol(input: FarolInput): Farol {
   }
 
   // ---- ninguém parado: o farol volta a ser o custo ----------------------
-  let valor: number | null = kpis.cpr;
+  const nReunioes = kpis.reunioesConversao.valor;
+  let valor: number | null = kpis.custoPorReuniao.valor;
   let rotulo = "custo por reunião";
-  let base: string | undefined = `${kpis.meetings} ${kpis.meetings === 1 ? "reunião" : "reuniões"} · verba de conversão`;
+  let base: string | undefined = `${nReunioes} ${nReunioes === 1 ? "reunião" : "reuniões"} de conversão agendadas · verba de conversão`;
   let porQue: string | undefined;
 
   if (cprQuarentena?.nivel === "quarentena") {
     const sub = degrauMaisFundoConfiavel(input.degraus);
     if (sub) {
       valor = sub.custoUnitario ?? null;
-      rotulo = `custo por ${sub.label.toLowerCase()}`;
-      base = `${sub.valor} ${sub.label.toLowerCase()} · verba de conversão`;
-      porQue = `${cprQuarentena.motivo} — este é o ponto mais fundo do funil que ainda sustenta um custo.`;
+      // O degrau Leads carrega o CPL do dicionário: o nome é o dele.
+      rotulo = sub.key === "leads" ? "CPL (custo por lead)" : `custo por ${sub.label.toLowerCase()}`;
+      base =
+        sub.key === "leads"
+          ? `${kpis.leadsConversao.valor} leads de conversão · verba de conversão`
+          : `${sub.valor} ${sub.label.toLowerCase()} · verba de conversão`;
+      porQue = `${cprQuarentena.motivo} (${fatoDoCusto(kpis)}) — este é o ponto mais fundo do funil que ainda sustenta um custo.`;
     } else {
       valor = null;
       base = undefined;
-      porQue = cprQuarentena.motivo;
+      porQue = `${cprQuarentena.motivo} (${fatoDoCusto(kpis)}).`;
     }
   }
 

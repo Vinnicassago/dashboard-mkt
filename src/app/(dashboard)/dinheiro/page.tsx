@@ -12,20 +12,22 @@ import { getData } from "@/lib/data/store";
 import { activeBrandSlug } from "@/lib/active-brand";
 import { pageRange } from "@/lib/page-range";
 import {
-  adKpis,
   adsetPerformance,
   campaignPacing,
   creativePerformance,
   dailySeries,
   trechosSemDado,
-  filterAds,
-  objectiveBreakdown,
-  overviewKpis,
+  trechosSemVeiculacao,
   rotuloCriativo,
   OBJECTIVE_LABEL,
 } from "@/lib/metrics";
 import { resolveMetaBrands } from "@/lib/meta/config";
-import { assessTrust, MIN_REUNIOES } from "@/lib/trust";
+import { MIN_REUNIOES } from "@/lib/trust";
+import { custoExibivel, kpisDoPeriodo, mostrar } from "@/lib/kpis";
+import { dica } from "@/lib/dicionario";
+import { coberturaDeAnuncios } from "@/lib/sincronizacao";
+import { alertasDeAtribuicao, alertasDeConfianca } from "@/lib/alertas";
+import { RegistrarAlertas } from "@/components/layout/alertas";
 import {
   formatCurrency,
   formatCurrency0,
@@ -85,34 +87,23 @@ export default async function DinheiroPage({
 }: {
   searchParams: Promise<{ range?: string }>;
 }) {
-  const data = await getData(await activeBrandSlug());
+  const brand = await activeBrandSlug();
+  const data = await getData(brand);
   const { range } = pageRange(data, (await searchParams).range);
+  const cobertura = await coberturaDeAnuncios(brand);
 
-  const k = adKpis(filterAds(data.adDaily, range));
-  const series = dailySeries(data, range);
+  // Os MESMOS números da home e da Jornada (kpisDoPeriodo), com a mesma
+  // confiança. Com menos de 3 reuniões o custo por reunião está em quarentena —
+  // e é aqui, onde se decide verba, que ele mais engana: "cj1 · CPR R$ 728" é
+  // uma reunião, não um custo.
+  const kp = kpisDoPeriodo(data, range, { brandRules: await resolveMetaBrands(), cobertura });
+  const k = kp.entrega;
+  const obj = kp.objetivos;
+  const series = dailySeries(data, range, cobertura);
   const byAdset = adsetPerformance(data, range);
-  const obj = objectiveBreakdown(data, range);
   const perf = creativePerformance(data, range);
   const rotulo = (c: (typeof perf)[number]) => rotuloCriativo(c, perf);
-
-  // A mesma avaliação de confiança da home. Com menos de 3 reuniões o custo por
-  // reunião está em quarentena — e é aqui, onde se decide verba, que ele mais
-  // engana: "cj1 · CPR R$ 728" é uma reunião, não um custo.
-  const kc = overviewKpis(data, range);
-  const trust = assessTrust({
-    data,
-    range,
-    brandRules: await resolveMetaBrands(),
-    kpis: {
-      meetings: kc.meetings,
-      meetingsConversao: kc.meetingsConversao,
-      leadsConversao: kc.leadsConversao,
-      leads: kc.leads,
-      spendConversao: kc.spendConversao,
-      spendTotal: kc.spend,
-    },
-  });
-  const cprQuarentena = trust.porMetrica.cpr?.nivel === "quarentena";
+  const cprQuarentena = !custoExibivel(kp.custoPorReuniao);
 
   // Metas para pintar de vermelho quem passou do teto.
   const goalCpl = data.goals.find((g) => g.metric === "cpl")?.target;
@@ -125,10 +116,11 @@ export default async function DinheiroPage({
   const pace = campaignPacing(data, new Date().toISOString());
 
   // Destaques de criativo — só entre quem tem volume para a razão significar algo.
-  const withLeads = perf.filter((c) => c.leads > 0);
-  const enough = withLeads.filter((c) => c.leads >= MIN_LEADS);
-  const bestCpl = [...(enough.length ? enough : withLeads)].sort((a, b) => a.cpl - b.cpl)[0];
-  const bestCplLowSample = bestCpl != null && bestCpl.leads < MIN_LEADS;
+  // CPL do PAINEL (o mesmo das outras telas), não o do Pixel.
+  const withLeads = perf.filter((c) => c.leadsPainel > 0);
+  const enough = withLeads.filter((c) => c.leadsPainel >= MIN_LEADS);
+  const bestCpl = [...(enough.length ? enough : withLeads)].sort((a, b) => a.cplPainel - b.cplPainel)[0];
+  const bestCplLowSample = bestCpl != null && bestCpl.leadsPainel < MIN_LEADS;
   const gastoPeriodo = perf.reduce((s, c) => s + c.spend, 0);
   const comVolume = perf.filter(
     (c) => c.impressions >= MIN_IMPRESSOES || (gastoPeriodo > 0 && c.spend >= gastoPeriodo * 0.01),
@@ -139,6 +131,7 @@ export default async function DinheiroPage({
 
   return (
     <div className="space-y-6">
+      <RegistrarAlertas alertas={[...alertasDeConfianca(kp.trust.travas), ...alertasDeAtribuicao(data, range)]} />
       {/* 1. A decisão de verba: por conjunto */}
       <Card id="conjuntos" className="scroll-mt-24">
         <CardHeader>
@@ -147,7 +140,7 @@ export default async function DinheiroPage({
             Onde a verba vira reunião. Custo por lead e por reunião só nos conjuntos de
             conversão — descoberta não gera lead, então fica com &ldquo;—&rdquo;.
             {cprQuarentena
-              ? ` O custo por reunião também fica em “—” até ${MIN_REUNIOES} reuniões da campanha de conversão (hoje ${kc.meetingsConversao}): com menos, a próxima reunião muda o número pela metade.`
+              ? ` O custo por reunião também fica em “—” até ${MIN_REUNIOES} reuniões da campanha de conversão (hoje ${kp.reunioesConversao.valor}): com menos, a próxima reunião muda o número pela metade.`
               : ` Por conjunto, o custo por reunião só aparece com ${MIN_REUNIOES} reuniões ou mais naquele conjunto.`}
           </CardDescription>
         </CardHeader>
@@ -159,16 +152,17 @@ export default async function DinheiroPage({
                 <TH>Objetivo</TH>
                 <TH className="text-right">Gasto</TH>
                 <TH className="text-right">CTR</TH>
-                <TH className="text-right">Leads</TH>
-                <TH className="text-right">CPL</TH>
-                <TH className="text-right">Reuniões</TH>
-                <TH className="text-right">CPR</TH>
+                <TH className="text-right" title={dica("leads")}>Leads (painel)</TH>
+                <TH className="text-right" title={dica("cpl")}>CPL (painel)</TH>
+                <TH className="text-right" title={dica("conversoes_pixel")}>CPL Meta (Pixel)</TH>
+                <TH className="text-right" title={dica("reunioes_agendadas")}>Reuniões</TH>
+                <TH className="text-right" title={dica("custo_por_reuniao")}>CPR</TH>
               </TR>
             </THead>
             <TBody>
               {byAdset.map((g) => {
                 const isConv = g.bucket === "conversao";
-                const cplOver = isConv && goalCpl != null && g.leads > 0 && g.cpl > goalCpl;
+                const cplOver = isConv && goalCpl != null && g.leadsPainel > 0 && g.cplPainel > goalCpl;
                 // Quarentena por LINHA: 1 reunião no conjunto não é custo, é sorte.
                 const cprMedido = isConv && !cprQuarentena && g.meetings >= MIN_REUNIOES;
                 const cprOver = cprMedido && goalCpr != null && g.cpr > goalCpr;
@@ -186,8 +180,11 @@ export default async function DinheiroPage({
                     </TD>
                     <TD className="text-right tabular">{formatCurrency0(g.spend)}</TD>
                     <TD className="text-right tabular">{formatPercent(g.ctr)}</TD>
-                    <TD className="text-right tabular">{formatInt(g.leads)}</TD>
+                    <TD className="text-right tabular">{formatInt(g.leadsPainel)}</TD>
                     <TD className={`text-right tabular ${overCls(cplOver)}`}>
+                      {isConv && g.leadsPainel > 0 ? formatCurrency(g.cplPainel) : "—"}
+                    </TD>
+                    <TD className="text-right tabular text-muted-foreground">
                       {isConv && g.leads > 0 ? formatCurrency(g.cpl) : "—"}
                     </TD>
                     <TD className="text-right tabular">{isConv ? formatInt(g.meetings) : "—"}</TD>
@@ -260,14 +257,14 @@ export default async function DinheiroPage({
                       <p className="text-xs text-muted-foreground">Melhor CPL</p>
                       <p className="font-semibold">{rotulo(bestCpl)}</p>
                       <p className="text-sm text-muted-foreground">
-                        {formatCurrency(bestCpl.cpl)} por lead · {formatInt(bestCpl.leads)}{" "}
-                        {bestCpl.leads === 1 ? "lead" : "leads"} · {formatInt(bestCpl.meetings)}{" "}
+                        {formatCurrency(bestCpl.cplPainel)} por lead · {formatInt(bestCpl.leadsPainel)}{" "}
+                        {bestCpl.leadsPainel === 1 ? "lead" : "leads"} · {formatInt(bestCpl.meetings)}{" "}
                         {bestCpl.meetings === 1 ? "reunião" : "reuniões"}
                       </p>
                       {bestCplLowSample ? (
                         <p className="mt-0.5 text-xs text-[var(--danger-text)]">
-                          Amostra pequena ({formatInt(bestCpl.leads)}{" "}
-                          {bestCpl.leads === 1 ? "lead" : "leads"}) — confirme antes de escalar.
+                          Amostra pequena ({formatInt(bestCpl.leadsPainel)}{" "}
+                          {bestCpl.leadsPainel === 1 ? "lead" : "leads"}) — confirme antes de escalar.
                         </p>
                       ) : null}
                     </div>
@@ -399,10 +396,10 @@ export default async function DinheiroPage({
             descoberta={obj.descoberta.spend}
           />
 
-          {obj.organicLeads > 0 ? (
+          {kp.leadsOrganicos.valor > 0 ? (
             <p className="text-xs text-muted-foreground">
-              + {formatInt(obj.organicLeads)}{" "}
-              {obj.organicLeads === 1 ? "lead orgânico ou direto" : "leads orgânicos ou diretos"}{" "}
+              + {formatInt(kp.leadsOrganicos.valor)}{" "}
+              {kp.leadsOrganicos.valor === 1 ? "lead orgânico ou direto" : "leads orgânicos ou diretos"}{" "}
               — sem custo pago, fora do CPL e do custo por reunião.
             </p>
           ) : null}
@@ -413,28 +410,21 @@ export default async function DinheiroPage({
                 <UserPlus className="size-4 text-primary" />
                 <p className="font-medium">Conversão — geração de leads</p>
               </div>
-              <Stat label="Investimento" value={formatCurrency0(obj.conversao.spend)} />
-              <Stat label="Leads" value={formatInt(obj.conversao.leads)} />
+              <Stat label="Investimento" value={mostrar(kp.investimentoConversao, "moeda0")} />
+              <Stat label="Leads" value={formatInt(kp.leadsConversao.valor)} />
               {/* Sem denominador o custo é DESCONHECIDO, não zero — e "R$ 0,00"
                   ao lado de "Reuniões 0" lê-se como custo excelente. */}
-              <Stat
-                label="CPL"
-                value={obj.conversao.leads > 0 ? formatCurrency(obj.conversao.cpl) : "—"}
-                highlight
-              />
-              <Stat label="Reuniões" value={formatInt(obj.conversao.meetings)} />
+              <Stat label="CPL" value={mostrar(kp.cpl, "moeda")} highlight />
+              <Stat label="Reuniões agendadas" value={formatInt(kp.reunioesConversao.valor)} />
               <Stat
                 label="Custo por reunião"
-                value={
-                  obj.conversao.meetings > 0 && !cprQuarentena
-                    ? formatCurrency(obj.conversao.cpr)
-                    : "—"
-                }
+                value={mostrar(kp.custoPorReuniao, "moeda")}
                 highlight={!cprQuarentena}
               />
               {cprQuarentena ? (
                 <p className="text-xs text-muted-foreground">
-                  Volta com {MIN_REUNIOES} reuniões da campanha de conversão (hoje {kc.meetingsConversao}).
+                  Volta com {MIN_REUNIOES} reuniões da campanha de conversão (hoje{" "}
+                  {kp.reunioesConversao.valor}).
                 </p>
               ) : null}
             </div>
@@ -479,14 +469,17 @@ export default async function DinheiroPage({
 
       <ChartCard
         title="Investimento por dia"
-        description="Um dia por barra. Faixa cinza = dias sem nenhuma linha de anúncio (pausa ou falha de sincronização)."
+        description="Um dia por barra. Faixa cinza = campanha parada (um sync confirmou que não houve veiculação). Faixa âmbar = sem dados: nenhuma sincronização cobriu o dia, pode ter havido gasto que o painel não viu."
       >
         <TimeSeriesChart
           data={series}
           series={[{ key: "spend", label: "Investimento", color: CHART.series[0], kind: "bar" }]}
           yFormat="currency0"
           valueFormat="currency"
-          faixas={trechosSemDado(series).map((t) => ({ ...t, label: "sem dados" }))}
+          faixas={[
+            ...trechosSemVeiculacao(series).map((t) => ({ ...t, label: "sem veiculação", tom: "pausa" as const })),
+            ...trechosSemDado(series).map((t) => ({ ...t, label: "sem dados", tom: "falha" as const })),
+          ]}
         />
       </ChartCard>
     </div>

@@ -104,9 +104,27 @@ export async function resolveMetaBrands(): Promise<BrandMeta[]> {
 }
 
 /**
+ * Balde das linhas de anúncio que NENHUMA regra reivindica numa conta
+ * compartilhada. Não é marca: fica fora de todos os números, com alerta, até
+ * alguém dizer de quem é. Antes elas caíam em silêncio na marca padrão — e um
+ * erro de atribuição era indistinguível de um acerto.
+ */
+export const NAO_CLASSIFICADO = "nao-classificado";
+
+/** Token que declara uma marca como "o resto da conta". */
+export const CURINGA = "*";
+
+/**
  * Escolhe a marca de uma linha de anúncio dentro de um ad account compartilhado,
- * pela campanha: casa por id numérico ou por fragmento do nome; sem casar, cai na
- * marca catch-all (sem campaignMatch) — tipicamente a consorcio. Pura/testável.
+ * pela campanha: casa por id numérico ou por fragmento do nome. Sem casar:
+ *   • conta de uma marca só → essa marca (não há o que classificar);
+ *   • uma marca com o token `*` → ela (o "resto" declarado);
+ *   • NENHUMA marca com regra → a padrão (ninguém começou a classificar; a trava
+ *     "separação nunca configurada" avisa) — sem isso a conta inteira viraria
+ *     "não classificado" no dia do deploy;
+ *   • exatamente uma marca SEM regra → ela (o resto implícito de antes da 0016);
+ *   • senão → `NAO_CLASSIFICADO`.
+ * Pura/testável.
  */
 export function brandForCampaign(
   campaignName: string | undefined,
@@ -116,6 +134,7 @@ export function brandForCampaign(
   const name = (campaignName ?? "").toLowerCase();
   for (const b of brands) {
     for (const token of b.campaignMatch) {
+      if (token === CURINGA) continue;
       if (/^\d+$/.test(token)) {
         if (campaignId && campaignId === token) return b.slug;
       } else if (token && name.includes(token.toLowerCase())) {
@@ -123,11 +142,15 @@ export function brandForCampaign(
       }
     }
   }
-  const fallback =
-    brands.find((b) => b.campaignMatch.length === 0) ??
-    brands.find((b) => b.slug === DEFAULT_BRAND) ??
-    brands[0];
-  return fallback?.slug ?? DEFAULT_BRAND;
+  if (brands.length <= 1) return brands[0]?.slug ?? DEFAULT_BRAND;
+  const resto = brands.find((b) => b.campaignMatch.includes(CURINGA));
+  if (resto) return resto.slug;
+  const semRegra = brands.filter((b) => b.campaignMatch.length === 0);
+  if (semRegra.length === brands.length) {
+    return (brands.find((b) => b.slug === DEFAULT_BRAND) ?? brands[0]).slug;
+  }
+  if (semRegra.length === 1) return semRegra[0].slug;
+  return NAO_CLASSIFICADO;
 }
 
 /** Conversions API: the dataset id is what used to be called the Pixel id. */
