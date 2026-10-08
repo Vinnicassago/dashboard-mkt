@@ -4,6 +4,8 @@ import { ensureSchema, pg } from "../db/pg";
 import { buildSeedData, buildSeedLeadEvents } from "./seed";
 import {
   LEAD_CONTACT_FIELDS,
+  MOTIVO_EXCLUSAO_RESET,
+  eventoExclusaoReset,
   type AdScope,
   type CampaignBudget,
   type DataBackend,
@@ -225,13 +227,29 @@ export const postgresBackend: DataBackend = {
     };
   },
 
-  async resetToSeed(): Promise<DashboardData> {
+  async resetToSeed(by = "sistema"): Promise<DashboardData> {
     const seed = buildSeedData();
     const events = buildSeedLeadEvents(seed.leads);
     await inTransaction(async (client) => {
-      // lead_events e audit_log ficam de fora de propósito: o reset apaga os
-      // leads, mas a trilha do que existia continua consultável.
-      for (const t of ["ad_daily", "creatives", "ig_account_daily", "ig_posts", "lp_daily", "leads", "goals", "campaign"]) {
+      // leads, lead_events e audit_log ficam de fora de propósito: nada de
+      // DELETE em lead. Quem não é do exemplo é excluído de forma reversível
+      // (quem já estava excluído guarda o motivo original); os do exemplo
+      // voltam ao estado do exemplo pelo upsert abaixo. Cada excluído ganha o
+      // evento `excluido` na mesma transação.
+      const at = new Date().toISOString();
+      const excluidos = await client.query(
+        `update leads set deleted_at = $1, deleted_by = $2, deleted_reason = $3
+         where deleted_at is null and not (id = any($4))
+         returning *`,
+        [at, by, MOTIVO_EXCLUSAO_RESET, seed.leads.map((l) => l.id)],
+      );
+      await insertMany(
+        "lead_events",
+        EVENT_COLS,
+        (excluidos.rows as Row[]).map((r) => fromEvent(eventoExclusaoReset(toLead(r), by, at))),
+        client,
+      );
+      for (const t of ["ad_daily", "creatives", "ig_account_daily", "ig_posts", "lp_daily", "goals", "campaign"]) {
         await client.query(`delete from ${t}`);
       }
       await insertMany("campaign", CAMPAIGN_COLS, [fromCampaign(seed.campaign)], client);
@@ -240,7 +258,7 @@ export const postgresBackend: DataBackend = {
       await insertMany("creatives", CREATIVE_COLS, seed.creatives.map(fromCreative), client);
       await insertMany("ad_daily", AD_COLS, seed.adDaily.map(fromAd), client);
       await insertMany("lp_daily", LP_COLS, seed.lpDaily.map(fromLp), client);
-      await insertMany("leads", LEAD_COLS, seed.leads.map(fromLead), client);
+      await upsertMany("leads", LEAD_COLS, seed.leads.map(fromLead), ["id"], withoutPk(LEAD_COLS, ["id"]), client);
       await insertMany("goals", GOAL_COLS, seed.goals.map(fromGoal), client);
       await insertMany("lead_events", EVENT_COLS, events.map(fromEvent), client, true);
     });

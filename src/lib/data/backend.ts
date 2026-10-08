@@ -81,6 +81,27 @@ export const LEAD_CONTACT_FIELDS = [
   "gaSessionId",
 ] as const;
 
+/** Motivo gravado nos leads que `resetToSeed` exclui (reversível). */
+export const MOTIVO_EXCLUSAO_RESET = "restaurar exemplo";
+
+/**
+ * O evento `excluido` de um lead que o reset tirou de cena — o mesmo formato da
+ * exclusão manual, para a ficha dizer por que ele sumiu. Id derivado do lead e
+ * do instante: um reset grava um evento por lead, nunca dois.
+ */
+export function eventoExclusaoReset(lead: Pick<Lead, "id" | "brand" | "name">, by: string, at: string): LeadEvent {
+  return {
+    id: `EVT-reset-${lead.id}-${Date.parse(at).toString(36)}`,
+    leadId: lead.id,
+    brand: lead.brand,
+    leadName: lead.name,
+    actor: by,
+    action: "excluido",
+    payload: { motivo: MOTIVO_EXCLUSAO_RESET },
+    createdAt: at,
+  };
+}
+
 export interface DataBackend {
   readonly name: "local" | "supabase" | "postgres";
 
@@ -90,11 +111,14 @@ export interface DataBackend {
    */
   getData(brand: string): Promise<DashboardData>;
   /**
-   * Volta os dados de campanha ao exemplo. O histórico dos leads
-   * (`lead_events`) e o registro de auditoria são PRESERVADOS: o reset apaga
-   * leads, mas a trilha do que existia continua consultável.
+   * Volta os dados de campanha ao exemplo. Nenhum lead é apagado: quem não é do
+   * exemplo e ainda estava ativo é excluído de forma reversível
+   * (`MOTIVO_EXCLUSAO_RESET`, por `by`, com o evento `excluido` de
+   * `eventoExclusaoReset`) e aparece em Pessoas → Excluídos; os
+   * leads do exemplo (ids `LEAD-0001`…, que nenhuma entrada real usa) voltam ao
+   * estado do exemplo. `lead_events` e o registro de auditoria ficam intactos.
    */
-  resetToSeed(): Promise<DashboardData>;
+  resetToSeed(by?: string): Promise<DashboardData>;
 
   upsertAdDaily(rows: AdDaily[]): Promise<number>;
   upsertCreatives(rows: Creative[]): Promise<number>;

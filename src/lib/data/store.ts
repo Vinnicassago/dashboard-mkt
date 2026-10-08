@@ -59,7 +59,8 @@ export const getData = (brand: string = DEFAULT_BRAND) => backend().getData(bran
 
 // ---- writes ---------------------------------------------------------
 
-export const resetToSeed = () => backend().resetToSeed();
+/** Dados de campanha voltam ao exemplo; leads reais são excluídos de forma reversível por `by`. */
+export const resetToSeed = (by?: string) => backend().resetToSeed(by);
 
 export const upsertAdDaily = (rows: AdDaily[]) => backend().upsertAdDaily(rows);
 

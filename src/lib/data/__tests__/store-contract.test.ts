@@ -157,6 +157,55 @@ function contrato(nome: string, abrir: () => Promise<{ backend: DataBackend; fec
       expect(ids.filter((x) => x === "EVT-S-1")).toHaveLength(1);
     });
 
+    it("restaurar o exemplo não apaga lead: quem não é do exemplo fica excluído (reversível), com marcos e histórico", async () => {
+      const id = `LEAD-LP-reset-${sfx}`;
+      const jaExcluido = `LEAD-LP-reset-x-${sfx}`;
+      await b.addLead({ id, brand: "consorcio", createdAt: "2026-10-01T10:00:00.000Z", name: "Pessoa Teste", phone: "11977776666", status: "lead" });
+      await b.setLeadStatus(id, "agendado", { bookedAt: "2026-10-02T15:00:00.000Z", meetingFor: "2026-10-05T14:00:00.000Z" });
+      await b.addLeadEvent(evento(id, `EVT-reset-${sfx}`, "created"));
+      await b.addLead({ id: jaExcluido, brand: "consorcio", createdAt: "2026-10-01T11:00:00.000Z", name: "Pessoa Teste", status: "lead" });
+      await b.softDeleteLead(jaExcluido, { at: "2026-10-03T10:00:00.000Z", by: "admin", reason: "duplicado" });
+
+      const seed = await b.resetToSeed("admin");
+      const doExemplo = seed.leads.filter((l) => l.brand === "consorcio").map((l) => l.id);
+      expect((await b.getData("consorcio")).leads.map((l) => l.id).sort()).toEqual([...doExemplo].sort());
+
+      const excluido = (await b.listDeletedLeads("consorcio")).find((l) => l.id === id);
+      expect(excluido).toMatchObject({
+        status: "agendado",
+        bookedAt: "2026-10-02T15:00:00.000Z",
+        phone: "11977776666",
+        deletedBy: "admin",
+        deletedReason: "restaurar exemplo",
+      });
+      // quem já estava excluído guarda o próprio motivo e não ganha evento
+      expect((await b.getLead(jaExcluido))?.deletedReason).toBe("duplicado");
+      const exclusoes = async (leadId: string) =>
+        (await b.listLeadEvents({ leadId, limit: 0 })).filter((e) => e.action === "excluido");
+      expect(await exclusoes(jaExcluido)).toHaveLength(0);
+      // o histórico fica e ganha o porquê, no instante da exclusão
+      expect((await b.listLeadEvents({ leadId: id })).map((e) => e.id)).toContain(`EVT-reset-${sfx}`);
+      expect(await exclusoes(id)).toEqual([
+        expect.objectContaining({
+          actor: "admin",
+          leadName: "Pessoa Teste",
+          brand: "consorcio",
+          payload: { motivo: "restaurar exemplo" },
+          createdAt: excluido?.deletedAt,
+        }),
+      ]);
+
+      // lead do exemplo excluído à mão volta; repetir o reset não regrava a exclusão
+      await b.softDeleteLead(doExemplo[0], { at: new Date().toISOString(), by: "admin", reason: "teste" });
+      await b.resetToSeed("outro");
+      expect((await b.getLead(doExemplo[0]))?.deletedAt).toBeUndefined();
+      expect(await b.getLead(id)).toMatchObject({ deletedAt: excluido?.deletedAt, deletedBy: "admin" });
+      expect(await exclusoes(id)).toHaveLength(1);
+
+      await b.restoreLead(id);
+      expect((await b.getData("consorcio")).leads.find((l) => l.id === id)).toMatchObject({ status: "agendado" });
+    });
+
     it("1º contato é marco (grava uma vez; só o desfazer limpa) e o evento guarda quando aconteceu", async () => {
       const id = `LEAD-LP-contato-${sfx}`;
       await b.addLead({ id, brand: "consorcio", createdAt: "2026-10-08T12:00:00.000Z", name: "Pessoa Teste", status: "lead" });

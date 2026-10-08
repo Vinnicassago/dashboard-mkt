@@ -430,8 +430,9 @@ export async function setBudgetAction(
 
 /**
  * Troca os dados de campanha pelo exemplo. Só administrador, com a palavra de
- * confirmação conferida AQUI (não só no navegador). O histórico dos leads e o
- * registro de auditoria sobrevivem.
+ * confirmação conferida AQUI (não só no navegador). Nenhum lead é apagado: os
+ * que não são do exemplo ficam excluídos (reversível, em Pessoas) em nome de
+ * quem apertou. O histórico dos leads e o registro de auditoria sobrevivem.
  */
 export async function resetSeedAction(confirmacao: string): Promise<ActionState> {
   if (!(await can("danger:run"))) {
@@ -440,10 +441,17 @@ export async function resetSeedAction(confirmacao: string): Promise<ActionState>
   if (confirmacao.trim().toUpperCase() !== CONFIRMACAO_PERIGO) {
     return { ok: false, message: `Nada foi apagado: digite ${CONFIRMACAO_PERIGO} para confirmar.` };
   }
-  await resetToSeed();
-  await registrarAuditoria("Restaurar dados de exemplo", "dados de campanha trocados pelo exemplo");
+  await resetToSeed(await currentActor());
+  await registrarAuditoria(
+    "Restaurar dados de exemplo",
+    "dados de campanha trocados pelo exemplo; leads reais excluídos de forma reversível",
+  );
   revalidateAll();
-  return { ok: true, message: "Dados de exemplo restaurados. O histórico dos leads foi preservado." };
+  return {
+    ok: true,
+    message:
+      "Dados de exemplo restaurados. Os leads reais não foram apagados: estão em Pessoas → Excluídos e podem ser restaurados.",
+  };
 }
 
 /**

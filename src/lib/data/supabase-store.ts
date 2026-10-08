@@ -3,6 +3,8 @@ import { supabase } from "../supabase/client";
 import { buildSeedData, buildSeedLeadEvents } from "./seed";
 import {
   LEAD_CONTACT_FIELDS,
+  MOTIVO_EXCLUSAO_RESET,
+  eventoExclusaoReset,
   type AdScope,
   type CampaignBudget,
   type DataBackend,
@@ -117,9 +119,31 @@ export const supabaseBackend: DataBackend = {
     };
   },
 
-  async resetToSeed(): Promise<DashboardData> {
+  async resetToSeed(by = "sistema"): Promise<DashboardData> {
     const db = supabase();
     const seed = buildSeedData();
+
+    // Nada de DELETE em lead: quem não é do exemplo é excluído de forma
+    // reversível (quem já estava excluído guarda o motivo original). Ids do
+    // exemplo são `LEAD-0001`…, seguros dentro do `in.(…)` sem aspas. Cada
+    // excluído ganha o evento `excluido`.
+    const at = new Date().toISOString();
+    const excluir = await db
+      .from("leads")
+      .update({ deleted_at: at, deleted_by: by, deleted_reason: MOTIVO_EXCLUSAO_RESET })
+      .is("deleted_at", null)
+      .not("id", "in", `(${seed.leads.map((l) => l.id).join(",")})`)
+      .select();
+    check(excluir.error, "reset: excluir leads fora do exemplo");
+    const exclusoes = (excluir.data ?? []).map((r: Row) => fromEvent(eventoExclusaoReset(toLead(r), by, at)));
+    if (exclusoes.length) {
+      const ev = await db.from("lead_events").insert(exclusoes);
+      check(ev.error, "reset: histórico dos excluídos");
+    }
+    // Upsert: os do exemplo voltam ao estado do exemplo (inclusive `deleted_*`
+    // nulos, que `fromLead` sempre manda), sem colidir com o que já existia.
+    const exemplo = await db.from("leads").upsert(seed.leads.map(fromLead), { onConflict: "id" });
+    check(exemplo.error, "reset: leads do exemplo");
 
     // wipe (PostgREST requires a filter, so match "pk is not null")
     await Promise.all([
@@ -128,10 +152,9 @@ export const supabaseBackend: DataBackend = {
       db.from("ig_account_daily").delete().not("date", "is", null),
       db.from("ig_posts").delete().not("id", "is", null),
       db.from("lp_daily").delete().not("date", "is", null),
-      db.from("leads").delete().not("id", "is", null),
       db.from("goals").delete().not("metric", "is", null),
       db.from("campaign").delete().not("id", "is", null),
-      // lead_events e audit_log ficam: a trilha do que existia sobrevive ao reset.
+      // leads, lead_events e audit_log ficam: a trilha do que existia sobrevive ao reset.
     ]);
 
     await Promise.all([
@@ -141,7 +164,6 @@ export const supabaseBackend: DataBackend = {
       db.from("creatives").insert(seed.creatives.map(fromCreative)),
       db.from("ad_daily").insert(seed.adDaily.map(fromAd)),
       db.from("lp_daily").insert(seed.lpDaily.map(fromLp)),
-      db.from("leads").insert(seed.leads.map(fromLead)),
       db.from("goals").insert(seed.goals.map(fromGoal)),
       db
         .from("lead_events")

@@ -691,7 +691,7 @@ export function ResetButton() {
         disabled={pending}
         onClick={() => {
           const digitado = window.prompt(
-            `Isso APAGA leads, anúncios, Instagram e metas e grava o exemplo no lugar. O histórico dos leads fica.\n\nPara confirmar, digite ${CONFIRMACAO_PERIGO}:`,
+            `Isso APAGA anúncios, Instagram e metas e grava o exemplo no lugar. Os leads reais não são apagados: ficam excluídos (dá para restaurar em Pessoas), com o histórico.\n\nPara confirmar, digite ${CONFIRMACAO_PERIGO}:`,
           );
           if (digitado == null) return;
           startTransition(async () => {

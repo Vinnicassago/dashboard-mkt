@@ -5,6 +5,8 @@ import { buildSeedData, buildSeedLeadEvents } from "./seed";
 import { FALLBACK_CAMPAIGN } from "./mappers";
 import {
   LEAD_CONTACT_FIELDS,
+  MOTIVO_EXCLUSAO_RESET,
+  eventoExclusaoReset,
   type AdScope,
   type CampaignBudget,
   type DataBackend,
@@ -217,24 +219,34 @@ export const localBackend: DataBackend = {
     };
   },
 
-  async resetToSeed() {
+  async resetToSeed(by = "sistema") {
     // keep users, drafts, the state bag, the lead history and the audit log —
     // só os dados de campanha voltam ao seed (rascunho é trabalho de produção;
     // o histórico é a trilha do que existia antes do reset)
-    const data = buildSeedData();
+    const seed = buildSeedData();
+    // Nenhum lead some: quem não é do exemplo fica, excluído de forma reversível
+    // (quem já estava excluído guarda o motivo original). Os do exemplo voltam
+    // ao estado do exemplo. Cada excluído ganha o evento `excluido`.
+    const doExemplo = new Set(seed.leads.map((l) => l.id));
+    const at = new Date().toISOString();
+    const foraDoExemplo = file().data.leads.filter((l) => !doExemplo.has(l.id));
+    const exclusoes = foraDoExemplo.filter((l) => !l.deletedAt).map((l) => eventoExclusaoReset(l, by, at));
+    const preservados = foraDoExemplo.map((l) =>
+      l.deletedAt ? l : { ...l, deletedAt: at, deletedBy: by, deletedReason: MOTIVO_EXCLUSAO_RESET },
+    );
     const atuais = file().leadEvents;
     const ids = new Set(atuais.map((e) => e.id));
     cache = {
-      data,
+      data: { ...seed, leads: [...seed.leads, ...preservados] },
       state: file().state,
       users: file().users,
-      leadEvents: [...buildSeedLeadEvents(data.leads).filter((e) => !ids.has(e.id)), ...atuais],
+      leadEvents: [...exclusoes, ...buildSeedLeadEvents(seed.leads).filter((e) => !ids.has(e.id)), ...atuais],
       drafts: file().drafts,
       audit: file().audit,
       syncRuns: file().syncRuns,
     };
     persist(cache);
-    return cache.data;
+    return seed;
   },
 
   async listDrafts(brand: string) {
