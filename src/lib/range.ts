@@ -65,35 +65,52 @@ export function rangeLabel(key: string | undefined): string {
   return `até ${curto(custom.to as string)}`;
 }
 
+/** "Hoje" no calendário de quem usa o painel (Brasília), não no do servidor (UTC). */
+export function hojeEmBrasilia(agora: Date = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(agora);
+}
+
 /**
- * Resolve a preset key or a custom "from..to" into a concrete DateRange,
- * anchored to the dataset's last day. `undefined` means "all data".
+ * Resolve a preset key or a custom "from..to" into a concrete DateRange.
+ * `undefined` means "all data".
+ *
+ * Os presets contam a partir de HOJE, não do último dia com anúncio: ancorar no
+ * dado fazia "7 dias" mostrar, sem aviso, uma semana velha sempre que o sync
+ * parava (e todo preset virava "tudo" numa marca sem anúncio). Os dias sem
+ * dado no fim do período aparecem — é a confiança (`trust.ts`) que diz o que
+ * eles significam. `hoje` vem de fora para o cálculo seguir puro.
  */
 export function resolveRange(
   key: string | undefined,
   span: { from: string; to: string },
+  hoje: string = span.to,
 ): DateRange | undefined {
   if (!key || key === "all") return undefined;
+  const fim = hoje || span.to;
 
-  // Período livre: recorta ao que existe de dado, para não pedir dia sem série.
   const custom = parseCustomRange(key);
   if (custom) {
     let from = custom.from ?? span.from;
-    let to = custom.to ?? span.to;
+    let to = custom.to ?? fim;
     if (!from && !to) return undefined;
     if (span.from && from && from < span.from) from = span.from;
-    if (span.to && to && to > span.to) to = span.to;
+    if (fim && to && to > fim) to = fim;
     if (!from || !to || from > to) return undefined;
     return { from, to };
   }
 
   const days = Object.hasOwn(PRESET_DAYS, key) ? PRESET_DAYS[key] : 0;
-  if (!days || !span.to) return undefined;
-  const fromD = new Date(span.to + "T00:00:00Z");
+  if (!days || !fim) return undefined;
+  const fromD = new Date(fim + "T00:00:00Z");
   fromD.setUTCDate(fromD.getUTCDate() - (days - 1));
   let from = fromD.toISOString().slice(0, 10);
   if (span.from && from < span.from) from = span.from;
-  return { from, to: span.to };
+  return { from, to: fim };
 }
 
 /**

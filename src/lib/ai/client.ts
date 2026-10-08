@@ -1,4 +1,5 @@
 import "server-only";
+import { mensagemHumana } from "../erros";
 import Anthropic from "@anthropic-ai/sdk";
 import { isAiConfigured } from "./config";
 
@@ -38,5 +39,6 @@ export function aiErrorMessage(e: unknown): string {
     // Falta de crédito chega como 400/403 com mensagem própria — vale mostrar.
     return `A API recusou a chamada (${e.status ?? "sem status"}): ${e.message}`;
   }
-  return e instanceof Error ? e.message : "Falha inesperada na revisão por IA.";
+  console.error("[ia] falha inesperada:", e);
+  return mensagemHumana("IA", e);
 }

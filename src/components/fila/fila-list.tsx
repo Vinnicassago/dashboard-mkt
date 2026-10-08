@@ -4,7 +4,7 @@ import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Clock, MessageCircle, Check, ChevronDown, Mail } from "lucide-react";
 import { salvarComercial } from "@/app/(dashboard)/pessoas/comercial-actions";
-import { changeLeadStatus } from "@/app/(dashboard)/pessoas/actions";
+import { RegistrarStatus } from "@/components/tables/lead-status";
 import {
   ETAPAS_QUENTES,
   FILA_ETAPAS,
@@ -13,8 +13,7 @@ import {
   type FilaItem,
   type FiltroFila,
 } from "@/lib/fila";
-import { LEAD_STATUS_META, LOST_STATUSES, statusLabel } from "@/lib/lead-status";
-import type { LeadStatus } from "@/lib/types";
+import { LOST_STATUSES } from "@/lib/lead-status";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
@@ -57,15 +56,6 @@ function FilaCard({
     if (!item.sessionId) return;
     start(async () => {
       const r = await salvarComercial(item.sessionId!, "abordado", "sim", item.telefone);
-      setMsg(r.message);
-      if (r.ok) onDone(item.id);
-    });
-  }
-
-  function mudarStatus(status: LeadStatus) {
-    if (!item.leadId) return;
-    start(async () => {
-      const r = await changeLeadStatus(item.leadId!, status);
       setMsg(r.message);
       if (r.ok) onDone(item.id);
     });
@@ -149,19 +139,19 @@ function FilaCard({
         ) : null}
 
         {aberto && item.leadId ? (
-          <div className="flex flex-wrap gap-1.5 border-t pt-3">
-            {(["agendado", ...LOST_STATUSES] as LeadStatus[]).map((s) => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => mudarStatus(s)}
-                disabled={pending}
-                title={LEAD_STATUS_META[s].hint}
-                className="rounded-md border px-2 py-1 text-xs hover:bg-foreground/5 disabled:opacity-50"
-              >
-                {statusLabel(s)}
-              </button>
-            ))}
+          <div className="border-t pt-3">
+            <RegistrarStatus
+              id={item.leadId}
+              name={item.nome}
+              status="lead"
+              jaAgendou={item.jaAgendou ?? false}
+              modo="botoes"
+              opcoes={["agendado", ...LOST_STATUSES]}
+              onDone={(m) => {
+                setMsg(m);
+                onDone(item.id);
+              }}
+            />
           </div>
         ) : null}
 

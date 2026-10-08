@@ -23,6 +23,7 @@
  * Função PURA: recebe as três listas já carregadas e devolve uma só.
  */
 
+import { formatarEspera } from "./format";
 import { chaveTelefone } from "./phone";
 import type { Lead } from "./types";
 
@@ -103,6 +104,8 @@ export interface FilaItem {
   sessionId?: string;
   /** Lead no painel — habilita mudar status. */
   leadId?: string;
+  /** O lead do painel já teve reunião marcada — só então "Desistência" é opção. */
+  jaAgendou?: boolean;
   /** Contexto que o robô já colheu, para não começar a conversa do zero. */
   briefing?: string;
   /** Outras etapas em que esta mesma pessoa também aparece. */
@@ -225,6 +228,8 @@ export function montarFila(input: FilaInput): FilaResult {
       horasEsperando: horas,
       atraso: calcAtraso(horas, FILA_ETAPAS["sem-status"].slaHoras),
       leadId: l.id,
+      // Na fila só entra status "lead": aqui o marco é o único sinal de agendamento.
+      jaAgendou: Boolean(l.bookedAt),
       tambemEm: [],
     });
   }
@@ -302,16 +307,5 @@ export function montarFila(input: FilaInput): FilaResult {
   return { itens: finais, resumo, total: finais.length };
 }
 
-/** "4 d 6 h" / "35 min" — a espera em linguagem de quem vai ligar. */
-export function formatEspera(horas?: number): string {
-  if (horas === undefined) return "—";
-  if (horas < 1) return `${Math.round(horas * 60)} min`;
-  if (horas < 48) {
-    const h = Math.floor(horas);
-    const m = Math.round((horas - h) * 60);
-    return m ? `${h} h ${m} min` : `${h} h`;
-  }
-  const d = Math.floor(horas / 24);
-  const h = Math.round(horas % 24);
-  return h ? `${d} d ${h} h` : `${d} d`;
-}
+/** A espera em linguagem de quem vai ligar — ver `formatarEspera` (format.ts). */
+export const formatEspera = formatarEspera;

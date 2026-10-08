@@ -59,14 +59,21 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   para `number | null`: 75 call sites e null vazaria para o Recharts. Trava nova =
   entrada em `assessTrust`, não um `if` na página. `MIN_REUNIOES` (trust.ts) é a régua
   ÚNICA da quarentena do custo por reunião: motor de ações, IA, Dinheiro e cascata leem
-  dali — nenhuma tela imprime nem decide por CPR abaixo dela.
+  dali — nenhuma tela imprime nem decide por CPR abaixo dela. A quarentena olha o
+  denominador de VERDADE (`meetingsConversao`, `leadsConversao`) e vale também linha a
+  linha (conjunto, criativo).
 - **Status do lead** (`src/lib/lead-status.ts`): fonte ÚNICA de rótulo, cor, posição
   no funil e "isto encerra o lead?". UI, métricas, CSV e seed leem dali — nunca
   repita a lista de status nem hardcode um `<option>`. Os quatro motivos de perda
   se dividem em `lossKind` **qualidade** (mídia) e **decisão** (oferta) — é a quebra
   que o funil mostra. Status novo = entrada em `LEAD_STATUS_META` + migração em
   `db/schema.ts` E `supabase/migrations/`, e um apelido em `normalizeLeadStatus` se
-  o nome antigo puder estar gravado.
+  o nome antigo puder estar gravado. **Transições** (`podeTransitar`, pura): "Agendado"
+  exige `meetingFor` (data DA reunião — `meetingAt` é legado e guardava a hora do
+  clique), "Cliente" exige valor, "Desistência" só para quem já agendou
+  (`everBooked`). A tela usa `destinosPermitidos`; o servidor confere de novo
+  (`changeLeadStatus`). Gravar status = `aplicarStatus` (`lib/leads/mudar-status.ts`),
+  usado pela tela e pela ponte do robô.
 - **Marcos vs. status** (migração `0012`): `status` é o estado ATUAL (rótulo, cor,
   fila) e é mutável; `bookedAt`/`attendedAt`/`closedAt` são o FATO, gravados uma vez
   e nunca sobrescritos (`coalesce` no Postgres, `??=` nos outros backends). A
@@ -124,7 +131,13 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   mecanicamente fica AQUI; julgamento (gancho cria tensão? soa como anúncio?)
   fica para a camada de IA (Etapa 2), nunca misturado.
 - **Formatação:** sempre via `src/lib/format.ts` (pt-BR). Para charts, passe o
-  **tipo de formato** (`NumFmt`, string) — nunca uma função (fronteira RSC).
+  **tipo de formato** (`NumFmt`, string) — nunca uma função (fronteira RSC). Espera e
+  duração: `formatarEspera` (arredonda o total antes de fatiar — nada de "31 d 24 h").
+  Data exibida no servidor sempre com `timeZone: "America/Sao_Paulo"`. Erro técnico
+  nunca vai cru para a tela: `mensagemHumana` (`lib/erros.ts`) e o detalhe no log.
+- **Período** (`lib/range.ts`): os presets contam a partir de HOJE em Brasília
+  (`hojeEmBrasilia`), não do último dia com anúncio. O cabeçalho mostra a data do
+  último sync que deu certo POR FONTE (`lib/frescor.ts`), nunca o `updated_at` global.
 - **Charts (client) recebem props serializáveis.** Server Components não podem
   passar funções para Client Components. Cores vêm de CSS vars (`components/charts/colors.ts`),
   da paleta data-viz validada — não invente hex novos sem rodar o validador.

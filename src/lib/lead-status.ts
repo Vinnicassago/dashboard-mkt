@@ -54,7 +54,7 @@ export const LEAD_STATUS_META: Record<LeadStatus, LeadStatusMeta> = {
     variant: "default",
     order: 5,
     lost: false,
-    hint: "Reunião marcada. É esta transição que avisa a Meta e o GA4.",
+    hint: "Reunião marcada, com data e hora.",
   },
   reuniao_realizada: {
     label: "Reunião realizada",
@@ -154,6 +154,64 @@ export function isBookedStatus(s: LeadStatus): boolean {
 
 export function isLead(l: Lead): boolean {
   return l.status === "lead";
+}
+
+// ---------------------------------------------------------------- transições
+
+/** O que uma transição precisa saber do lead. `jaAgendou` = `everBooked()` (metrics.ts). */
+export interface EstadoParaTransicao {
+  status: LeadStatus;
+  jaAgendou: boolean;
+}
+
+/** O que algumas transições exigem junto. */
+export interface DadosDaTransicao {
+  /** Data e hora da reunião (ISO) — obrigatória para "Agendado". */
+  meetingFor?: string;
+  /** Valor da carta (R$) — obrigatório para "Cliente". */
+  value?: number;
+}
+
+/** Que dado extra a interface precisa pedir antes de confirmar. */
+export function dadoExigido(para: LeadStatus): "data" | "valor" | null {
+  if (para === "agendado") return "data";
+  if (para === "cliente") return "valor";
+  return null;
+}
+
+/**
+ * Destinos que a interface oferece para este lead. O servidor confere de novo
+ * com `podeTransitar` — a lista é conveniência, a regra mora lá.
+ */
+export function destinosPermitidos(l: EstadoParaTransicao): LeadStatus[] {
+  return LEAD_STATUSES.filter((s) => s !== l.status && (s !== "desistencia" || l.jaAgendou));
+}
+
+/**
+ * A transição pode acontecer? `null` = pode; texto = por que não (vai direto
+ * para a tela). Máquina mínima da Fase 1 — tentativas e no-show chegam na Fase 2:
+ * - "Desistência" é de quem chegou a agendar (havia 11 leads assim sem nunca
+ *   terem agendado, contados como perda por decisão);
+ * - "Agendado" exige a data da reunião (antes gravava a hora do clique);
+ * - "Cliente" exige o valor da carta.
+ */
+export function podeTransitar(
+  l: EstadoParaTransicao,
+  para: LeadStatus,
+  dados: DadosDaTransicao = {},
+): string | null {
+  if (para === l.status) return `O lead já está em "${statusLabel(para)}".`;
+  if (para === "desistencia" && !l.jaAgendou) {
+    return "Desistência é de quem chegou a agendar. Para quem nunca agendou, use “Não tem interesse”.";
+  }
+  if (para === "agendado") {
+    const t = dados.meetingFor ? Date.parse(dados.meetingFor) : NaN;
+    if (!Number.isFinite(t)) return "Informe a data e a hora da reunião.";
+  }
+  if (para === "cliente" && !(dados.value != null && dados.value > 0)) {
+    return "Informe o valor da carta (R$).";
+  }
+  return null;
 }
 
 /**

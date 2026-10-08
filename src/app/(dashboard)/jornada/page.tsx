@@ -13,6 +13,7 @@ import { LEAD_STATUS_META } from "@/lib/lead-status";
 import {
   cohortWeekly,
   filterLeads,
+  countLostAfterMeeting,
   lossBreakdown,
   lossByKind,
   objectiveBreakdown,
@@ -24,21 +25,21 @@ import {
   formatInt,
   formatPercent,
   formatPercentValue,
+  formatarEspera,
 } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
+
+/** Abaixo disto, a taxa lead→reunião de uma semana é anedota, não taxa. */
+const AMOSTRA_COORTE = 5;
 
 /** Média que pode não existir ainda (robô sem nenhuma transferência). */
 function media(v: number | null | undefined): string {
   return v == null ? "—" : formatDecimal(v, 1);
 }
 
-/** Horas decimais em linguagem de gente: 0,4 → "24 min"; 5,25 → "5,3 h". */
-function horas(n: number | null): string {
-  if (n == null) return "—";
-  if (n < 1) return `${Math.round(n * 60)} min`;
-  return `${formatDecimal(n, 1)} h`;
-}
+/** Horas médias do robô → a mesma escrita de espera do resto do painel. */
+const horas = (n: number | null) => formatarEspera(n);
 
 /**
  * Jornada — onde exatamente o dinheiro vaza.
@@ -87,6 +88,7 @@ export default async function JornadaPage({
   const lossRows = lossBreakdown(leads).filter((r) => r.count > 0);
   const byKind = lossByKind(leads);
   const lossTotal = byKind.qualidade + byKind.decisao;
+  const perdasDepoisDaReuniao = countLostAfterMeeting(leads);
   const origem = (row: (typeof lossRows)[number]) =>
     LEAD_STATUS_META[row.status].origemDaPerda ?? "—";
   const leituras = lossRows
@@ -208,7 +210,10 @@ export default async function JornadaPage({
           <CardHeader>
             <CardTitle>Por que perdemos</CardTitle>
             <CardDescription>
-              Leads encerrados sem reunião no período, pelo motivo registrado.
+              Leads encerrados sem nunca ter tido reunião, pelo motivo registrado.
+              {perdasDepoisDaReuniao > 0
+                ? ` ${formatInt(perdasDepoisDaReuniao)} ${perdasDepoisDaReuniao === 1 ? "lead chegou" : "leads chegaram"} a agendar antes de encerrar e não ${perdasDepoisDaReuniao === 1 ? "entra" : "entram"} aqui: ali o motivo descreve o fim da conversa, não por que ela não começou.`
+                : ""}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -374,10 +379,23 @@ export default async function JornadaPage({
                           (maturando)
                         </span>
                       ) : null}
+                      {c.semVeiculacao ? (
+                        <span
+                          className="ml-1.5 text-xs font-normal text-muted-foreground"
+                          title="Nenhuma linha de anúncio nesta semana: campanha pausada ou sincronização falhou"
+                        >
+                          (sem veiculação)
+                        </span>
+                      ) : null}
                     </TD>
                     <TD className="text-right tabular">{formatInt(c.leads)}</TD>
                     <TD className="text-right tabular">{formatInt(c.meetings)}</TD>
-                    <TD className="text-right tabular">{formatPercent(c.leadToMeeting)}</TD>
+                    <TD
+                      className="text-right tabular"
+                      title={c.leads > 0 && c.leads < AMOSTRA_COORTE ? `Só ${c.leads} lead(s): ainda não é taxa` : undefined}
+                    >
+                      {c.leads >= AMOSTRA_COORTE ? formatPercent(c.leadToMeeting) : "—"}
+                    </TD>
                     <TD className="text-right tabular">{formatInt(c.clients)}</TD>
                     <TD className="text-right tabular">{formatCurrency0(c.revenue)}</TD>
                   </TR>

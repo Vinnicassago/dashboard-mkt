@@ -1,4 +1,5 @@
 import "server-only";
+import { mensagemHumana } from "../erros";
 import { fetchAdsAccount, syncAdsAccount, type AdsPull } from "./ads";
 import { isoDaysAgo, isoToday } from "./http";
 import { syncInstagram } from "./instagram";
@@ -66,7 +67,8 @@ export async function runSync({
           notes.push(`${account} (${r.since}→${r.until}) → ${dist}`);
         } catch (e) {
           ok = false;
-          notes.push(`${account}: erro — ${e instanceof Error ? e.message : String(e)}`);
+          console.error(`[sync] anúncios ${account}:`, e);
+          notes.push(`${account}: ${mensagemHumana("Meta", e)}`);
         }
       }
       report.ads = { ok, detail: notes.join(" · ") };
@@ -87,7 +89,8 @@ export async function runSync({
         try {
           tokenNotes.push(`${b.slug}: ${await refreshIgTokenIfNeeded(b.slug, b.igToken)}`);
         } catch (e) {
-          tokenNotes.push(`${b.slug}: falha token — ${e instanceof Error ? e.message : String(e)}`);
+          console.error(`[sync] token do Instagram ${b.slug}:`, e);
+          tokenNotes.push(`${b.slug}: ${mensagemHumana("Instagram", e)}`);
         }
         try {
           const token = (await getIgToken(b.slug, b.igToken))!;
@@ -95,7 +98,8 @@ export async function runSync({
           notes.push(`${b.slug}: ${r.note}`);
         } catch (e) {
           ok = false;
-          notes.push(`${b.slug}: erro — ${e instanceof Error ? e.message : String(e)}`);
+          console.error(`[sync] Instagram ${b.slug}:`, e);
+          notes.push(`${b.slug}: ${mensagemHumana("Instagram", e)}`);
         }
       }
       report.instagram = { ok, detail: notes.join(" · ") };

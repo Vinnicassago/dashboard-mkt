@@ -3,6 +3,7 @@
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { Badge } from "@/components/ui/badge";
 import type { CreativePerf, FatigueLevel } from "@/lib/metrics";
+import { MIN_REUNIOES } from "@/lib/trust";
 import {
   formatCurrency,
   formatInt,
@@ -89,9 +90,19 @@ const columns: Column<CreativePerf>[] = [
     header: "Custo/reunião",
     align: "right",
     sortable: true,
-    // Mesmo motivo do CPL: sem reunião o custo é desconhecido, não zero.
-    sortValue: (r) => (r.meetings > 0 ? r.cpr : Number.POSITIVE_INFINITY),
-    render: (r) => (r.meetings > 0 ? formatCurrency(r.cpr) : "—"),
+    // Sem reunião o custo é desconhecido, não zero; com menos de MIN_REUNIOES
+    // NESTE criativo, uma reunião é sorte, não custo (quarentena por linha).
+    sortValue: (r) => (r.meetings >= MIN_REUNIOES ? r.cpr : Number.POSITIVE_INFINITY),
+    render: (r) =>
+      r.meetings >= MIN_REUNIOES ? (
+        formatCurrency(r.cpr)
+      ) : r.meetings > 0 ? (
+        <span className="text-muted-foreground" title={`${r.meetings} de ${MIN_REUNIOES} reuniões necessárias para ser custo`}>
+          —
+        </span>
+      ) : (
+        "—"
+      ),
   },
   /*
    * "Gancho (3s)" está OCULTA de propósito, não esquecida.

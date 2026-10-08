@@ -196,6 +196,8 @@ export default async function ConfigPage({
     brandRules: await resolveMetaBrands(),
     kpis: {
       meetings: k.meetings,
+      meetingsConversao: k.meetingsConversao,
+      leadsConversao: k.leadsConversao,
       leads: k.leads,
       spendConversao: k.spendConversao,
       spendTotal: k.spend,
@@ -305,7 +307,7 @@ export default async function ConfigPage({
               ok={status.ga4}
               hint={
                 status.ga4
-                  ? "Eventos generate_lead e schedule enviados ao GA4"
+                  ? "Eventos generate_lead (lead) e qualify_lead (reunião agendada) enviados ao GA4"
                   : "Faltam GA4_MEASUREMENT_ID e GA4_API_SECRET"
               }
             />

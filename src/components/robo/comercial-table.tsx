@@ -1,5 +1,6 @@
 "use client";
 
+import { formatarEspera } from "@/lib/format";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { MessageCircle, Mail, X, FileText } from "lucide-react";
@@ -41,19 +42,8 @@ function quandoCurto(iso: string | null): string {
   });
 }
 
-/** 135 → "2 h 15 min"; acima de um dia mostra "2 d 3 h". */
-function duracao(min: number | null): string {
-  if (min == null) return "—";
-  if (min < 60) return `${min} min`;
-  const h = Math.floor(min / 60);
-  if (h < 24) {
-    const m = min % 60;
-    return m ? `${h} h ${m} min` : `${h} h`;
-  }
-  const d = Math.floor(h / 24);
-  const hr = h % 24;
-  return hr ? `${d} d ${hr} h` : `${d} d`;
-}
+/** Minutos do robô → a mesma escrita de espera do resto do painel. */
+const duracao = (min: number | null) => formatarEspera(min == null ? null : min / 60);
 
 function Contato({ row }: { row: ComercialTableRow }) {
   if (!row.telefone && !row.email) return <span className="text-muted-foreground">—</span>;

@@ -17,6 +17,7 @@ import {
   campaignPacing,
   creativePerformance,
   dailySeries,
+  trechosSemDado,
   filterAds,
   objectiveBreakdown,
   overviewKpis,
@@ -32,6 +33,7 @@ import {
   formatDecimal,
   formatInt,
   formatPercent,
+  formatIntComSinal,
 } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -103,6 +105,8 @@ export default async function DinheiroPage({
     brandRules: await resolveMetaBrands(),
     kpis: {
       meetings: kc.meetings,
+      meetingsConversao: kc.meetingsConversao,
+      leadsConversao: kc.leadsConversao,
       leads: kc.leads,
       spendConversao: kc.spendConversao,
       spendTotal: kc.spend,
@@ -143,8 +147,8 @@ export default async function DinheiroPage({
             Onde a verba vira reunião. Custo por lead e por reunião só nos conjuntos de
             conversão — descoberta não gera lead, então fica com &ldquo;—&rdquo;.
             {cprQuarentena
-              ? ` O custo por reunião também fica em “—” até ${MIN_REUNIOES} reuniões (hoje ${kc.meetings}): com menos, a próxima reunião muda o número pela metade.`
-              : null}
+              ? ` O custo por reunião também fica em “—” até ${MIN_REUNIOES} reuniões da campanha de conversão (hoje ${kc.meetingsConversao}): com menos, a próxima reunião muda o número pela metade.`
+              : ` Por conjunto, o custo por reunião só aparece com ${MIN_REUNIOES} reuniões ou mais naquele conjunto.`}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -165,8 +169,9 @@ export default async function DinheiroPage({
               {byAdset.map((g) => {
                 const isConv = g.bucket === "conversao";
                 const cplOver = isConv && goalCpl != null && g.leads > 0 && g.cpl > goalCpl;
-                const cprOver =
-                  isConv && !cprQuarentena && goalCpr != null && g.meetings > 0 && g.cpr > goalCpr;
+                // Quarentena por LINHA: 1 reunião no conjunto não é custo, é sorte.
+                const cprMedido = isConv && !cprQuarentena && g.meetings >= MIN_REUNIOES;
+                const cprOver = cprMedido && goalCpr != null && g.cpr > goalCpr;
                 return (
                   <TR key={g.adset}>
                     <TD className="font-medium">{g.adset}</TD>
@@ -187,7 +192,7 @@ export default async function DinheiroPage({
                     </TD>
                     <TD className="text-right tabular">{isConv ? formatInt(g.meetings) : "—"}</TD>
                     <TD className={`text-right tabular ${overCls(cprOver)}`}>
-                      {isConv && g.meetings > 0 && !cprQuarentena ? formatCurrency(g.cpr) : "—"}
+                      {cprMedido ? formatCurrency(g.cpr) : "—"}
                     </TD>
                   </TR>
                 );
@@ -313,8 +318,13 @@ export default async function DinheiroPage({
           <CardTitle>Orçamento da campanha</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
+          {/* O número grande é o GASTO, e diz isso: sem orçamento cadastrado ele
+              era lido como o orçamento (B9). */}
           <div className="flex flex-wrap items-baseline justify-between gap-2 text-sm">
-            <span className="tabular text-2xl font-semibold">{formatCurrency0(spentAllTime)}</span>
+            <span>
+              <span className="tabular text-2xl font-semibold">{formatCurrency0(spentAllTime)}</span>{" "}
+              <span className="text-muted-foreground">gastos desde o início da campanha</span>
+            </span>
             {/*
               Orçamento zero não é "consumi 0%" — é campo em branco. Mostrar
               "de R$ 0 · 0% consumido" com a barra vazia dava a entender que o
@@ -325,12 +335,15 @@ export default async function DinheiroPage({
                 de {formatCurrency0(budget)} · {formatPercent(pacing, 0)} consumido
               </span>
             ) : (
-              <Link
-                href="/config#orcamento"
-                className="text-xs font-medium text-primary underline-offset-4 hover:underline"
-              >
-                Cadastrar o orçamento para ver o ritmo →
-              </Link>
+              <span className="text-xs">
+                <span className="font-medium">Orçamento não cadastrado</span> ·{" "}
+                <Link
+                  href="/config#orcamento"
+                  className="font-medium text-primary underline-offset-4 hover:underline"
+                >
+                  cadastrar para ver o ritmo →
+                </Link>
+              </span>
             )}
           </div>
           {budget > 0 ? (
@@ -421,7 +434,7 @@ export default async function DinheiroPage({
               />
               {cprQuarentena ? (
                 <p className="text-xs text-muted-foreground">
-                  Volta com {MIN_REUNIOES} reuniões (hoje {kc.meetings}).
+                  Volta com {MIN_REUNIOES} reuniões da campanha de conversão (hoje {kc.meetingsConversao}).
                 </p>
               ) : null}
             </div>
@@ -442,7 +455,7 @@ export default async function DinheiroPage({
                   />
                   <Stat
                     label="Seguidores no período"
-                    value={`+${formatInt(obj.netNewFollowers)}`}
+                    value={formatIntComSinal(obj.netNewFollowers)}
                   />
                   <Stat
                     label="Custo / seguidor (est.)"
@@ -464,12 +477,16 @@ export default async function DinheiroPage({
         </CardContent>
       </Card>
 
-      <ChartCard title="Investimento por dia" description="Pacing diário de gasto.">
+      <ChartCard
+        title="Investimento por dia"
+        description="Um dia por barra. Faixa cinza = dias sem nenhuma linha de anúncio (pausa ou falha de sincronização)."
+      >
         <TimeSeriesChart
           data={series}
-          series={[{ key: "spend", label: "Investimento", color: CHART.series[0] }]}
+          series={[{ key: "spend", label: "Investimento", color: CHART.series[0], kind: "bar" }]}
           yFormat="currency0"
           valueFormat="currency"
+          faixas={trechosSemDado(series).map((t) => ({ ...t, label: "sem dados" }))}
         />
       </ChartCard>
     </div>

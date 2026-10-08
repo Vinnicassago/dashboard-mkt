@@ -87,14 +87,14 @@ export default async function InstagramPage({
               label="Custo por seguidor"
               value={formatCurrencyOrDash(aware.costPerFollower)}
               Icon={Sparkles}
-              hint="North Star"
+              hint={aware.spend > 0 ? "North Star" : "sem verba atribuída à marca"}
               highlight
             />
             <KpiCard
               label="Custo / 1k alcance"
               value={formatCurrencyOrDash(aware.costPerReach)}
               Icon={Radio}
-              hint="alcance da conta"
+              hint={aware.spend > 0 ? "alcance da conta" : "sem verba atribuída à marca"}
             />
             <KpiCard label="Investimento" value={formatCurrency0(aware.spend)} Icon={DollarSign} />
           </>

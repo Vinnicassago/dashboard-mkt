@@ -2,10 +2,12 @@
 
 import {
   Area,
+  Bar,
   CartesianGrid,
   ComposedChart,
   Legend,
   Line,
+  ReferenceArea,
   ReferenceDot,
   ResponsiveContainer,
   Tooltip,
@@ -20,7 +22,8 @@ export interface SeriesDef {
   key: string;
   label: string;
   color?: string;
-  kind?: "area" | "line";
+  /** "bar" para valores diários discretos (gasto): sem área ligando dias distantes. */
+  kind?: "area" | "line" | "bar";
 }
 
 /**
@@ -36,6 +39,7 @@ export function TimeSeriesChart({
   height = 260,
   yFormat = "compact",
   valueFormat,
+  faixas = [],
 }: {
   data: readonly unknown[];
   xKey?: string;
@@ -43,6 +47,8 @@ export function TimeSeriesChart({
   height?: number;
   yFormat?: NumFmt;
   valueFormat?: NumFmt;
+  /** Trechos marcados em cinza (ex.: dias sem dado). `from`/`to` são valores do eixo X. */
+  faixas?: { from: string; to: string; label: string }[];
 }) {
   const showLegend = series.length >= 2;
   const yFn = (v: number) => formatBy(yFormat, v);
@@ -111,13 +117,28 @@ export function TimeSeriesChart({
             formatter={(value) => <span className="text-muted-foreground">{value}</span>}
           />
         ) : null}
+        {faixas.map((f) => (
+          <ReferenceArea
+            key={`${f.from}-${f.to}`}
+            x1={f.from}
+            x2={f.to}
+            fill="var(--muted-foreground)"
+            fillOpacity={0.12}
+            stroke="none"
+            label={{ value: f.label, position: "insideTop", fontSize: 10, fill: CHART.axis }}
+          />
+        ))}
         {series.map((s, i) => {
           const color = s.color ?? CHART.series[i];
+          if (s.kind === "bar") {
+            return <Bar key={s.key} dataKey={s.key} name={s.label} fill={color} radius={[2, 2, 0, 0]} />;
+          }
+          // Linha reta entre pontos: curva suavizada inventa valor entre dois dias.
           if (s.kind === "line") {
             return (
               <Line
                 key={s.key}
-                type="monotone"
+                type="linear"
                 dataKey={s.key}
                 name={s.label}
                 stroke={color}
@@ -130,7 +151,7 @@ export function TimeSeriesChart({
           return (
             <Area
               key={s.key}
-              type="monotone"
+              type="linear"
               dataKey={s.key}
               name={s.label}
               stroke={color}
@@ -143,7 +164,7 @@ export function TimeSeriesChart({
         })}
         {series.map((s, i) => {
           const y = Number(last[s.key]);
-          if (!Number.isFinite(y)) return null;
+          if (!Number.isFinite(y) || s.kind === "bar") return null;
           return (
             <ReferenceDot
               key={`end-${s.key}`}

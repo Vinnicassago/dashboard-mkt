@@ -70,7 +70,7 @@ const POST_COLS = ["id", "brand", "published_at", "type", "caption", "permalink"
 const CREATIVE_COLS = ["ad_id", "brand", "name", "format", "thumbnail_url", "video_plays", "thru_plays", "instagram_media_id", "instagram_permalink"];
 const AD_COLS = ["brand", "date", "ad_id", "campaign", "adset", "objective", "spend", "impressions", "reach", "frequency", "clicks", "leads"];
 const LP_COLS = ["brand", "date", "visits", "clicks", "form_submits"];
-const LEAD_COLS = ["id", "brand", "created_at", "name", "email", "phone", "utm_source", "utm_campaign", "utm_content", "status", "meeting_at", "value", "booked_at", "attended_at", "closed_at", "lost_at", "robo_session_id", "fbc", "fbp", "ga_client_id", "ga_session_id", "deleted_at", "deleted_by", "deleted_reason"];
+const LEAD_COLS = ["id", "brand", "created_at", "name", "email", "phone", "utm_source", "utm_campaign", "utm_content", "status", "meeting_at", "meeting_for", "value", "booked_at", "attended_at", "closed_at", "lost_at", "robo_session_id", "fbc", "fbp", "ga_client_id", "ga_session_id", "deleted_at", "deleted_by", "deleted_reason"];
 const GOAL_COLS = ["brand", "metric", "period", "target", "lower_is_better"];
 const EVENT_COLS = ["id", "lead_id", "brand", "lead_name", "actor", "action", "from_status", "to_status", "payload", "created_at"];
 const AUDIT_COLS = ["id", "at", "actor", "action", "detail"];
@@ -356,6 +356,7 @@ export const postgresBackend: DataBackend = {
     };
 
     if (patch?.meetingAt !== undefined) set("meeting_at", patch.meetingAt);
+    if (patch?.meetingFor !== undefined) set("meeting_for", patch.meetingFor);
     if (patch?.value !== undefined) set("value", patch.value);
     if (patch?.roboSessionId !== undefined) set("robo_session_id", patch.roboSessionId);
     stamp("booked_at", patch?.bookedAt);

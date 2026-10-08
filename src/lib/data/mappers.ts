@@ -266,6 +266,7 @@ export const toLead = (r: Row): Lead => ({
   // entram normalizadas, mesmo que a migração ainda não tenha rodado.
   status: normalizeLeadStatus(s(r.status)),
   meetingAt: r.meeting_at ? iso(r.meeting_at) : undefined,
+  meetingFor: r.meeting_for ? iso(r.meeting_for) : undefined,
   value: r.value == null ? undefined : n(r.value),
   bookedAt: r.booked_at ? iso(r.booked_at) : undefined,
   attendedAt: r.attended_at ? iso(r.attended_at) : undefined,
@@ -293,6 +294,7 @@ export const fromLead = (l: Lead): Row => ({
   utm_content: l.utmContent ?? null,
   status: l.status,
   meeting_at: l.meetingAt ?? null,
+  meeting_for: l.meetingFor ?? null,
   value: l.value ?? null,
   booked_at: l.bookedAt ?? null,
   attended_at: l.attendedAt ?? null,

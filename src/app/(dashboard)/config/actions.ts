@@ -96,7 +96,7 @@ export async function importLeadsCsv(
   }
   try {
     const text = await file.text();
-    const { leads, eventIds, skipped } = parseLeadsCsv(text);
+    const { leads, eventIds, skipped, telefonesIlegiveis } = parseLeadsCsv(text);
     const brand = await activeBrandSlug();
     const actor = await currentActor();
     let novos = 0;
@@ -133,7 +133,11 @@ export async function importLeadsCsv(
     }
     revalidateAll();
     const existentes = leads.length - novos;
-    const extra = skipped > 0 ? ` ${skipped} linha(s) ignorada(s).` : "";
+    const extra =
+      (skipped > 0 ? ` ${skipped} linha(s) ignorada(s).` : "") +
+      (telefonesIlegiveis > 0
+        ? ` ${telefonesIlegiveis} telefone(s) em notação científica (ex.: 5,51E+12) ficaram em branco — o Excel já tinha cortado os dígitos; corrija na planilha e reimporte.`
+        : "");
     const jaHavia =
       existentes > 0
         ? ` ${existentes} já existia(m) e foram mantido(s) como estão — status muda pela Fila ou por Pessoas.`
@@ -310,13 +314,23 @@ export async function addLeadAction(
   const date = String(formData.get("date") ?? "").trim();
   const status = normalizeLeadStatus(String(formData.get("status") ?? ""));
   const utmContent = String(formData.get("utmContent") ?? "").trim() || undefined;
-  const meetingDate = String(formData.get("meetingAt") ?? "").trim();
+  // datetime-local chega sem fuso: é horário de Brasília (sem horário de verão desde 2019).
+  const meetingRaw = String(formData.get("meetingFor") ?? "").trim();
+  const meetingFor = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(meetingRaw)
+    ? new Date(`${meetingRaw}:00-03:00`).toISOString()
+    : undefined;
   const phone = String(formData.get("phone") ?? "").trim() || undefined;
   const email = String(formData.get("email") ?? "").trim() || undefined;
   const valueRaw = Number(formData.get("value"));
   const value = Number.isFinite(valueRaw) && valueRaw > 0 ? valueRaw : undefined;
   if (!name) return { ok: false, message: "Informe o nome do lead." };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { ok: false, message: "Informe a data do lead." };
+  if (status === "agendado" && !meetingFor) {
+    return { ok: false, message: "Lead agendado precisa da data e da hora da reunião." };
+  }
+  if (status === "desistencia") {
+    return { ok: false, message: "Desistência é de quem chegou a agendar: cadastre como Agendado e registre a desistência depois." };
+  }
 
   const leadId = `LEAD-M-${Date.now()}`;
   const brand = await activeBrandSlug();
@@ -330,7 +344,7 @@ export async function addLeadAction(
     utmSource: "manual",
     utmContent,
     status,
-    meetingAt: /^\d{4}-\d{2}-\d{2}$/.test(meetingDate) ? `${meetingDate}T10:00:00` : undefined,
+    meetingFor,
     value,
   });
   await addLeadEvent({

@@ -352,6 +352,7 @@ export const localBackend: DataBackend = {
       if (!lead) return;
       lead.status = status;
       if (patch?.meetingAt !== undefined) lead.meetingAt = patch.meetingAt;
+      if (patch?.meetingFor !== undefined) lead.meetingFor = patch.meetingFor;
       if (patch?.value !== undefined) lead.value = patch.value;
       if (patch?.roboSessionId !== undefined) lead.roboSessionId = patch.roboSessionId;
       // Marcos: gravados uma vez, nunca sobrescritos — é o que impede uma perda

@@ -6,6 +6,7 @@ import { Download, Mail, MessageCircle, RotateCcw, Search, Trash2 } from "lucide
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { LEAD_STATUSES, LEAD_STATUS_META, statusLabel } from "@/lib/lead-status";
 import { deleteLeadAction, restoreLeadAction } from "@/app/(dashboard)/pessoas/actions";
+import { RegistrarStatus, StatusBadge } from "@/components/tables/lead-status";
 import type { LeadStatus } from "@/lib/types";
 import { formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -18,7 +19,10 @@ export interface LeadDirectoryRow {
   phone?: string;
   creativeName: string;
   status: LeadStatus;
-  meetingAt?: string;
+  /** Já teve reunião marcada (`everBooked`) — libera "Desistência". */
+  jaAgendou: boolean;
+  /** Data DA reunião. Lead agendado antes de out/2026 não tem (a coluna diz isso). */
+  meetingFor?: string;
 }
 
 /** Digits only, with Brazilian country code, for a wa.me link. */
@@ -99,7 +103,7 @@ function DeleteLeadButton({ id, name }: { id: string; name: string }) {
   );
 }
 
-function buildColumns(canDelete: boolean): Column<LeadDirectoryRow>[] {
+function buildColumns(canEdit: boolean, canDelete: boolean): Column<LeadDirectoryRow>[] {
   return [
     {
       key: "name",
@@ -107,6 +111,18 @@ function buildColumns(canDelete: boolean): Column<LeadDirectoryRow>[] {
       sortable: true,
       sortValue: (r) => r.name,
       render: (r) => <span className="font-medium">{r.name}</span>,
+    },
+    {
+      key: "status",
+      header: "Status",
+      sortable: true,
+      sortValue: (r) => LEAD_STATUS_META[r.status].order,
+      render: (r) =>
+        canEdit ? (
+          <RegistrarStatus id={r.id} name={r.name} status={r.status} jaAgendou={r.jaAgendou} />
+        ) : (
+          <StatusBadge status={r.status} />
+        ),
     },
     {
       key: "contact",
@@ -128,12 +144,21 @@ function buildColumns(canDelete: boolean): Column<LeadDirectoryRow>[] {
       render: (r) => <span className="text-muted-foreground">{formatDateTime(r.createdAt)}</span>,
     },
     {
-      key: "meetingAt",
+      key: "meetingFor",
       header: "Reunião",
       align: "right",
       sortable: true,
-      sortValue: (r) => r.meetingAt ?? "",
-      render: (r) => (r.meetingAt ? formatDateTime(r.meetingAt) : "—"),
+      sortValue: (r) => r.meetingFor ?? "",
+      render: (r) =>
+        r.meetingFor ? (
+          formatDateTime(r.meetingFor)
+        ) : r.jaAgendou ? (
+          <span className="text-muted-foreground" title="Agendado antes de a data da reunião ser registrada">
+            data não registrada
+          </span>
+        ) : (
+          "—"
+        ),
     },
     ...(canDelete
       ? [
@@ -152,20 +177,27 @@ function csvCell(v: string): string {
   return /[;"\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
 }
 
+/**
+ * Telefone como TEXTO para o Excel: sem isso ele abre 5511999990000 como número e
+ * grava "5,51E+12" — foi assim que telefones viraram notação científica. O
+ * importador de leads desfaz o `="…"`.
+ */
+function csvTelefone(v?: string): string {
+  return v ? `="${v.replace(/"/g, "")}"` : "";
+}
+
 function buildCsv(rows: LeadDirectoryRow[]): string {
   const header = ["Nome", "E-mail", "Telefone", "Status", "Origem", "Entrada", "Reunião"];
   const lines = rows.map((r) =>
     [
-      r.name,
-      r.email ?? "",
-      r.phone ?? "",
-      statusLabel(r.status),
-      r.creativeName,
-      formatDateTime(r.createdAt),
-      r.meetingAt ? formatDateTime(r.meetingAt) : "",
-    ]
-      .map((c) => csvCell(String(c)))
-      .join(";"),
+      csvCell(r.name),
+      csvCell(r.email ?? ""),
+      csvTelefone(r.phone),
+      csvCell(statusLabel(r.status)),
+      csvCell(r.creativeName),
+      csvCell(formatDateTime(r.createdAt)),
+      csvCell(r.meetingFor ? formatDateTime(r.meetingFor) : ""),
+    ].join(";"),
   );
   // BOM + CRLF so Excel pt-BR opens accents and columns correctly
   return "﻿" + [header.join(";"), ...lines].join("\r\n");
@@ -193,9 +225,12 @@ const FILTERS: { key: StatusFilter; label: string }[] = [
 
 export function LeadsDirectory({
   rows,
+  canEdit = false,
   canDelete = false,
 }: {
   rows: LeadDirectoryRow[];
+  /** Mudar status (leads:write — comercial e administrador). */
+  canEdit?: boolean;
   /** Excluir é só do administrador (e reversível — ver `DeletedLeads`). */
   canDelete?: boolean;
 }) {
@@ -219,6 +254,17 @@ export function LeadsDirectory({
       return inText || inPhone;
     });
   }, [rows, query, status]);
+
+  // Quantos leads em cada aba — as contagens somam o total (exceto "Perdidos",
+  // que agrupa os quatro motivos).
+  const contagem = useMemo(() => {
+    const c: Record<string, number> = { todos: rows.length, perdidos: 0 };
+    for (const r of rows) {
+      c[r.status] = (c[r.status] ?? 0) + 1;
+      if (LEAD_STATUS_META[r.status].lost) c.perdidos++;
+    }
+    return c;
+  }, [rows]);
 
   function exportCsv() {
     const blob = new Blob([buildCsv(filtered)], { type: "text/csv;charset=utf-8" });
@@ -268,7 +314,7 @@ export function LeadsDirectory({
                   : "border text-muted-foreground hover:text-foreground",
               )}
             >
-              {f.label}
+              {f.label} <span className="tabular-nums opacity-70">({contagem[f.key] ?? 0})</span>
             </button>
           </span>
         ))}
@@ -280,7 +326,7 @@ export function LeadsDirectory({
         </p>
       ) : (
         <DataTable
-          columns={buildColumns(canDelete)}
+          columns={buildColumns(canEdit, canDelete)}
           rows={filtered}
           initialSortKey="createdAt"
           initialSortDir="desc"

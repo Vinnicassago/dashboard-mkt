@@ -20,7 +20,7 @@ import { FILA_ETAPAS } from "@/lib/fila";
 import { FarolCard } from "@/components/kpi/farol-card";
 import { Cascata } from "@/components/charts/cascata";
 import { resolveMetaBrands } from "@/lib/meta/config";
-import { assessTrust } from "@/lib/trust";
+import { assessTrust, aplicarConfianca } from "@/lib/trust";
 import { TrustBand } from "@/components/kpi/trust-band";
 import {
   awarenessKpis,
@@ -49,6 +49,7 @@ import {
   formatCurrency0,
   formatCurrencyOrDash,
   formatInt,
+  formatIntComSinal,
 } from "@/lib/format";
 import { CHART } from "@/components/charts/colors";
 
@@ -115,6 +116,8 @@ export default async function OverviewPage({
     brandRules: await resolveMetaBrands(),
     kpis: {
       meetings: k.meetings,
+      meetingsConversao: k.meetingsConversao,
+      leadsConversao: k.leadsConversao,
       leads: k.leads,
       spendConversao: k.spendConversao,
       spendTotal: k.spend,
@@ -171,7 +174,9 @@ export default async function OverviewPage({
     metaCpr: data.goals.find((g) => g.metric === "cpr")?.target,
     parados,
     midiaParada,
-    fontesOk: fontesCascata.falha == null,
+    // Robô DESLIGADO (sem credencial) é ausência, não falha: a cascata cai no
+    // funil do painel e o farol segue. Só a leitura que QUEBROU vira "não sei".
+    fontesOk: fontesCascata.falha?.tipo !== "erro",
   });
 
   // A faixa "antes de decidir" fica só com o que desqualifica um número.
@@ -229,7 +234,12 @@ export default async function OverviewPage({
               <p className="tabular text-xl font-semibold">
                 {formatInt(k.leads)}
                 <span className="ml-2 text-sm font-normal text-muted-foreground">
-                  {k.leads > 0 ? `a ${temPiso ? "≥ " : ""}${formatCurrency(k.cpl)}` : ""}
+                  {/* O CPL divide pelos leads da campanha de conversão — sem dizer
+                      isso, "113 leads a R$ 29,70" parecia uma conta que não fecha. */}
+                  {k.leadsConversao > 0
+                    ? `a ${temPiso ? "≥ " : ""}${formatCurrency(k.cpl)}` +
+                      (k.leadsConversao !== k.leads ? ` (sobre ${formatInt(k.leadsConversao)} de conversão)` : "")
+                    : ""}
                 </span>
               </p>
             </div>
@@ -238,9 +248,15 @@ export default async function OverviewPage({
               <p className="tabular text-xl font-semibold">
                 {formatInt(k.meetings)}
                 <span className="ml-2 text-sm font-normal text-muted-foreground">
-                  {trust.porMetrica.cpr
+                  {/* Mesma régua do farol: só a QUARENTENA some com o número; teto e
+                      piso o mostram com ≤ / ≥ e dizem por quê. */}
+                  {trust.porMetrica.cpr?.nivel === "quarentena"
                     ? trust.porMetrica.cpr.motivo.toLowerCase()
-                    : `a ${formatCurrency(k.cpr)}`}
+                    : `a ${aplicarConfianca(formatCurrency(k.cpr), trust.porMetrica.cpr)}` +
+                      (k.meetingsConversao !== k.meetings
+                        ? ` (sobre ${formatInt(k.meetingsConversao)} de conversão)`
+                        : "") +
+                      (trust.porMetrica.cpr ? ` — ${trust.porMetrica.cpr.motivo.toLowerCase()}` : "")}
                 </span>
               </p>
             </div>
@@ -294,7 +310,9 @@ export default async function OverviewPage({
 
       <p className="flex flex-wrap gap-x-5 gap-y-1 border-t pt-4 text-xs text-muted-foreground">
         <Link href={comPeriodo("/conteudo", rangeKey)} className="hover:text-foreground">
-          Orgânico: {formatCompact(ig.reach)} de alcance, +{formatInt(ig.followersEnd - ig.followersStart)} seguidores →
+          {/* O alcance da conta INCLUI anúncios (Meta) — não é orgânico (B11). */}
+          Instagram: {formatCompact(ig.reach)} de alcance da conta (pago + orgânico),{" "}
+          {formatIntComSinal(ig.followersEnd - ig.followersStart)} seguidores →
         </Link>
         <Link href={comPeriodo("/dinheiro", rangeKey)} className="hover:text-foreground">
           Verba por conjunto e por criativo →
@@ -372,14 +390,14 @@ function AwarenessOverview({
           label="Custo por seguidor"
           value={formatCurrencyOrDash(a.costPerFollower)}
           Icon={Sparkles}
-          hint="North Star"
+          hint={a.spend > 0 ? "North Star" : "sem verba atribuída à marca"}
           highlight
         />
         <KpiCard
           label="Custo / 1k alcance"
           value={formatCurrencyOrDash(a.costPerReach)}
           Icon={Radio}
-          hint="alcance da conta"
+          hint={a.spend > 0 ? "alcance da conta" : "sem verba atribuída à marca"}
         />
       </div>
 

@@ -1,3 +1,4 @@
+import { mensagemHumana } from "@/lib/erros";
 import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { runSync, type SyncSource } from "@/lib/meta/sync";
@@ -47,8 +48,9 @@ async function handle(request: Request) {
     revalidatePath("/", "layout");
     return NextResponse.json(report);
   } catch (e) {
+    console.error("[api/sync]", e);
     return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Falha na sincronização." },
+      { error: mensagemHumana("servidor", e) },
       { status: 500 },
     );
   }

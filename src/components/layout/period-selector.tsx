@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { CalendarRange } from "lucide-react";
-import { RANGE_PRESETS, buildCustomKey, parseCustomRange, rangeLabel } from "@/lib/range";
+import { RANGE_PRESETS, buildCustomKey, hojeEmBrasilia, parseCustomRange, rangeLabel } from "@/lib/range";
 import { cn } from "@/lib/utils";
 
 export function PeriodSelector() {
@@ -14,6 +14,8 @@ export function PeriodSelector() {
   const custom = parseCustomRange(current);
 
   const [aberto, setAberto] = useState(false);
+  // A página inteira é recalculada no servidor; sem isto o clique parecia não ter efeito.
+  const [carregando, startTransition] = useTransition();
   const [de, setDe] = useState(custom?.from ?? "");
   const [ate, setAte] = useState(custom?.to ?? "");
   const caixa = useRef<HTMLDivElement>(null);
@@ -40,7 +42,7 @@ export function PeriodSelector() {
     if (!key || key === "all") next.delete("range");
     else next.set("range", key);
     const qs = next.toString();
-    router.push(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    startTransition(() => router.push(qs ? `${pathname}?${qs}` : pathname, { scroll: false }));
   }
 
   function aplicar() {
@@ -49,11 +51,16 @@ export function PeriodSelector() {
     setAberto(false);
   }
 
-  const hoje = new Date().toISOString().slice(0, 10);
+  const hoje = hojeEmBrasilia();
 
   return (
-    <div className="relative inline-flex" ref={caixa}>
-      <div className="inline-flex h-9 items-center gap-0.5 rounded-lg border bg-card p-0.5">
+    <div className="relative inline-flex" ref={caixa} aria-busy={carregando}>
+      <div
+        className={cn(
+          "inline-flex h-9 items-center gap-0.5 rounded-lg border bg-card p-0.5 transition-opacity",
+          carregando && "pointer-events-none animate-pulse opacity-60",
+        )}
+      >
         {RANGE_PRESETS.map((preset) => {
           const active = current === preset.key;
           return (
@@ -61,6 +68,7 @@ export function PeriodSelector() {
               key={preset.key}
               type="button"
               aria-pressed={active}
+              disabled={carregando}
               onClick={() => irPara(preset.key)}
               className={cn(
                 "flex h-full items-center rounded-md px-2 text-xs font-medium transition-colors sm:px-2.5",

@@ -421,8 +421,22 @@ export interface LossRow {
 }
 
 /**
- * Quebra das perdas por motivo — a leitura que separa problema de MÍDIA de
- * problema de PITCH. Muita perda por `qualidade` (contato inválido, sem
+ * Perda SEM reunião: encerrado e nunca agendou. Quem teve reunião e depois
+ * "não respondeu" não é perda de mídia — o motivo registrado descreve o fim da
+ * conversa, não por que ela não começou (B20). Lê o FATO (`everBooked`).
+ */
+export function isLostWithoutMeeting(l: Lead): boolean {
+  return isLost(l) && !everBooked(l);
+}
+
+/** Encerrados DEPOIS de ter reunião marcada — ficam fora da quebra por motivo. */
+export function countLostAfterMeeting(leads: Lead[]): number {
+  return leads.filter((l) => isLost(l) && everBooked(l)).length;
+}
+
+/**
+ * Quebra das perdas SEM reunião por motivo — a leitura que separa problema de
+ * MÍDIA de problema de PITCH. Muita perda por `qualidade` (contato inválido, sem
  * resposta) acusa segmentação/formulário; muita por `decisao` (não tem
  * interesse, desistência) acusa a oferta. Retorna sempre os quatro motivos,
  * inclusive os zerados, para a tabela não mudar de tamanho entre períodos.
@@ -430,7 +444,7 @@ export interface LossRow {
 export function lossBreakdown(leads: Lead[]): LossRow[] {
   const counts = new Map<LeadStatus, number>();
   for (const l of leads) {
-    if (isLost(l)) counts.set(l.status, (counts.get(l.status) ?? 0) + 1);
+    if (isLostWithoutMeeting(l)) counts.set(l.status, (counts.get(l.status) ?? 0) + 1);
   }
   const total = [...counts.values()].reduce((s, n) => s + n, 0);
   return LOST_STATUSES.map((status) => {
@@ -445,10 +459,11 @@ export function lossBreakdown(leads: Lead[]): LossRow[] {
   }).sort((a, b) => b.count - a.count);
 }
 
-/** Perdas somadas por origem do problema — mídia (`qualidade`) vs oferta (`decisao`). */
+/** Perdas SEM reunião somadas por origem — mídia (`qualidade`) vs oferta (`decisao`). */
 export function lossByKind(leads: Lead[]): Record<LossKind, number> {
   const out: Record<LossKind, number> = { qualidade: 0, decisao: 0 };
   for (const l of leads) {
+    if (!isLostWithoutMeeting(l)) continue;
     const meta = LEAD_STATUS_META[l.status];
     if (meta.lost && meta.lossKind) out[meta.lossKind] += 1;
   }
@@ -500,7 +515,11 @@ export interface OverviewKpis {
   leads: number;
   cpl: number; // FIEL: gasto de conversão ÷ leads de conversão
   cplBlended: number; // gasto total ÷ leads (legado, para referência)
+  /** Denominador do CPL: leads atribuídos à conversão (não `leads`, que inclui orgânicos). */
+  leadsConversao: number;
   meetings: number;
+  /** Denominador do CPR: reuniões de leads de conversão. A quarentena olha ESTE número. */
+  meetingsConversao: number;
   attended: number;
   cpr: number; // FIEL (North Star): gasto de conversão ÷ reuniões de conversão
   cprBlended: number; // gasto total ÷ reuniões (legado, para referência)
@@ -537,7 +556,9 @@ export function overviewKpis(data: DashboardData, range?: DateRange): OverviewKp
     leads: leads.length,
     cpl: obj.conversao.cpl,
     cplBlended: div(k.spend, leads.length),
+    leadsConversao: obj.conversao.leads,
     meetings,
+    meetingsConversao: obj.conversao.meetings,
     attended,
     cpr: obj.conversao.cpr,
     cprBlended: cpr(k.spend, meetings),
@@ -567,24 +588,57 @@ export interface DailyPoint {
   clicks: number;
   leads: number;
   cpl: number;
+  /** Dia sem nenhuma linha de anúncio (pausa ou sync que falhou) — não é "gastou 0". */
+  semDado: boolean;
 }
 
+/**
+ * Série diária CONTÍNUA: todo dia do período aparece, com ou sem dado. Antes só
+ * os dias com linha entravam, e o eixo do gráfico pulava de 24/08 para 03/09 —
+ * semanas sem gasto pareciam continuidade (B12).
+ */
 export function dailySeries(data: DashboardData, range?: DateRange): DailyPoint[] {
   const ads = filterAds(data.adDaily, range);
   const byDate = new Map<string, DailyPoint>();
   for (const r of ads) {
     const p =
       byDate.get(r.date) ??
-      { date: r.date, spend: 0, impressions: 0, clicks: 0, leads: 0, cpl: 0 };
+      { date: r.date, spend: 0, impressions: 0, clicks: 0, leads: 0, cpl: 0, semDado: false };
     p.spend += r.spend;
     p.impressions += r.impressions;
     p.clicks += r.clicks;
     p.leads += r.leads;
     byDate.set(r.date, p);
   }
-  return [...byDate.values()]
-    .sort((a, b) => a.date.localeCompare(b.date))
-    .map((p) => ({ ...p, cpl: div(p.spend, p.leads) }));
+  const datas = [...byDate.keys()].sort();
+  const from = range?.from ?? datas[0];
+  const to = range?.to ?? datas.at(-1);
+  if (!from || !to) return [];
+  const out: DailyPoint[] = [];
+  for (let d = new Date(from + "T00:00:00Z"); d.toISOString().slice(0, 10) <= to; d.setUTCDate(d.getUTCDate() + 1)) {
+    const date = d.toISOString().slice(0, 10);
+    const p = byDate.get(date);
+    out.push(
+      p
+        ? { ...p, cpl: div(p.spend, p.leads) }
+        : { date, spend: 0, impressions: 0, clicks: 0, leads: 0, cpl: 0, semDado: true },
+    );
+  }
+  return out;
+}
+
+/** Trechos seguidos de dias sem dado, para o gráfico marcar (não esconder). */
+export function trechosSemDado(serie: { date: string; semDado: boolean }[]): { from: string; to: string }[] {
+  const out: { from: string; to: string }[] = [];
+  for (const p of serie) {
+    if (!p.semDado) continue;
+    const ultimo = out.at(-1);
+    const anterior = ultimo ? new Date(ultimo.to + "T00:00:00Z") : null;
+    if (anterior) anterior.setUTCDate(anterior.getUTCDate() + 1);
+    if (ultimo && anterior && anterior.toISOString().slice(0, 10) === p.date) ultimo.to = p.date;
+    else out.push({ from: p.date, to: p.date });
+  }
+  return out;
 }
 
 export interface FollowerPoint {
@@ -969,6 +1023,8 @@ export interface Cohort {
   revenue: number;
   leadToMeeting: number;
   immature: boolean; // coorte recente ainda maturando (não comparar direto)
+  /** Semana sem nenhuma linha de anúncio: campanha pausada (ou sync falhou). */
+  semVeiculacao: boolean;
 }
 
 /** Segunda-feira (UTC) da semana de uma data ISO. */
@@ -997,23 +1053,39 @@ export function cohortWeekly(
     byWeek.set(w, list);
   }
   const nowMs = new Date(nowIso).getTime();
-  return [...byWeek.entries()]
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([week, ls]) => {
-      const meetings = countMeetings(ls);
-      const startMs = new Date(week + "T00:00:00Z").getTime();
-      return {
-        week,
-        label: `${week.slice(8, 10)}/${week.slice(5, 7)}`,
-        leads: ls.length,
-        meetings,
-        attended: countAttended(ls),
-        clients: countClients(ls),
-        revenue: sumRevenue(ls),
-        leadToMeeting: div(meetings, ls.length),
-        immature: nowMs - startMs < 7 * 86_400_000,
-      };
-    });
+
+  // Toda semana entre a primeira coorte e o fim do período (ou hoje) — a semana
+  // sem lead não pode sumir: buraco na tabela parece continuidade (B21).
+  const semanasComAnuncio = new Set(filterAds(data.adDaily, range).map((r) => weekStart(r.date)));
+  const primeiras = [...byWeek.keys()].sort();
+  if (primeiras.length === 0) return [];
+  const ultima = weekStart(range?.to ?? nowIso);
+  const semanas: string[] = [];
+  for (
+    let w = new Date(primeiras[0] + "T00:00:00Z");
+    w.toISOString().slice(0, 10) <= ultima;
+    w.setUTCDate(w.getUTCDate() + 7)
+  ) {
+    semanas.push(w.toISOString().slice(0, 10));
+  }
+
+  return semanas.map((week) => {
+    const ls = byWeek.get(week) ?? [];
+    const meetings = countMeetings(ls);
+    const startMs = new Date(week + "T00:00:00Z").getTime();
+    return {
+      week,
+      label: `${week.slice(8, 10)}/${week.slice(5, 7)}`,
+      leads: ls.length,
+      meetings,
+      attended: countAttended(ls),
+      clients: countClients(ls),
+      revenue: sumRevenue(ls),
+      leadToMeeting: div(meetings, ls.length),
+      immature: nowMs - startMs < 7 * 86_400_000,
+      semVeiculacao: !semanasComAnuncio.has(week),
+    };
+  });
 }
 
 // ---- posts ----------------------------------------------------------
@@ -1568,8 +1640,10 @@ export function igEngagementSeries(rows: IgAccountDaily[], range?: DateRange): I
  * marca awareness é para crescimento, casamos o gasto total do período com o
  * ganho líquido de seguidores da própria conta.
  *
- * `costPerFollower`/`costPerReach` são `null` (não 0) quando o denominador é 0 —
- * para a UI exibir "—" em vez de "R$ 0,00" (que se lê como "de graça").
+ * `costPerFollower`/`costPerReach` são `null` (não 0) quando o denominador é 0
+ * OU quando não há gasto atribuído à marca — para a UI exibir "—" em vez de
+ * "R$ 0,00" (que se lê como "de graça"). Sem verba, a regra de marca não pegou
+ * nenhuma campanha: o custo é desconhecido, não zero (B16).
  * Pressupõe `data` JÁ recortado por marca (via getData(brand)).
  */
 export interface AwarenessKpis {
@@ -1598,9 +1672,9 @@ export function awarenessKpis(data: DashboardData, range?: DateRange): Awareness
     spend,
     followersEnd: t.followersEnd,
     netNewFollowers: t.netNew,
-    costPerFollower: t.netNew > 0 ? spend / t.netNew : null,
+    costPerFollower: spend > 0 && t.netNew > 0 ? spend / t.netNew : null,
     reach: t.reach,
-    costPerReach: t.reach > 0 ? (spend / t.reach) * 1000 : null,
+    costPerReach: spend > 0 && t.reach > 0 ? (spend / t.reach) * 1000 : null,
     views: t.views,
     interactions: t.interactions,
     engagementRate: t.engagementRate,

@@ -435,8 +435,8 @@ export function LeadForm({ creatives }: { creatives: { adId: string; name: strin
             </optgroup>
           </select>
         </Field>
-        <Field label="Data da reunião (opcional)">
-          <input type="date" name="meetingAt" className={inputCls} />
+        <Field label="Data e hora da reunião (obrigatória se agendado)">
+          <input type="datetime-local" name="meetingFor" className={inputCls} />
         </Field>
         <Field label="Valor da carta (R$, se cliente)">
           <input type="number" name="value" min="0" step="0.01" placeholder="0,00" className={inputCls} />

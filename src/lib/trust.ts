@@ -18,6 +18,7 @@
 
 import type { DashboardData } from "./types";
 import type { DateRange } from "./metrics";
+import { hojeEmBrasilia } from "./range";
 
 // ---------------------------------------------------------------- vocabulário
 
@@ -68,12 +69,26 @@ export interface TrustInput {
   range?: DateRange;
   /** Regras de marca já resolvidas (env + override da UI). */
   brandRules: { slug: string; campaignMatch: string[] }[];
-  kpis: { meetings: number; leads: number; spendConversao: number; spendTotal: number };
+  kpis: {
+    meetings: number;
+    leads: number;
+    spendConversao: number;
+    spendTotal: number;
+    /**
+     * Os denominadores de verdade do CPR e do CPL (só conversão). Sem eles a
+     * quarentena olhava o total: com 3 reuniões e 1 paga, o CPR = gasto ÷ 1
+     * aparecia como se fosse medido (S11). Ausente = usa `meetings`/`leads`.
+     */
+    meetingsConversao?: number;
+    leadsConversao?: number;
+  };
   /**
    * Reuniões que o robô/comercial registrou no mesmo período. `null` = sem
    * leitura (robô desligado ou falhou) — o que NÃO é o mesmo que zero.
    */
   roboReunioes?: number | null;
+  /** "Hoje" em Brasília (AAAA-MM-DD). Ausente = o relógio agora. */
+  hoje?: string;
 }
 
 export interface TrustReport {
@@ -86,14 +101,38 @@ const SEVERIDADE: Record<NivelConfianca, number> = { quarentena: 3, teto: 2, pis
 
 // ---------------------------------------------------------------- checagens
 
-/** Dias do intervalo sem nenhuma linha de anúncio (o buraco que vira "piso"). */
-function diasSemDado(data: DashboardData, range?: DateRange): { faltando: number; total: number } {
+/**
+ * Linhas de anúncio do PERÍODO em análise. Os alertas de marca comparam o gasto
+ * de outra marca com o investimento do período — somar o histórico inteiro no
+ * numerador dava "359% do investimento" em 7 dias (B2).
+ */
+function linhasDoPeriodo(input: TrustInput) {
+  const { range } = input;
+  if (!range) return input.data.adDaily;
+  return input.data.adDaily.filter((r) => r.date >= range.from && r.date <= range.to);
+}
+
+/**
+ * Dias do intervalo sem nenhuma linha de anúncio (o buraco que vira "piso").
+ * HOJE não conta: o dia ainda está acontecendo e o sync roda de manhã — com os
+ * presets ancorados em hoje, ele seria um "buraco" em todo período.
+ */
+function diasSemDado(
+  data: DashboardData,
+  range: DateRange | undefined,
+  hoje: string,
+): { faltando: number; total: number } {
   const dates = new Set(data.adDaily.map((r) => r.date));
   let from: string;
   let to: string;
   if (range) {
     from = range.from;
     to = range.to;
+    if (to >= hoje) {
+      const ontem = new Date(hoje + "T00:00:00Z");
+      ontem.setUTCDate(ontem.getUTCDate() - 1);
+      to = ontem.toISOString().slice(0, 10);
+    }
   } else {
     const all = [...dates].sort();
     if (all.length < 2) return { faltando: 0, total: all.length };
@@ -138,7 +177,7 @@ function gastoDeOutraMarca(input: TrustInput): {
 
   const casados = new Set<string>();
   let valor = 0;
-  for (const row of input.data.adDaily) {
+  for (const row of linhasDoPeriodo(input)) {
     const nome = (row.campaign ?? "").toLowerCase();
     const hit = outros.find((t) => nome.includes(t));
     if (hit) {
@@ -169,7 +208,7 @@ function prefixosOrfaos(input: TrustInput): { prefixo: string; valor: number }[]
     .filter(Boolean);
 
   const porPrefixo = new Map<string, number>();
-  for (const row of input.data.adDaily) {
+  for (const row of linhasDoPeriodo(input)) {
     const nome = row.campaign ?? "";
     const m = /^\s*\[([^\]]{1,12})\]/.exec(nome);
     if (!m) continue;
@@ -198,6 +237,8 @@ function prefixosOrfaos(input: TrustInput): { prefixo: string; valor: number }[]
 export function assessTrust(input: TrustInput): TrustReport {
   const { data, kpis } = input;
   const travas: Trava[] = [];
+  const reunioesCpr = kpis.meetingsConversao ?? kpis.meetings;
+  const leadsCpl = kpis.leadsConversao ?? kpis.leads;
 
   // 1. Fontes divergem sobre o mesmo fato. É a trava mais grave que existe:
   //    dois sistemas afirmando coisas incompatíveis sobre a MESMA reunião.
@@ -214,11 +255,14 @@ export function assessTrust(input: TrustInput): TrustReport {
 
   // 2. Sem reunião no período, CPR não é R$ 0,00 — é ausência de denominador.
   //    Esta é a trava que tira o "custo excelente" que nunca existiu da tela.
-  if (kpis.meetings === 0 && kpis.spendConversao > 0) {
+  if (reunioesCpr === 0 && kpis.spendConversao > 0) {
     travas.push({
       id: "sem-reuniao",
       nivel: "quarentena",
-      titulo: "Nenhuma reunião registrada no período",
+      titulo:
+        kpis.meetings > 0
+          ? "Nenhuma reunião veio da campanha de conversão no período"
+          : "Nenhuma reunião registrada no período",
       detalhe: `Houve R$ ${Math.round(kpis.spendConversao)} de investimento em conversão e nenhuma reunião marcada. O custo por reunião fica sem denominador: "R$ 0,00" seria lido como custo baixo, quando é ausência de resultado.`,
       afeta: ["cpr"],
       cta: { label: "Ver a jornada", href: "/jornada" },
@@ -232,11 +276,11 @@ export function assessTrust(input: TrustInput): TrustReport {
    * uma taxa" no degrau; sem esta trava o KPI do topo exibia o mesmo valor com
    * cara de medição estável.
    */
-  if (kpis.meetings > 0 && kpis.meetings < MIN_REUNIOES) {
+  if (reunioesCpr > 0 && reunioesCpr < MIN_REUNIOES) {
     travas.push({
       id: "cpr-amostra",
       nivel: "quarentena",
-      titulo: `Só ${kpis.meetings} ${kpis.meetings === 1 ? "reunião" : "reuniões"} no período`,
+      titulo: `Só ${reunioesCpr} ${reunioesCpr === 1 ? "reunião" : "reuniões"} de campanha de conversão no período`,
       detalhe: `Com menos de ${MIN_REUNIOES} reuniões, o custo por reunião oscila demais para orientar verba — a próxima reunião muda o número pela metade. Ele volta a ser exibido quando houver amostra.`,
       afeta: ["cpr"],
       cta: { label: "Ver a fila de contato", href: "/fila" },
@@ -244,7 +288,7 @@ export function assessTrust(input: TrustInput): TrustReport {
   }
 
   // 2b. Mesmo raciocínio um degrau acima: sem lead, CPL não é R$ 0,00.
-  if (kpis.leads === 0 && kpis.spendConversao > 0) {
+  if (leadsCpl === 0 && kpis.spendConversao > 0) {
     travas.push({
       id: "sem-lead",
       nivel: "quarentena",
@@ -341,7 +385,7 @@ export function assessTrust(input: TrustInput): TrustReport {
   }
 
   // 4. Buraco na série: o gasto real é maior, então CPL/CPR reais são maiores.
-  const { faltando, total } = diasSemDado(data, input.range);
+  const { faltando, total } = diasSemDado(data, input.range, input.hoje ?? hojeEmBrasilia());
   if (total > 0 && faltando / total > 0.1) {
     travas.push({
       id: "cobertura-de-dias",

@@ -1,12 +1,14 @@
 "use server";
 
+import { mensagemHumana } from "@/lib/erros";
 import { revalidatePath } from "next/cache";
 import { updateComercial, type ComercialPatch } from "@/lib/robo/client";
-import { changeLeadStatus } from "@/app/(dashboard)/pessoas/actions";
+import { aplicarStatus } from "@/lib/leads/mudar-status";
 import { getData, setLeadStatus } from "@/lib/data/store";
 import { mesmoTelefone } from "@/lib/phone";
 import { can } from "@/lib/auth/guard";
-import { isBookedStatus, isLostStatus, statusRank } from "@/lib/lead-status";
+import { isLostStatus, statusRank } from "@/lib/lead-status";
+import { everBooked } from "@/lib/metrics";
 import type { Lead, LeadStatus } from "@/lib/types";
 
 export interface ComercialResult {
@@ -65,7 +67,7 @@ async function acharLead(telefone: string | null, sessionId?: string): Promise<L
 function statusDaDecisao(
   campo: CampoComercial,
   valor: string,
-  atual: LeadStatus,
+  jaAgendou: boolean,
 ): LeadStatus | null {
   if (valor === "sim") {
     if (campo === "reuniao_marcada") return "agendado";
@@ -73,7 +75,7 @@ function statusDaDecisao(
     if (campo === "negocio_fechado") return "cliente";
   }
   if (valor === "nao" && campo === "negocio_fechado") {
-    return isBookedStatus(atual) ? "desistencia" : "sem_interesse";
+    return jaAgendou ? "desistencia" : "sem_interesse";
   }
   return null;
 }
@@ -109,7 +111,8 @@ export async function salvarComercial(
   try {
     await updateComercial(sessionId, patch);
   } catch (e) {
-    return { ok: false, message: e instanceof Error ? e.message : "Falha ao salvar." };
+    console.error("[comercial] falha ao gravar no banco do robô:", e);
+    return { ok: false, message: mensagemHumana("robô", e) };
   }
 
   // Reunião e venda alimentam o funil, as metas e o aprendizado da campanha.
@@ -135,7 +138,7 @@ export async function salvarComercial(
     await setLeadStatus(lead.id, lead.status, { roboSessionId: sessionId });
   }
 
-  const novoStatus = statusDaDecisao(campo, valor, lead.status);
+  const novoStatus = statusDaDecisao(campo, valor, everBooked(lead));
   if (!novoStatus) {
     revalidatePath("/pessoas");
     revalidatePath("/fila");
@@ -153,7 +156,8 @@ export async function salvarComercial(
     return { ok: true, message: "Salvo." };
   }
 
-  const r = await changeLeadStatus(lead.id, novoStatus, valorNegocio);
+  // Regras do robô (acima), não as da tela: o robô não sabe a data da reunião.
+  const r = await aplicarStatus(lead, novoStatus, { value: valorNegocio });
   revalidatePath("/pessoas");
   revalidatePath("/fila");
   return { ok: true, message: r.message };

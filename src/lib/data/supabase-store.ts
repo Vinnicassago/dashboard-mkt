@@ -287,6 +287,7 @@ export const supabaseBackend: DataBackend = {
   async setLeadStatus(id: string, status: LeadStatus, patch?: LeadStatusPatch) {
     const row: Row = { status };
     if (patch?.meetingAt !== undefined) row.meeting_at = patch.meetingAt;
+    if (patch?.meetingFor !== undefined) row.meeting_for = patch.meetingFor;
     if (patch?.value !== undefined) row.value = patch.value;
     if (patch?.roboSessionId !== undefined) row.robo_session_id = patch.roboSessionId;
     if (patch?.lostAt !== undefined) row.lost_at = patch.lostAt;

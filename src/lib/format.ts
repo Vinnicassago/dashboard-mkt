@@ -44,6 +44,13 @@ export function formatInt(n: number | null | undefined): string {
 }
 
 /** 12,3 mil */
+/** Inteiro com sinal: "+12", "−5", "0" — nunca "+-5" (B10). */
+export function formatIntComSinal(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  if (n === 0) return "0";
+  return `${n > 0 ? "+" : "−"}${formatInt(Math.abs(n))}`;
+}
+
 export function formatCompact(n: number | null | undefined): string {
   return compact.format(n ?? 0);
 }
@@ -131,6 +138,30 @@ export function formatDuration(seconds: number | null | undefined): string {
   const m = Math.floor(total / 60);
   const rest = total % 60;
   return rest > 0 ? `${m}m ${rest}s` : `${m}m`;
+}
+
+/**
+ * Espera / tempo decorrido, em horas, na língua de quem vai ligar: "35 min",
+ * "5 h 20 min", "1 d 5 h", "32 d". Fonte ÚNICA (Fila, Pessoas, Jornada).
+ *
+ * Arredonda o TOTAL antes de fatiar — senão 31 d 23 h 41 min vira "31 d 24 h"
+ * (era o bug da Fila). Abaixo de um dia mostra minutos; a partir de um dia,
+ * dias e horas inteiras.
+ */
+export function formatarEspera(horas: number | null | undefined): string {
+  if (horas == null || !Number.isFinite(horas)) return "—";
+  const h = Math.max(0, horas);
+  const totalMin = Math.round(h * 60);
+  if (totalMin < 60) return `${totalMin} min`;
+  if (totalMin < 24 * 60) {
+    const hh = Math.floor(totalMin / 60);
+    const mm = totalMin % 60;
+    return mm ? `${hh} h ${mm} min` : `${hh} h`;
+  }
+  const totalH = Math.round(h);
+  const d = Math.floor(totalH / 24);
+  const resto = totalH % 24;
+  return resto ? `${d} d ${resto} h` : `${d} d`;
 }
 
 /**

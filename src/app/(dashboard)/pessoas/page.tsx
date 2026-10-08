@@ -1,3 +1,4 @@
+import { mensagemHumana } from "@/lib/erros";
 import Link from "next/link";
 import { AlertTriangle } from "lucide-react";
 import {
@@ -12,9 +13,10 @@ import { RolarParaAncora } from "@/components/ui/rolar-para-ancora";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getData, listDeletedLeads, listLeadEvents } from "@/lib/data/store";
 import { activeBrandSlug } from "@/lib/active-brand";
-import { adIdFromUtmContent, creativePerformance, rotuloCriativo } from "@/lib/metrics";
+import { adIdFromUtmContent, creativePerformance, everBooked, rotuloCriativo } from "@/lib/metrics";
 import { getComercial } from "@/lib/robo/client";
 import { can } from "@/lib/auth/guard";
+import { formatarEspera } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -26,19 +28,8 @@ function originLabel(utmContent: string | undefined, nameById: Map<string, strin
   return (id ? nameById.get(id) : nameById.get(utmContent)) ?? utmContent.split("|")[0];
 }
 
-/** 135 → "2 h 15 min"; acima de um dia mostra "2 d 3 h". */
-function duracao(min: number | null): string {
-  if (min == null) return "—";
-  if (min < 60) return `${min} min`;
-  const h = Math.floor(min / 60);
-  if (h < 24) {
-    const m = min % 60;
-    return m ? `${h} h ${m} min` : `${h} h`;
-  }
-  const d = Math.floor(h / 24);
-  const hr = h % 24;
-  return hr ? `${d} d ${hr} h` : `${d} d`;
-}
+/** Minutos do robô → a mesma escrita de espera do resto do painel. */
+const duracao = (min: number | null) => formatarEspera(min == null ? null : min / 60);
 
 /**
  * Pessoas — quem é essa pessoa e o que já aconteceu com ela.
@@ -80,7 +71,8 @@ export default async function PessoasPage() {
     phone: l.phone,
     creativeName: originLabel(l.utmContent, nameById),
     status: l.status,
-    meetingAt: l.meetingAt,
+    jaAgendou: everBooked(l),
+    meetingFor: l.meetingFor,
   }));
 
   const { kpis } = comercial;
@@ -108,7 +100,7 @@ export default async function PessoasPage() {
                 Não consegui ler o atendimento do especialista.
               </span>{" "}
               A lista dele não aparece para não passar zeros por números reais; os leads do
-              painel abaixo estão completos. Detalhe: {comercial.falha.detalhe}
+              painel abaixo estão completos. {mensagemHumana("robô", comercial.falha.detalhe)}
             </p>
           </CardContent>
         </Card>
@@ -141,7 +133,7 @@ export default async function PessoasPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <LeadsDirectory rows={rows} canDelete={canDelete} />
+          <LeadsDirectory rows={rows} canEdit={canEdit} canDelete={canDelete} />
         </CardContent>
       </Card>
 

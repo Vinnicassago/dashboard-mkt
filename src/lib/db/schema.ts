@@ -375,4 +375,8 @@ create table if not exists audit_log (
   detail text
 );
 create index if not exists audit_log_at_idx on audit_log (at desc);
+
+-- 0014 — a data DA REUNIÃO. meeting_at guardava o momento em que o status virou
+-- "Agendado" (esse fato já é booked_at); a reunião em si não tinha onde morar.
+alter table leads add column if not exists meeting_for timestamptz;
 `;

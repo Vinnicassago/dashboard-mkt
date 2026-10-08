@@ -101,6 +101,19 @@ function toStatus(raw?: string): LeadStatus {
   return STATUS_ALIASES[key] ?? normalizeLeadStatus(key);
 }
 
+/**
+ * Telefone da planilha. Desfaz o `="…"` com que o painel exporta (para o Excel
+ * não converter em número) e RECUSA notação científica: "5,51299E+12" já perdeu
+ * os últimos dígitos quando o Excel salvou — normalizar daria um número errado
+ * com cara de certo. Melhor sem telefone do que com o de outra pessoa.
+ */
+export function lerTelefone(raw?: string): { valor?: string; ilegivel: boolean } {
+  if (!raw) return { ilegivel: false };
+  const v = raw.replace(/^="?|"$/g, "").trim();
+  if (/^\d+([.,]\d+)?e\+?\d+$/i.test(v)) return { ilegivel: true };
+  return { valor: v || undefined, ilegivel: false };
+}
+
 /** Mesmo esquema de id do /api/track, para deduplicar com os leads ao vivo. */
 function leadIdFrom(eventId: string, fallbackSeed: string): string {
   const ev = eventId.trim();
@@ -111,6 +124,8 @@ export interface LeadsParseResult {
   leads: Lead[];
   /** event_id de cada lead (por id), para o importador resolver contra o banco. */
   eventIds: Map<string, string>;
+  /** Telefones em notação científica ("5,51299E+12") — vieram de um Excel e perderam dígitos. */
+  telefonesIlegiveis: number;
   matchedColumns: Partial<Record<Field, string>>;
   skipped: number;
 }
@@ -132,6 +147,7 @@ export function parseLeadsCsv(text: string): LeadsParseResult {
   const byId = new Map<string, Lead>();
   const eventIds = new Map<string, string>();
   let skipped = 0;
+  let telefonesIlegiveis = 0;
   parsed.data.forEach((r, i) => {
     const name = (map.name ? r[map.name] : "")?.trim() ?? "";
     const createdAt = (map.createdAt ? r[map.createdAt] : "")?.trim() ?? "";
@@ -143,13 +159,15 @@ export function parseLeadsCsv(text: string): LeadsParseResult {
     const id = leadIdFrom(eventId, `${createdAt.slice(0, 10).replace(/-/g, "")}-${i}`);
     if (eventId) eventIds.set(id, eventId);
     const pick = (f: Field) => (map[f] ? r[map[f]!]?.trim() || undefined : undefined);
+    const phone = lerTelefone(pick("phone"));
+    if (phone.ilegivel) telefonesIlegiveis++;
     byId.set(id, {
       id,
       brand: DEFAULT_BRAND,
       createdAt,
       name,
       email: pick("email"),
-      phone: pick("phone"),
+      phone: phone.valor,
       utmSource: pick("utmSource"),
       utmCampaign: pick("utmCampaign"),
       utmContent: pick("utmContent"),
@@ -163,7 +181,7 @@ export function parseLeadsCsv(text: string): LeadsParseResult {
   if (leads.length === 0) {
     throw new Error("Nenhum lead válido encontrado no CSV.");
   }
-  return { leads, eventIds, matchedColumns: map, skipped };
+  return { leads, eventIds, matchedColumns: map, skipped, telefonesIlegiveis };
 }
 
 /**

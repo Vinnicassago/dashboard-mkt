@@ -34,6 +34,8 @@ export interface CampaignBudget {
 
 export interface LeadStatusPatch {
   meetingAt?: string;
+  /** Data da reunião — sobrescreve (remarcar troca a data). */
+  meetingFor?: string;
   value?: number;
   bookedAt?: string;
   attendedAt?: string;

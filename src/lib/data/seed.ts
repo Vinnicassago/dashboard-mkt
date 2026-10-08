@@ -262,6 +262,7 @@ function buildSeedData(): DashboardData {
         utmContent: bucket.adId,
         status,
         meetingAt,
+        meetingFor: meetingAt,
         value,
       });
     }

@@ -160,6 +160,9 @@ export function resumirCascata(degraus: Degrau[]): Degrau[] {
     (d, i) =>
       i === 0 ||
       d.ehAncora ||
+      // Reunião é a north star: o resumo nunca pula de Leads para Clientes (B22).
+      d.key === "reunioes" ||
+      d.key === "reuniao" ||
       (d.parados ?? 0) > 0 ||
       i === iv ||
       i === iv - 1 ||

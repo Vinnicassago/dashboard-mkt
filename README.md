@@ -245,7 +245,7 @@ duas vezes. Por isso o `event_id` é gerado uma única vez, no cliente.
 ### Reunião agendada → sinal de volta
 
 Na página **Pessoas** (ou na **Fila de contato**), mude o status do lead para *Agendado*. Isso dispara `Schedule`
-para a CAPI e `schedule` para o GA4, usando os identificadores (`fbc`/`fbp`) que
+para a CAPI (se configurada) e `qualify_lead` para o GA4 (se configurado), usando os identificadores (`fbc`/`fbp`) que
 guardamos no lead. O `event_id` é estável (`schedule-<leadId>`), então remarcar o
 mesmo lead não conta duas reuniões.
 
@@ -257,7 +257,7 @@ encerra o lead?" saem todos de lá. Status novo = uma entrada nessa tabela.
 | Status | O que significa |
 | --- | --- |
 | **Novo** | Entrou e ninguém contatou ainda. É o estoque da fila do comercial (SLA de resposta). |
-| **Agendado** | Reunião marcada. É esta transição que dispara `Schedule` para a Meta e `qualify_lead` para o GA4. |
+| **Agendado** | Reunião marcada — exige a data e a hora da reunião. Com CAPI/GA4 configurados, dispara `Schedule` para a Meta e `qualify_lead` para o GA4. |
 | **Reunião realizada** | Compareceu. |
 | **Cliente** | Fechou, com o valor da carta registrado. Dispara `Purchase`. |
 | **Contato inválido** | Telefone/e-mail não existe. Perda de **qualidade** — o comercial não teve chance. |

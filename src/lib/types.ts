@@ -346,7 +346,13 @@ export interface Lead {
   utmCampaign?: string;
   utmContent?: string; // maps to the creative/ad
   status: LeadStatus;
-  meetingAt?: string; // full ISO datetime when scheduled
+  /**
+   * LEGADO: até out/2026 guardava o MOMENTO em que o status virou "Agendado",
+   * não a data da reunião (esse fato hoje é `bookedAt`). Não grave mais aqui.
+   */
+  meetingAt?: string;
+  /** Data e hora DA REUNIÃO (ISO), exigida ao agendar. */
+  meetingFor?: string;
   /** Valor da carta/contrato (BRL), preenchido quando o lead vira cliente. */
   value?: number;
 

@@ -3,8 +3,13 @@ import {
   awarenessKpis,
   creativePerformance,
   overviewKpis,
+  rotuloCriativo,
   type DateRange,
 } from "./metrics";
+import { MIN_REUNIOES } from "./trust";
+
+/** Abaixo disto, "melhor criativo por CPL" é sorte, não ranking (mesma régua do Dinheiro). */
+const MIN_LEADS_RANKING = 5;
 import { isAwareness } from "./brands";
 import {
   formatCompact,
@@ -20,7 +25,8 @@ export function buildInsights(data: DashboardData, range?: DateRange): string[] 
   if (isAwareness(data.campaign.brand)) return buildAwarenessInsights(data, range);
 
   const out: string[] = [];
-  const creatives = creativePerformance(data, range).filter((c) => c.leads > 0);
+  const perf = creativePerformance(data, range);
+  const creatives = perf.filter((c) => c.leads >= MIN_LEADS_RANKING);
   const k = overviewKpis(data, range);
 
   if (k.hasDiscovery) {
@@ -42,17 +48,22 @@ export function buildInsights(data: DashboardData, range?: DateRange): string[] 
     const worst = byCpl[byCpl.length - 1];
     const ratio = best.cpl > 0 ? worst.cpl / best.cpl : 0;
     out.push(
-      `Melhor criativo por CPL: "${best.name}" a ${formatCurrency(best.cpl)}` +
+      // rotuloCriativo: dois anúncios podem ter o mesmo nome — o nome sozinho
+      // manda escalar (ou pausar) o errado.
+      `Melhor criativo por CPL: "${rotuloCriativo(best, perf)}" a ${formatCurrency(best.cpl)}` +
         (ratio > 1.2
-          ? ` — ${ratio.toFixed(1)}× mais barato que o pior ("${worst.name}", ${formatCurrency(worst.cpl)}). Vale escalar o vencedor e pausar o pior.`
+          ? ` — ${ratio.toFixed(1)}× mais barato que o pior ("${rotuloCriativo(worst, perf)}", ${formatCurrency(worst.cpl)}). Vale escalar o vencedor e pausar o pior.`
           : "."),
     );
   }
 
+  // Custo por reunião só com amostra (MIN_REUNIOES de conversão): com menos, o
+  // número existe mas não sustenta decisão — a próxima reunião o corta pela metade.
   out.push(
     `${formatInt(k.leads)} leads geraram ${formatInt(k.meetings)} reuniões (${formatPercent(
       k.leadToMeeting,
-    )} de conversão lead→reunião), a ${formatCurrency(k.cpr)} por reunião.`,
+    )} de conversão lead→reunião)` +
+      (k.meetingsConversao >= MIN_REUNIOES ? `, a ${formatCurrency(k.cpr)} por reunião.` : "."),
   );
 
   if (k.meetings > 0) {
