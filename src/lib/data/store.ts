@@ -29,6 +29,7 @@ import type { Role } from "../auth/roles";
 import type {
   AdDaily,
   AuditEntry,
+  Meta,
   SyncRun,
   Creative,
   Goal,
@@ -99,6 +100,7 @@ export const listDeletedLeads = (brand: string = DEFAULT_BRAND) => backend().lis
 export const listLeads = (brand: string = DEFAULT_BRAND) => backend().listLeads(brand);
 
 export const upsertGoal = (goal: Goal) => backend().upsertGoal(goal);
+export const addMeta = (meta: Meta) => backend().addMeta(meta);
 
 export const setCampaignBudget = (brand: string, budget: CampaignBudget) =>
   backend().setCampaignBudget(brand, budget);

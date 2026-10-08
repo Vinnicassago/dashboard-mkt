@@ -23,6 +23,7 @@ import type {
   Creative,
   DashboardData,
   Goal,
+  Meta,
   IgAccountDaily,
   IgPost,
   Lead,
@@ -45,6 +46,7 @@ import {
   toDraft,
   toEvent,
   toGoal,
+  toMeta,
   toIgDaily,
   toLead,
   toLp,
@@ -57,6 +59,7 @@ import {
   fromDraft,
   fromEvent,
   fromGoal,
+  fromMeta,
   fromIgDaily,
   fromLead,
   fromLp,
@@ -80,7 +83,7 @@ export const supabaseBackend: DataBackend = {
 
   async getData(brand: string): Promise<DashboardData> {
     const db = supabase();
-    const [campaign, igDaily, posts, ads, creatives, lp, leads, goals, state] =
+    const [campaign, igDaily, posts, ads, creatives, lp, leads, goals, metas, state] =
       await Promise.all([
         db.from("campaign").select("*").eq("brand", brand).limit(1).maybeSingle(),
         db.from("ig_account_daily").select("*").eq("brand", brand).order("date"),
@@ -95,6 +98,7 @@ export const supabaseBackend: DataBackend = {
           .is("deleted_at", null)
           .order("created_at", { ascending: false }),
         db.from("goals").select("*").eq("brand", brand),
+        db.from("metas").select("*").eq("brand", brand).order("vigente_desde").order("criada_em"),
         db.from("app_state").select("*"),
       ]);
 
@@ -114,6 +118,7 @@ export const supabaseBackend: DataBackend = {
       lpDaily: (lp.data ?? []).map(toLp),
       leads: (leads.data ?? []).map(toLead),
       goals: (goals.data ?? []).map(toGoal),
+      metas: (metas.data ?? []).map(toMeta),
       updatedAt: String(stateMap.get("updated_at") ?? new Date().toISOString()),
       isSeed: stateMap.get("is_seed") === true,
     };
@@ -165,6 +170,7 @@ export const supabaseBackend: DataBackend = {
       db.from("ad_daily").insert(seed.adDaily.map(fromAd)),
       db.from("lp_daily").insert(seed.lpDaily.map(fromLp)),
       db.from("goals").insert(seed.goals.map(fromGoal)),
+      db.from("metas").upsert((seed.metas ?? []).map(fromMeta), { onConflict: "id", ignoreDuplicates: true }),
       db
         .from("lead_events")
         .upsert(buildSeedLeadEvents(seed.leads).map(fromEvent), { onConflict: "id", ignoreDuplicates: true }),
@@ -385,6 +391,11 @@ export const supabaseBackend: DataBackend = {
       .order("created_at", { ascending: false });
     check(error, "list leads");
     return (data ?? []).map(toLead);
+  },
+
+  async addMeta(meta: Meta) {
+    const { error } = await supabase().from("metas").insert(fromMeta(meta));
+    check(error, "add meta");
   },
 
   async upsertGoal(goal: Goal) {

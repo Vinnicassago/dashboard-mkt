@@ -27,6 +27,7 @@ import type {
   Creative,
   DashboardData,
   Goal,
+  Meta,
   IgAccountDaily,
   IgPost,
   Lead,
@@ -85,7 +86,7 @@ function mtimeDoArquivo(): number {
 function migrateBrand(data: DashboardData) {
   const d = data as unknown as { campaign?: { brand?: string } } & Record<string, unknown>;
   if (d.campaign && !d.campaign.brand) d.campaign.brand = DEFAULT_BRAND;
-  const arrays = ["igAccountDaily", "igPosts", "adDaily", "creatives", "lpDaily", "leads", "goals"] as const;
+  const arrays = ["igAccountDaily", "igPosts", "adDaily", "creatives", "lpDaily", "leads", "goals", "metas"] as const;
   for (const key of arrays) {
     const rows = (data as unknown as Record<string, Array<{ brand?: string }>>)[key];
     if (Array.isArray(rows)) for (const r of rows) if (!r.brand) r.brand = DEFAULT_BRAND;
@@ -159,6 +160,7 @@ function load(): LocalFile {
         if (!Array.isArray(parsed.drafts)) parsed.drafts = [];
         if (!Array.isArray(parsed.audit)) parsed.audit = [];
         if (!Array.isArray(parsed.syncRuns)) parsed.syncRuns = [];
+        if (!Array.isArray(parsed.data.metas)) parsed.data.metas = [];
         migrateBrand(parsed.data);
         migrateLeadStatus(parsed);
         migrateLeadMilestones(parsed);
@@ -216,6 +218,7 @@ export const localBackend: DataBackend = {
       lpDaily: d.lpDaily.filter((r) => r.brand === brand),
       leads: d.leads.filter((r) => r.brand === brand && !r.deletedAt),
       goals: d.goals.filter((r) => r.brand === brand),
+      metas: (d.metas ?? []).filter((r) => r.brand === brand).map((m) => ({ ...m })),
     };
   },
 
@@ -234,6 +237,10 @@ export const localBackend: DataBackend = {
     const preservados = foraDoExemplo.map((l) =>
       l.deletedAt ? l : { ...l, deletedAt: at, deletedBy: by, deletedReason: MOTIVO_EXCLUSAO_RESET },
     );
+    // Metas não somem no reset (são a régua, com histórico).
+    const metasAtuais = file().data.metas ?? [];
+    const idsMetas = new Set(metasAtuais.map((m) => m.id));
+    seed.metas = [...(seed.metas ?? []).filter((m) => !idsMetas.has(m.id)), ...metasAtuais];
     const atuais = file().leadEvents;
     const ids = new Set(atuais.map((e) => e.id));
     cache = {
@@ -421,6 +428,12 @@ export const localBackend: DataBackend = {
       .data.leads.filter((l) => l.brand === brand && !l.deletedAt)
       .map((l) => ({ ...l }))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  },
+
+  async addMeta(meta: Meta) {
+    commit((data) => {
+      data.metas = [...(data.metas ?? []).filter((m) => m.id !== meta.id), meta];
+    });
   },
 
   async upsertGoal(goal: Goal) {

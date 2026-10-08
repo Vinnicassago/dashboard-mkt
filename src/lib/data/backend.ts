@@ -9,6 +9,7 @@ import type {
   Lead,
   LeadEvent,
   LeadStatus,
+  Meta,
   PostDraft,
   SyncFonte,
   SyncRun,
@@ -161,6 +162,11 @@ export interface DataBackend {
    */
   listLeads(brand: string): Promise<Lead[]>;
   upsertGoal(goal: Goal): Promise<void>;
+  /**
+   * Grava uma meta NOVA (nunca altera nem apaga uma anterior: a vigência é que
+   * diz qual vale em cada dia). As metas da marca chegam em `getData().metas`.
+   */
+  addMeta(meta: Meta): Promise<void>;
   /** Grava o orçamento da campanha da marca, criando a linha da campanha se o
    *  banco ainda não tiver uma (produção nunca rodou o seed). */
   setCampaignBudget(brand: string, budget: CampaignBudget): Promise<void>;

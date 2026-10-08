@@ -367,11 +367,8 @@ export async function setGoalsAction(
 ): Promise<ActionState> {
   if (!(await can("data:write"))) return DENIED;
   const brand = await activeBrandSlug();
+  // Só as metas de conteúdo: as do funil têm vigência (metas-actions.ts).
   const specs: { metric: GoalMetric; lowerIsBetter?: boolean }[] = [
-    { metric: "leads" },
-    { metric: "meetings" },
-    { metric: "cpl", lowerIsBetter: true },
-    { metric: "cpr", lowerIsBetter: true },
     { metric: "followers" },
     // metas orgânicas do plano de 90 dias
     { metric: "retencao_reels" },

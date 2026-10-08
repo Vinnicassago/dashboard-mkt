@@ -20,6 +20,7 @@ import type { DashboardData } from "./types";
 import type { DateRange } from "./metrics";
 import { hojeEmBrasilia } from "./range";
 import { diaCoberto, type Intervalo } from "./cobertura";
+import { isAwareness } from "./brands";
 
 // ---------------------------------------------------------------- vocabulário
 
@@ -409,15 +410,20 @@ export function assessTrust(input: TrustInput): TrustReport {
 
   // 5 e 6. Campo em branco — não é erro de medição, é configuração que falta.
   //        Não entra em `porMetrica`: não há número errado, há regra desligada.
-  if (data.goals.length === 0) {
+  // Marca de conversão: a régua são as metas do funil (com vigência). Marca de
+  // seguidores: as metas de conteúdo.
+  const semMetas = isAwareness(data.campaign.brand)
+    ? data.goals.length === 0
+    : !(data.metas ?? []).some((m) => m.alvo != null);
+  if (semMetas) {
     travas.push({
       id: "metas-ausentes",
       nivel: "config",
       titulo: "Nenhuma meta cadastrada",
       detalhe:
-        "Sem meta, nenhum custo desta tela dá para julgar — só comparar com a semana passada. E as duas regras de severidade alta do motor de recomendação (CPL e custo por reunião acima do alvo) nunca disparam: ele está rodando a meia força.",
+        "Sem meta, nenhum número desta tela fica verde ou vermelho — só dá para comparar com a semana passada. E as regras de severidade alta do motor de ações (CPL e custo por reunião acima do alvo) nunca disparam. A calculadora em Ajustes monta as metas a partir do valor da carta.",
       afeta: [],
-      cta: { label: "Cadastrar metas", href: "/config#metas" },
+      cta: { label: "Montar as metas", href: "/config#metas" },
     });
   }
 

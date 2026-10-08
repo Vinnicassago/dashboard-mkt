@@ -38,6 +38,17 @@
   --danger-text: #b91c1c;
   --warning-text: #8a5a00;      /* âmbar legível como TEXTO no claro (5.9:1); --warning é só p/ fill */
 
+  /* Status CONTRA META (Fase 4). Separado de --warning de propósito: o accent da
+     marca Consórcio é âmbar, e "perto da meta" em âmbar se confundia com botão e
+     destaque. "Perto" é coral (23° de matiz do âmbar). Validado em
+     src/lib/__tests__/paleta.test.ts (contraste ≥ 4,5:1 e distância de matiz). */
+  --status-ok: #0ca30c;
+  --status-ok-text: #006300;
+  --status-perto: #ec835a;
+  --status-perto-text: #c2410c;
+  --status-fora: #d03b3b;
+  --status-fora-text: #b91c1c;
+
   /* Categorical series (light steps) */
   --chart-1: #2a78d6;  /* blue */
   --chart-2: #eb6834;  /* orange */
@@ -80,6 +91,13 @@
   --success-text: #0ca30c;
   --danger-text: #f87171;
   --warning-text: #fab219;      /* no escuro o âmbar vivo já é legível como texto */
+
+  --status-ok: #0ca30c;
+  --status-ok-text: #0ca30c;
+  --status-perto: #ec835a;
+  --status-perto-text: #ec835a;
+  --status-fora: #d03b3b;
+  --status-fora-text: #f87171;
 
   --chart-1: #3987e5;
   --chart-2: #d95926;

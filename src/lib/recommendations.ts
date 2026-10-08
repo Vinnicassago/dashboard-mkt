@@ -17,6 +17,7 @@ import {
 } from "./metrics";
 import { MIN_REUNIOES } from "./trust";
 import { custoExibivel, kpisDoPeriodo } from "./kpis";
+import { metaVigente } from "./metas";
 import { isAwareness } from "./brands";
 // A régua editorial mora no playbook (o guia como código) — nunca hardcode aqui.
 import {
@@ -124,8 +125,10 @@ export function buildRecommendations(
   const k = kp.overview;
   const creatives = creativePerformance(data, range);
   const convAdsets = adsetPerformance(data, range).filter((a) => a.bucket === "conversao");
-  const goalCpl = data.goals.find((g) => g.metric === "cpl")?.target;
-  const goalCpr = data.goals.find((g) => g.metric === "cpr")?.target;
+  // As metas que valem HOJE (com vigência) — a régua de Ajustes → Metas.
+  const hoje = nowIso.slice(0, 10);
+  const goalCpl = metaVigente(data.metas, "cpl", hoje)?.alvo ?? undefined;
+  const goalCpr = metaVigente(data.metas, "custo_por_reuniao", hoje)?.alvo ?? undefined;
 
   // 1. Criativos fadigando — um verbo por regra. "Renove ou pause" com o CPL
   //    abaixo da média oferecia dois gestos opostos para um anúncio que ainda traz

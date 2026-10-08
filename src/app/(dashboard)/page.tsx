@@ -29,7 +29,11 @@ import {
   previousRange,
   type DateRange,
 } from "@/lib/metrics";
-import { custoExibivel, kpisDoPeriodo, mostrar } from "@/lib/kpis";
+import { custoExibivel, kpisDoPeriodo, mostrar, reguaDoPeriodo } from "@/lib/kpis";
+import { formatarAlvo, metaVigente } from "@/lib/metas";
+import { hojeEmBrasilia } from "@/lib/range";
+import { StatusMetaBadge, type MetaExibida } from "@/components/kpi/status-meta";
+import type { MetricaComMeta } from "@/lib/types";
 import { dica } from "@/lib/dicionario";
 import { coberturaDeAnuncios } from "@/lib/sincronizacao";
 import {
@@ -163,7 +167,7 @@ export default async function OverviewPage({
     degraus: cascata.degraus,
     trust,
     kpis: kp,
-    metaCpr: data.goals.find((g) => g.metric === "cpr")?.target,
+    metaCpr: metaVigente(data.metas, "custo_por_reuniao", hojeEmBrasilia())?.alvo ?? undefined,
     parados,
     midiaParada,
     filaHref,
@@ -194,6 +198,21 @@ export default async function OverviewPage({
   ];
   const temPiso = kp.investimento.confianca?.nivel === "piso";
   const nConv = kp.reunioesConversao.valor;
+
+  // A régua (Fase 4): cada número contra a meta que vale no período.
+  const regua = new Map(reguaDoPeriodo(kp, data, range).map((l) => [l.metrica, l]));
+  const metaDe = (m: MetricaComMeta, rotulo: string): MetaExibida | undefined => {
+    const l = regua.get(m);
+    if (!l || l.alvo == null) return undefined;
+    return { alvoTexto: `${rotulo} ${formatarAlvo(m, l.alvo)}`, avaliacao: l.avaliacao, provisoria: l.meta?.provisoria };
+  };
+  const metasDaTira = {
+    orcamento: metaDe("investimento_conversao", "conversão prevista"),
+    leads: metaDe("leads", "meta"),
+    cpl: metaDe("cpl", "CPL alvo"),
+    reunioes: metaDe("reunioes_agendadas", "meta"),
+    cpr: metaDe("custo_por_reuniao", "custo alvo"),
+  };
 
   return (
     <div className="space-y-6">
@@ -236,6 +255,7 @@ export default async function OverviewPage({
             <div title={dica("investimento")}>
               <p className="text-xs text-muted-foreground">Investimento</p>
               <p className="tabular text-xl font-semibold">{mostrar(kp.investimento, "moeda0")}</p>
+              {metasDaTira.orcamento ? <StatusMetaBadge meta={metasDaTira.orcamento} /> : null}
             </div>
             <div title={dica("cpl")}>
               <p className="text-xs text-muted-foreground">Leads</p>
@@ -252,6 +272,10 @@ export default async function OverviewPage({
                     : ""}
                 </span>
               </p>
+              <div className="flex flex-col">
+                {metasDaTira.leads ? <StatusMetaBadge meta={metasDaTira.leads} /> : null}
+                {metasDaTira.cpl ? <StatusMetaBadge meta={metasDaTira.cpl} /> : null}
+              </div>
             </div>
             <div title={dica("reunioes_agendadas")}>
               <p className="text-xs text-muted-foreground">Reuniões agendadas</p>
@@ -269,6 +293,10 @@ export default async function OverviewPage({
                       : `${formatInt(nConv)} de conversão — o custo por reunião aparece a partir de ${MIN_REUNIOES}`}
                 </span>
               </p>
+              <div className="flex flex-col">
+                {metasDaTira.reunioes ? <StatusMetaBadge meta={metasDaTira.reunioes} /> : null}
+                {metasDaTira.cpr ? <StatusMetaBadge meta={metasDaTira.cpr} /> : null}
+              </div>
             </div>
           </div>
 

@@ -28,6 +28,8 @@ export type MetricaId =
   | "custo_por_reuniao"
   | "agendaram"
   | "taxa_lead_agendada"
+  | "primeiro_contato_no_prazo"
+  | "comparecimento"
   | "conversoes_pixel";
 
 export interface Definicao {
@@ -150,6 +152,24 @@ export const DICIONARIO: Record<MetricaId, Definicao> = {
     fonte: "Painel",
     inclui: "a coorte de entrada do período",
     exclui: "desistências",
+  },
+  primeiro_contato_no_prazo: {
+    id: "primeiro_contato_no_prazo",
+    nome: "1º contato no prazo",
+    definicao: "Dos leads do período cujo prazo já fechou, a fração que teve a 1ª tentativa em até 1 hora útil.",
+    formula: "leads com 1ª tentativa no prazo ÷ (leads com tentativa + leads esperando com prazo vencido)",
+    fonte: "Painel (tentativas registradas)",
+    inclui: "quem ainda espera com o prazo vencido (conta como fora)",
+    exclui: "quem espera dentro do prazo; encerrado sem tentativa registrada (legado)",
+  },
+  comparecimento: {
+    id: "comparecimento",
+    nome: "Comparecimento",
+    definicao: "Das reuniões marcadas para o período cuja data já passou, a fração que aconteceu. Métrica de proteção da north star.",
+    formula: "reuniões realizadas ÷ reuniões com data passada",
+    fonte: "Painel (data da reunião)",
+    inclui: "não compareceu (conta como não realizada)",
+    exclui: "reunião sem data registrada (legado); desistências",
   },
   conversoes_pixel: {
     id: "conversoes_pixel",

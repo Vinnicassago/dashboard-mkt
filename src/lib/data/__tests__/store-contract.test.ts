@@ -257,6 +257,26 @@ function contrato(nome: string, abrir: () => Promise<{ backend: DataBackend; fec
       expect(ads[0].dateFrom).toBeUndefined();
     });
 
+    it("metas: só se insere (vigência nova não apaga a antiga), por marca, com as entradas", async () => {
+      const base = {
+        brand: "consorcio",
+        metrica: "cpl" as const,
+        periodo: "semana" as const,
+        provisoria: false,
+        origem: "calculadora" as const,
+        criadaPor: "admin",
+      };
+      await b.addMeta({ ...base, id: `MT1-${sfx}`, alvo: 20, vigenteDesde: "2031-01-01", criadaEm: "2031-01-01T12:00:00.000Z", entradas: { V: 200000, c: 0.02, m: 0.3, f: 0.2, s: 0.7, a: 0.1, N: 4 } });
+      await b.addMeta({ ...base, id: `MT2-${sfx}`, alvo: null, vigenteDesde: "2031-02-01", criadaEm: "2031-02-01T12:00:00.000Z", origem: "manual" });
+      await b.addMeta({ ...base, id: `MT3-${sfx}`, brand: "krone", alvo: 5, vigenteDesde: "2031-01-01", criadaEm: "2031-01-01T12:00:00.000Z" });
+
+      const metas = (await b.getData("consorcio")).metas ?? [];
+      const minhas = metas.filter((m) => m.id.endsWith(sfx));
+      expect(minhas.map((m) => m.id).sort()).toEqual([`MT1-${sfx}`, `MT2-${sfx}`]);
+      expect(minhas.find((m) => m.id === `MT1-${sfx}`)).toMatchObject({ alvo: 20, vigenteDesde: "2031-01-01", entradas: { V: 200000, a: 0.1 } });
+      expect(minhas.find((m) => m.id === `MT2-${sfx}`)?.alvo).toBeNull();
+    });
+
     it("registro de auditoria", async () => {
       await b.addAuditEntry({ id: `AUD-${sfx}`, at: new Date().toISOString(), actor: "admin", action: "teste", detail: "x" });
       const lista = await b.listAuditEntries(5);

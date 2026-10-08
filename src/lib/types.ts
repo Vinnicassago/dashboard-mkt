@@ -528,6 +528,60 @@ export interface Goal {
   lowerIsBetter?: boolean;
 }
 
+// ------------------------- Metas v2 (Fase 4) ------------------------
+
+/** As métricas do funil que têm meta (a régua da Bússola). */
+export type MetricaComMeta =
+  | "reunioes_agendadas"
+  | "leads"
+  | "cpl"
+  | "custo_por_reuniao"
+  | "taxa_lead_agendada"
+  | "primeiro_contato_no_prazo"
+  | "comparecimento"
+  | "investimento_conversao";
+
+/** As entradas da calculadora (seção 9 do relatório), guardadas com a meta. */
+export interface EntradasCalculadora {
+  /** Valor médio da carta vendida (R$). */
+  V: number;
+  /** Receita da empresa por venda, fração da carta (0,02 = 2%). */
+  c: number;
+  /** Fatia da receita aceitável como custo de aquisição (0,30 = 30%). */
+  m: number;
+  /** Fechamento: reunião realizada → venda (fração). */
+  f: number;
+  /** Comparecimento: agendada → realizada (fração). */
+  s: number;
+  /** Lead → reunião agendada (fração). */
+  a: number;
+  /** Vendas desejadas por mês. */
+  N: number;
+}
+
+/**
+ * Uma meta, com vigência. Mudar a meta INSERE uma linha nova a partir de uma
+ * data — o passado continua sendo julgado pela meta que valia nele. `alvo: null`
+ * limpa a meta a partir de `vigenteDesde`.
+ */
+export interface Meta {
+  id: string;
+  brand: Brand;
+  metrica: MetricaComMeta;
+  /** Contagens e orçamento escalam com o período; custo e taxa, não. */
+  periodo: "semana" | "mes";
+  alvo: number | null;
+  /** AAAA-MM-DD. */
+  vigenteDesde: string;
+  /** Sem amostra para sustentar a taxa (< 20 leads ou < 5 agendadas em 8 semanas). */
+  provisoria: boolean;
+  origem: "calculadora" | "manual" | "legado";
+  /** O que a calculadora recebeu — a meta é auditável. */
+  entradas?: EntradasCalculadora;
+  criadaEm: string;
+  criadaPor: string;
+}
+
 // ------------------------- Dataset ----------------------------------
 
 /** The full dataset the dashboard renders from. */
@@ -540,6 +594,8 @@ export interface DashboardData {
   lpDaily: LpDaily[];
   leads: Lead[];
   goals: Goal[];
+  /** Metas do funil com vigência (Fase 4). Ausente em dados antigos/testes. */
+  metas?: Meta[];
   /** When the data was last refreshed (ISO). */
   updatedAt: string;
   /** True while the dataset is the untouched example seed. */

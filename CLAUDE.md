@@ -182,6 +182,19 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   por sync bem-sucedido é **sem veiculação** (cinza, sem "≥"); sem cobertura é **sem
   dados** (âmbar, piso) — `lib/cobertura.ts`, ADR-06; um sync só cobre até 2 dias antes
   de terminar (a Meta atrasa).
+- **Metas** (Fase 4, `lib/metas.ts`, tabela `metas`, migração `0017`): a régua do
+  funil tem VIGÊNCIA — mudar uma meta INSERE uma linha (`addMeta`), nunca altera; cada
+  dia é julgado pela meta que valia nele (`metaVigente`), `alvo: null` limpa. Contagem
+  e verba somam a meta semanal dia a dia (`alvoNoPeriodo`); custo e taxa valem como
+  estão. Status SÓ por `statusContraMeta` (verde ≥ 100%, âmbar 80–99%, vermelho < 80%;
+  custo invertido até 120%; verba = ritmo ±10%/±25%) e SEMPRE com texto
+  (`StatusMetaBadge`, prop `meta` do `KpiCard`). Sem status quando a meta não cobre o
+  período inteiro ou o número não se sustenta (`reguaDoPeriodo`). As metas saem da
+  calculadora (`calcularMetas`, V·c·m·f·s·a·N, entradas gravadas com a meta); sem
+  amostra (< 20 leads ou < 5 agendadas em 8 semanas) ficam "provisórias". Cor de status
+  usa os tokens `--status-*` (nunca `--warning`, que colide com o âmbar da marca) —
+  validados em `paleta.test.ts`. Metas de conteúdo (seguidores, plano de 90 dias)
+  continuam em `goals`.
 - **Alertas** (`lib/alertas.ts`, `components/layout/alertas.tsx`): um lugar só, o
   "⚠ N" do cabeçalho com painel lateral. Globais (sync falhando, gasto sem marca,
   rastreio sem chave) vêm do layout; os do período (travas de confiança, saúde do dado,

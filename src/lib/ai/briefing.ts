@@ -32,7 +32,8 @@ import {
   rotuloCriativo,
 } from "../metrics";
 import { MIN_REUNIOES } from "../trust";
-import { custoExibivel, kpisDoPeriodo } from "../kpis";
+import { custoExibivel, kpisDoPeriodo, reguaDoPeriodo } from "../kpis";
+import { META_DEF } from "../metas";
 import { DICIONARIO } from "../dicionario";
 import { buildRecommendations } from "../recommendations";
 import { BENCHMARK, ROTINA_DIARIA, WEEKLY_MIX } from "../content/playbook";
@@ -123,8 +124,10 @@ export function buildBriefing(
       engajamento: pct(p.engagementRate),
     }));
 
-  // ---- metas ----
+  // ---- metas de conteúdo (as do funil têm vigência: `pago.regua`) ----
+  const FUNIL_LEGADO = new Set(["leads", "meetings", "cpl", "cpr"]);
   const metas = data.goals
+    .filter((g) => !FUNIL_LEGADO.has(g.metric))
     .map((g) => {
       // `actualForGoal` ancora "agora" em data.updatedAt para permanecer pura;
       // a cadência ancora no agora REAL. Com dataset parado os dois divergem
@@ -367,6 +370,17 @@ export function buildBriefing(
           .map((c) => ({ nome: rotuloCriativo(c, criativos), motivo: c.fatigue.reason, gasto: money(c.spend) })),
       },
     },
+    // A régua (Fase 4): cada número do funil contra a meta que vale no período.
+    // Sem status quando o número não se sustenta — a IA não julga o que a tela não julga.
+    regua: reguaDoPeriodo(kp, data, range, opts.nowIso.slice(0, 10))
+      .filter((l) => l.alvo != null)
+      .map((l) => ({
+        metrica: META_DEF[l.metrica].nome,
+        realizado: r2(l.medida.valor),
+        alvoDoPeriodo: r2(l.alvo!),
+        status: l.avaliacao?.rotulo ?? "sem status (número não se sustenta)",
+        provisoria: l.meta?.provisoria ?? false,
+      })),
     // O que cada número quer dizer — a IA lê a mesma definição que o ⓘ da tela.
     dicionario: [
       DICIONARIO.leads,

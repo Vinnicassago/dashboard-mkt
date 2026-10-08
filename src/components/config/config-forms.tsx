@@ -33,11 +33,11 @@ import { BRANDS } from "@/lib/brands";
 import { DEFAULT_BRAND } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-const inputCls =
+export const inputCls =
   "h-9 w-full rounded-lg border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring/40";
 const labelCls = "text-xs font-medium text-muted-foreground";
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+export function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="flex flex-col gap-1">
       <span className={labelCls}>{label}</span>
@@ -46,7 +46,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function SubmitButton({ children }: { children: React.ReactNode }) {
+export function SubmitButton({ children }: { children: React.ReactNode }) {
   const { pending } = useFormStatus();
   return (
     <button
@@ -59,7 +59,7 @@ function SubmitButton({ children }: { children: React.ReactNode }) {
   );
 }
 
-function Message({ state }: { state: ActionState | null }) {
+export function Message({ state }: { state: ActionState | null }) {
   if (!state) return null;
   return (
     <p
@@ -501,11 +501,9 @@ export function BudgetForm({
 
 export function GoalsForm({ current }: { current: Partial<Record<string, number>> }) {
   const [state, action] = useActionState(setGoalsAction, null);
+  // As metas do funil (leads, reuniões, CPL, custo por reunião…) moraram aqui
+  // até a Fase 4; agora têm vigência e calculadora — card "Metas".
   const fields: { metric: string; label: string }[] = [
-    { metric: "leads", label: "Leads (meta)" },
-    { metric: "meetings", label: "Reuniões (meta)" },
-    { metric: "cpl", label: "CPL alvo (R$)" },
-    { metric: "cpr", label: "Custo/reunião alvo (R$)" },
     { metric: "followers", label: "Seguidores (meta)" },
     { metric: "retencao_reels", label: "Retenção de reels (%)" },
     { metric: "alcance_base", label: "Alcance sobre a base (%)" },

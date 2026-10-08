@@ -23,6 +23,7 @@ import type {
   Creative,
   DashboardData,
   Goal,
+  Meta,
   IgAccountDaily,
   IgPost,
   Lead,
@@ -42,6 +43,7 @@ import {
   toDraft,
   toEvent,
   toGoal,
+  toMeta,
   toIgDaily,
   toLead,
   toLp,
@@ -56,6 +58,7 @@ import {
   fromDraft,
   fromEvent,
   fromGoal,
+  fromMeta,
   fromIgDaily,
   fromLead,
   fromLp,
@@ -78,6 +81,7 @@ const AD_COLS = ["brand", "date", "ad_id", "campaign", "campaign_id", "adset", "
 const LP_COLS = ["brand", "date", "visits", "clicks", "form_submits"];
 const LEAD_COLS = ["id", "brand", "created_at", "name", "email", "phone", "utm_source", "utm_campaign", "utm_content", "utm_medium", "utm_term", "fbclid", "status", "meeting_at", "meeting_for", "first_contact_at", "lost_reason_detail", "value", "booked_at", "attended_at", "closed_at", "lost_at", "robo_session_id", "fbc", "fbp", "ga_client_id", "ga_session_id", "deleted_at", "deleted_by", "deleted_reason"];
 const GOAL_COLS = ["brand", "metric", "period", "target", "lower_is_better"];
+const META_COLS = ["id", "brand", "metrica", "periodo", "alvo", "vigente_desde", "provisoria", "origem", "entradas", "criada_em", "criada_por"];
 const EVENT_COLS = ["id", "lead_id", "brand", "lead_name", "actor", "action", "from_status", "to_status", "payload", "occurred_at", "created_at"];
 const AUDIT_COLS = ["id", "at", "actor", "action", "detail"];
 const SYNC_RUN_COLS = ["id", "source", "brand", "started_at", "finished_at", "ok", "date_from", "date_to", "rows", "error"];
@@ -200,7 +204,7 @@ export const postgresBackend: DataBackend = {
   name: "postgres",
 
   async getData(brand: string): Promise<DashboardData> {
-    const [campaign, ig, posts, ads, creatives, lp, leads, goals, state] = await Promise.all([
+    const [campaign, ig, posts, ads, creatives, lp, leads, goals, metas, state] = await Promise.all([
       q("select * from campaign where brand = $1 limit 1", [brand]),
       q("select * from ig_account_daily where brand = $1 order by date", [brand]),
       q("select * from ig_posts where brand = $1 order by published_at desc", [brand]),
@@ -209,6 +213,7 @@ export const postgresBackend: DataBackend = {
       q("select * from lp_daily where brand = $1 order by date", [brand]),
       q("select * from leads where brand = $1 and deleted_at is null order by created_at desc", [brand]),
       q("select * from goals where brand = $1", [brand]),
+      q("select * from metas where brand = $1 order by vigente_desde, criada_em", [brand]),
       q("select * from app_state"),
     ]);
 
@@ -222,6 +227,7 @@ export const postgresBackend: DataBackend = {
       lpDaily: lp.map(toLp),
       leads: leads.map(toLead),
       goals: goals.map(toGoal),
+      metas: metas.map(toMeta),
       updatedAt: String(stateMap.get("updated_at") ?? new Date().toISOString()),
       isSeed: stateMap.get("is_seed") === true,
     };
@@ -260,6 +266,9 @@ export const postgresBackend: DataBackend = {
       await insertMany("lp_daily", LP_COLS, seed.lpDaily.map(fromLp), client);
       await upsertMany("leads", LEAD_COLS, seed.leads.map(fromLead), ["id"], withoutPk(LEAD_COLS, ["id"]), client);
       await insertMany("goals", GOAL_COLS, seed.goals.map(fromGoal), client);
+      // Metas não são apagadas no reset (são a régua, com histórico); as do
+      // exemplo entram se ainda não existirem.
+      await insertMany("metas", META_COLS, (seed.metas ?? []).map(fromMeta), client, true);
       await insertMany("lead_events", EVENT_COLS, events.map(fromEvent), client, true);
     });
     await touch(true);
@@ -425,6 +434,10 @@ export const postgresBackend: DataBackend = {
       [brand],
     );
     return rows.map(toLead);
+  },
+
+  async addMeta(meta: Meta) {
+    await insertMany("metas", META_COLS, [fromMeta(meta)]);
   },
 
   async upsertGoal(goal: Goal) {

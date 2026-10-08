@@ -27,6 +27,9 @@ import type {
   LeadEvent,
   LeadEventAction,
   LpDaily,
+  Meta,
+  MetricaComMeta,
+  EntradasCalculadora,
   PostDraft,
   SyncFonte,
   SyncRun,
@@ -464,6 +467,36 @@ export const toAudit = (r: Row): AuditEntry => ({
   actor: s(r.actor),
   action: s(r.action),
   detail: r.detail ? s(r.detail) : undefined,
+});
+
+export const toMeta = (r: Row): Meta => ({
+  id: s(r.id),
+  brand: brandOf(r.brand),
+  metrica: s(r.metrica) as MetricaComMeta,
+  periodo: r.periodo === "mes" ? "mes" : "semana",
+  alvo: r.alvo == null ? null : n(r.alvo),
+  vigenteDesde: day(r.vigente_desde),
+  provisoria: Boolean(r.provisoria),
+  origem: r.origem === "calculadora" || r.origem === "legado" ? r.origem : "manual",
+  entradas: r.entradas
+    ? ((typeof r.entradas === "string" ? JSON.parse(r.entradas) : r.entradas) as EntradasCalculadora)
+    : undefined,
+  criadaEm: iso(r.criada_em),
+  criadaPor: s(r.criada_por),
+});
+
+export const fromMeta = (m: Meta): Row => ({
+  id: m.id,
+  brand: m.brand,
+  metrica: m.metrica,
+  periodo: m.periodo,
+  alvo: m.alvo,
+  vigente_desde: m.vigenteDesde,
+  provisoria: m.provisoria,
+  origem: m.origem,
+  entradas: m.entradas ?? null,
+  criada_em: m.criadaEm,
+  criada_por: m.criadaPor,
 });
 
 export const toSyncRun = (r: Row): SyncRun => ({

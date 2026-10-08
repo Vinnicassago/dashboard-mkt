@@ -22,6 +22,8 @@ import type {
   LeadEvent,
   LeadStatus,
   LpDaily,
+  Meta,
+  MetricaComMeta,
 } from "../types";
 import { DEFAULT_BRAND } from "../types";
 import { isBookedStatus } from "../lead-status";
@@ -379,9 +381,39 @@ function buildSeedData(): DashboardData {
     lpDaily,
     leads,
     goals: [...goals, ...krone.goals],
+    metas: buildSeedMetas(),
     updatedAt: `${END}T09:00:00`,
     isSeed: true,
   };
+}
+
+/**
+ * Metas de exemplo (Fase 4), semanais, vigentes desde o início da campanha —
+ * para o exemplo mostrar a régua (status contra meta) sem ninguém cadastrar nada.
+ */
+function buildSeedMetas(): Meta[] {
+  const alvos: [MetricaComMeta, number][] = [
+    ["reunioes_agendadas", 30],
+    ["leads", 70],
+    ["cpl", 40],
+    ["custo_por_reuniao", 95],
+    ["taxa_lead_agendada", 0.35],
+    ["comparecimento", 0.7],
+    ["primeiro_contato_no_prazo", 0.9],
+    ["investimento_conversao", 2500],
+  ];
+  return alvos.map(([metrica, alvo]) => ({
+    id: `SEED-META-${metrica}`,
+    brand: DEFAULT_BRAND,
+    metrica,
+    periodo: "semana",
+    alvo,
+    vigenteDesde: START,
+    provisoria: false,
+    origem: "manual",
+    criadaEm: `${START}T09:00:00.000Z`,
+    criadaPor: "exemplo",
+  }));
 }
 
 const KRONE = "krone";

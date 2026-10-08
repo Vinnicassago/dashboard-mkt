@@ -23,7 +23,11 @@ import {
 } from "@/lib/metrics";
 import { resolveMetaBrands } from "@/lib/meta/config";
 import { MIN_REUNIOES } from "@/lib/trust";
-import { custoExibivel, kpisDoPeriodo, mostrar } from "@/lib/kpis";
+import { custoExibivel, kpisDoPeriodo, mostrar, reguaDoPeriodo } from "@/lib/kpis";
+import { formatarAlvo, metaVigente } from "@/lib/metas";
+import { StatusMetaBadge, type MetaExibida } from "@/components/kpi/status-meta";
+import type { MetricaComMeta } from "@/lib/types";
+import { hojeEmBrasilia } from "@/lib/range";
 import { dica } from "@/lib/dicionario";
 import { coberturaDeAnuncios } from "@/lib/sincronizacao";
 import { alertasDeAtribuicao, alertasDeConfianca } from "@/lib/alertas";
@@ -49,22 +53,31 @@ import { cn } from "@/lib/utils";
  * no card de orçamento.
  */
 
-/** Uma linha rótulo → valor dentro das colunas por objetivo. */
+/** Uma linha rótulo → valor dentro das colunas por objetivo, com a meta embaixo. */
 function Stat({
   label,
   value,
   highlight,
+  meta,
 }: {
   label: string;
   value: string;
   highlight?: boolean;
+  meta?: MetaExibida;
 }) {
   return (
-    <div className="flex items-baseline justify-between gap-3">
-      <span className="text-sm text-muted-foreground">{label}</span>
-      <span className={cn("tabular text-sm font-medium", highlight && "text-primary")}>
-        {value}
-      </span>
+    <div>
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-sm text-muted-foreground">{label}</span>
+        <span className={cn("tabular text-sm font-medium", highlight && "text-primary")}>
+          {value}
+        </span>
+      </div>
+      {meta ? (
+        <div className="flex justify-end">
+          <StatusMetaBadge meta={meta} />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -105,9 +118,17 @@ export default async function DinheiroPage({
   const rotulo = (c: (typeof perf)[number]) => rotuloCriativo(c, perf);
   const cprQuarentena = !custoExibivel(kp.custoPorReuniao);
 
-  // Metas para pintar de vermelho quem passou do teto.
-  const goalCpl = data.goals.find((g) => g.metric === "cpl")?.target;
-  const goalCpr = data.goals.find((g) => g.metric === "cpr")?.target;
+  // Metas (com vigência) para pintar de vermelho quem passou do teto.
+  const hoje = hojeEmBrasilia();
+  const goalCpl = metaVigente(data.metas, "cpl", hoje)?.alvo ?? undefined;
+  const goalCpr = metaVigente(data.metas, "custo_por_reuniao", hoje)?.alvo ?? undefined;
+  const regua = new Map(reguaDoPeriodo(kp, data, range, hoje).map((l) => [l.metrica, l]));
+  const metaDe = (m: MetricaComMeta, rotulo: string): MetaExibida | undefined => {
+    const l = regua.get(m);
+    if (!l || l.alvo == null) return undefined;
+    return { alvoTexto: `${rotulo} ${formatarAlvo(m, l.alvo)}`, avaliacao: l.avaliacao, provisoria: l.meta?.provisoria };
+  };
+  const ritmo = regua.get("investimento_conversao");
   const overCls = (over: boolean) => (over ? "text-[var(--danger-text)] font-medium" : "");
 
   const spentAllTime = data.adDaily.reduce((s, r) => s + r.spend, 0);
@@ -199,7 +220,7 @@ export default async function DinheiroPage({
           {goalCpl != null || goalCpr != null ? (
             <p className="mt-3 text-xs text-muted-foreground">
               Em <span className="text-[var(--danger-text)]">vermelho</span>: acima da meta
-              {goalCpl != null ? ` de CPL (${formatCurrency0(goalCpl)})` : ""}
+              {goalCpl != null ? ` de CPL (${formatCurrency(goalCpl)})` : ""}
               {goalCpl != null && goalCpr != null ? " ou" : ""}
               {goalCpr != null ? ` de CPR (${formatCurrency0(goalCpr)})` : ""}.
             </p>
@@ -371,6 +392,28 @@ export default async function DinheiroPage({
               No ritmo atual, o orçamento dura ~{pace.exhaustInDays} dias.
             </p>
           ) : null}
+          {/* O ritmo que importa é o do PERÍODO contra o orçamento de conversão
+              semanal (4.5) — o gasto acumulado da campanha inteira não diz se esta
+              semana está acima ou abaixo do combinado. */}
+          {ritmo?.alvo != null ? (
+            <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+              <span>
+                No período: <span className="tabular font-medium">{mostrar(kp.investimentoConversao, "moeda0")}</span>{" "}
+                em conversão, de <span className="tabular">{formatarAlvo("investimento_conversao", ritmo.alvo)}</span>{" "}
+                previstos{ritmo.parcial ? " (parte do período sem meta)" : ""}
+              </span>
+              {ritmo.avaliacao ? (
+                <StatusMetaBadge meta={{ avaliacao: ritmo.avaliacao }} />
+              ) : null}
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Sem orçamento de conversão semanal, não há ritmo do período.{" "}
+              <Link href="/config#metas" className="text-primary underline-offset-4 hover:underline">
+                Montar as metas
+              </Link>
+            </p>
+          )}
           <div className="flex flex-wrap gap-x-6 gap-y-1 border-t pt-3 text-xs text-muted-foreground">
             <span className="font-medium text-foreground">No período</span>
             <span>{formatInt(k.impressions)} impressões</span>
@@ -414,12 +457,13 @@ export default async function DinheiroPage({
               <Stat label="Leads" value={formatInt(kp.leadsConversao.valor)} />
               {/* Sem denominador o custo é DESCONHECIDO, não zero — e "R$ 0,00"
                   ao lado de "Reuniões 0" lê-se como custo excelente. */}
-              <Stat label="CPL" value={mostrar(kp.cpl, "moeda")} highlight />
+              <Stat label="CPL" value={mostrar(kp.cpl, "moeda")} highlight meta={metaDe("cpl", "alvo")} />
               <Stat label="Reuniões agendadas" value={formatInt(kp.reunioesConversao.valor)} />
               <Stat
                 label="Custo por reunião"
                 value={mostrar(kp.custoPorReuniao, "moeda")}
                 highlight={!cprQuarentena}
+                meta={metaDe("custo_por_reuniao", "alvo")}
               />
               {cprQuarentena ? (
                 <p className="text-xs text-muted-foreground">

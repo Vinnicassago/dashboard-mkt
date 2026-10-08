@@ -3,6 +3,7 @@ import { Card } from "@/components/ui/card";
 import { KpiSparkline } from "./kpi-sparkline";
 import { cn } from "@/lib/utils";
 import { aplicarConfianca, type Quarentena } from "@/lib/trust";
+import { StatusMetaBadge, type MetaExibida } from "./status-meta";
 
 export interface KpiDelta {
   text: string;
@@ -25,6 +26,7 @@ export function KpiCard({
   highlight = false,
   spark,
   quarentena,
+  meta,
 }: {
   label: string;
   value: string;
@@ -40,6 +42,12 @@ export function KpiCard({
    * ganhar tendência nem comparação, senão volta a parecer medição.
    */
   quarentena?: Quarentena;
+  /**
+   * Meta e status (lib/metas.ts). Sem meta, o card mostra só o delta; com meta,
+   * a cor vem SEMPRE com o texto ("Abaixo da meta (60%)"). Em quarentena o
+   * status some: número que não se sustenta não fica verde nem vermelho.
+   */
+  meta?: MetaExibida;
 }) {
   const DeltaIcon =
     delta?.direction === "up" ? ArrowUp : delta?.direction === "down" ? ArrowDown : Minus;
@@ -86,6 +94,12 @@ export function KpiCard({
           <span className="text-muted-foreground">{hint}</span>
         ) : null}
       </div>
+      {meta ? (
+        <StatusMetaBadge
+          meta={suprimido ? { ...meta, avaliacao: undefined } : meta}
+          className="mt-1"
+        />
+      ) : null}
       {spark && spark.length > 1 && !suprimido ? (
         <KpiSparkline
           data={spark}
