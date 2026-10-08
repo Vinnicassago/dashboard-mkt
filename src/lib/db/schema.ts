@@ -337,7 +337,7 @@ update leads l set closed_at = e.first_at from (
 -- (importação de CSV, lead criado já agendado). created_at é o melhor palpite
 -- disponível; sem ele o lead sumiria da contagem.
 update leads set booked_at = created_at
-  where booked_at is null and status in ('agendado', 'reuniao_realizada', 'cliente');
+  where booked_at is null and status in ('agendado', 'no_show', 'reuniao_realizada', 'cliente');
 update leads set attended_at = created_at
   where attended_at is null and status in ('reuniao_realizada', 'cliente');
 update leads set closed_at = created_at
@@ -379,4 +379,11 @@ create index if not exists audit_log_at_idx on audit_log (at desc);
 -- 0014 — a data DA REUNIÃO. meeting_at guardava o momento em que o status virou
 -- "Agendado" (esse fato já é booked_at); a reunião em si não tinha onde morar.
 alter table leads add column if not exists meeting_for timestamptz;
+
+-- 0015 — o processo comercial instrumentado. Marco da 1ª tentativa de contato
+-- (velocidade de contato), detalhe do motivo de perda, e no histórico a hora em
+-- que o fato ACONTECEU (occurred_at), separada da hora em que foi registrado.
+alter table leads add column if not exists first_contact_at timestamptz;
+alter table leads add column if not exists lost_reason_detail text;
+alter table lead_events add column if not exists occurred_at timestamptz;
 `;

@@ -33,8 +33,8 @@ describe("transições de status (B19 e o registro do comercial)", () => {
     expect(podeTransitar(agendado, "desistencia")).toBeNull();
   });
 
-  it("perda depois de agendar continua liberando Desistência (o marco fica)", () => {
-    expect(destinosPermitidos({ status: "sem_resposta", jaAgendou: true })).toContain("desistencia");
+  it("perda encerra o lead (Fase 2): sair dela é reabrir, não escolher outro status", () => {
+    expect(destinosPermitidos({ status: "sem_resposta", jaAgendou: true })).toEqual([]);
   });
 
   it("Agendado exige data e hora da reunião", () => {
@@ -43,21 +43,21 @@ describe("transições de status (B19 e o registro do comercial)", () => {
     expect(podeTransitar(novo, "agendado", { meetingFor: "2026-10-09T17:30:00.000Z" })).toBeNull();
   });
 
-  it("Cliente exige o valor da carta", () => {
-    expect(podeTransitar(agendado, "cliente")).toMatch(/valor/);
-    expect(podeTransitar(agendado, "cliente", { value: 0 })).toMatch(/valor/);
-    expect(podeTransitar(agendado, "cliente", { value: 250000 })).toBeNull();
+  it("Cliente exige o valor da carta (e vem depois da reunião realizada)", () => {
+    const realizada = { status: "reuniao_realizada" as const, jaAgendou: true };
+    expect(podeTransitar(realizada, "cliente")).toMatch(/valor/);
+    expect(podeTransitar(realizada, "cliente", { value: 0 })).toMatch(/valor/);
+    expect(podeTransitar(realizada, "cliente", { value: 250000 })).toBeNull();
   });
 
-  it("Reunião realizada e Cliente estão disponíveis (antes não havia tela para isso)", () => {
-    expect(destinosPermitidos(agendado)).toEqual(
-      expect.arrayContaining(["reuniao_realizada", "cliente"]),
-    );
+  it("Reunião realizada e Cliente têm tela (antes não havia)", () => {
+    expect(destinosPermitidos(agendado)).toContain("reuniao_realizada");
+    expect(destinosPermitidos({ status: "reuniao_realizada", jaAgendou: true })).toContain("cliente");
   });
 
-  it("mesmo status não é mudança", () => {
+  it("mesmo status não é mudança — exceto remarcar uma reunião", () => {
     expect(destinosPermitidos(novo)).not.toContain("lead");
-    expect(podeTransitar(agendado, "agendado", { meetingFor: "2026-10-09T17:30:00.000Z" })).toMatch(/já está/);
+    expect(podeTransitar(agendado, "agendado", { meetingFor: "2026-10-09T17:30:00.000Z" })).toBeNull();
   });
 });
 

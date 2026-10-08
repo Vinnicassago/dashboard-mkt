@@ -5,6 +5,8 @@ import {
   BudgetForm,
   CleanResyncAdsButton,
   DiagnosticoLeadsPanel,
+  MensagemWhatsappForm,
+  RoboToggle,
   DmForm,
   GoalsForm,
   ImportForm,
@@ -25,6 +27,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { activeBackend, getData, getState, listAuditEntries, listUsers } from "@/lib/data/store";
 import { VERSAO } from "@/lib/version";
+import { isRoboConfigured } from "@/lib/robo/client";
+import { MENSAGEM_WHATSAPP_PADRAO, mensagemWhatsapp, roboDesativado } from "@/lib/integracoes";
+import { isAiConfigured } from "@/lib/ai/config";
 import { STATE_KEYS } from "@/lib/data/backend";
 import { activeBrandSlug } from "@/lib/active-brand";
 import { BRANDS, brandDef } from "@/lib/brands";
@@ -115,6 +120,9 @@ export default async function ConfigPage({
   const canDanger = await can("danger:run");
   const auditoria = canDanger ? await listAuditEntries(10) : [];
   const ingestKey = Boolean(process.env.TRACK_INGEST_KEY?.trim());
+  const roboConfigurado = isRoboConfigured();
+  const roboOff = await roboDesativado();
+  const mensagemAtual = await mensagemWhatsapp();
 
   const creatives = data.creatives.map((c) => ({ adId: c.adId, name: c.name }));
   const currentGoals: Record<string, number> = {};
@@ -318,6 +326,35 @@ export default async function ConfigPage({
                 ingestKey
                   ? "TRACK_INGEST_KEY definido — só a LP com a chave consegue enviar leads"
                   : "Sem TRACK_INGEST_KEY o endereço de envio aceita lead de QUALQUER origem: defina a chave no servidor (a mesma que está na LP)"
+              }
+            />
+            {/* Robô e atendimento: escolha operacional, não só credencial (D5). */}
+            <div className="flex items-start justify-between gap-3 border-b py-2.5">
+              <div className="min-w-0">
+                <p className="text-sm font-medium">Robô de WhatsApp e atendimento do especialista</p>
+                <p className="text-xs text-muted-foreground">
+                  {!roboConfigurado
+                    ? "Faltam ROBO_SUPABASE_URL e ROBO_SUPABASE_KEY — o painel funciona sem o robô."
+                    : roboOff
+                      ? "Desativado: as etapas do robô não aparecem na cascata, na Fila nem em Pessoas."
+                      : "Ativo: o painel lê o robô. Se a leitura falhar, a Fila avisa que está incompleta."}
+                </p>
+              </div>
+              {roboConfigurado && canData ? (
+                <RoboToggle ativo={!roboOff} />
+              ) : (
+                <Badge variant={roboConfigurado && !roboOff ? "good" : "muted"}>
+                  {!roboConfigurado ? "Não configurado" : roboOff ? "Desativado" : "Ativo"}
+                </Badge>
+              )}
+            </div>
+            <StatusRow
+              label="Análise por IA (Claude)"
+              ok={isAiConfigured()}
+              hint={
+                isAiConfigured()
+                  ? "ANTHROPIC_API_KEY definido — leitura do período e revisão de peças"
+                  : "Defina ANTHROPIC_API_KEY para a leitura do período e a revisão de peças"
               }
             />
             <StatusRow
@@ -596,6 +633,24 @@ export default async function ConfigPage({
           </Card>
 
         </>
+      ) : null}
+
+      {/* Mensagem do WhatsApp da Fila — quem usa é o comercial. */}
+      {canLeads || canData ? (
+        <Card id="whatsapp" className="scroll-mt-24">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <MessageCircle className="size-4 text-primary" />
+              Mensagem do WhatsApp (Fila)
+            </CardTitle>
+            <CardDescription>
+              O botão de WhatsApp da Fila abre a conversa com este texto já escrito.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <MensagemWhatsappForm atual={mensagemAtual} padrao={MENSAGEM_WHATSAPP_PADRAO} />
+          </CardContent>
+        </Card>
       ) : null}
 
       {/* Diagnóstico dos leads — lê o histórico, só altera com aprovação. */}

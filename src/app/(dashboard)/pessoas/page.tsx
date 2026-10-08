@@ -8,25 +8,22 @@ import {
   type LeadDirectoryRow,
 } from "@/components/leads/leads-directory";
 import { LeadActivity } from "@/components/leads/lead-activity";
+import { Revisar, type RevisarDados, type RevisarLead } from "@/components/leads/revisar";
 import { ComercialTable } from "@/components/robo/comercial-table";
 import { RolarParaAncora } from "@/components/ui/rolar-para-ancora";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getData, listDeletedLeads, listLeadEvents } from "@/lib/data/store";
 import { activeBrandSlug } from "@/lib/active-brand";
-import { adIdFromUtmContent, creativePerformance, everBooked, rotuloCriativo } from "@/lib/metrics";
+import { everBooked } from "@/lib/metrics";
+import { rotuladorDeOrigem } from "@/lib/origem";
 import { getComercial } from "@/lib/robo/client";
 import { can } from "@/lib/auth/guard";
 import { formatarEspera } from "@/lib/format";
+import { eventosPorLead, resumoContato } from "@/lib/contato";
+import { paraRevisar } from "@/lib/identidade";
+import type { Lead } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
-
-/** Nome do criativo a partir do utm_content ("nome|adid"): resolve pelo id do
- *  anúncio, senão mostra a parte de nome (antes do "|"). */
-function originLabel(utmContent: string | undefined, nameById: Map<string, string>): string {
-  if (!utmContent) return "—";
-  const id = adIdFromUtmContent(utmContent);
-  return (id ? nameById.get(id) : nameById.get(utmContent)) ?? utmContent.split("|")[0];
-}
 
 /** Minutos do robô → a mesma escrita de espera do resto do painel. */
 const duracao = (min: number | null) => formatarEspera(min == null ? null : min / 60);
@@ -45,11 +42,14 @@ export default async function PessoasPage() {
   const data = await getData(brand);
   const canEdit = await can("leads:write");
   const canDelete = await can("leads:delete");
-  const [events, comercial, excluidos] = await Promise.all([
-    listLeadEvents({ brand, limit: 200 }),
+  const [todosEventos, comercial, excluidos] = await Promise.all([
+    listLeadEvents({ brand, limit: 0 }),
     getComercial(),
     listDeletedLeads(brand),
   ]);
+  // O histórico na tela mostra os 200 mais recentes; o resumo de contato usa todos.
+  const events = todosEventos.slice(0, 200);
+  const porLead = eventosPorLead(todosEventos);
   const deletedRows: DeletedLeadRow[] = excluidos.map((l) => ({
     id: l.id,
     name: l.name,
@@ -57,11 +57,7 @@ export default async function PessoasPage() {
     deletedBy: l.deletedBy,
     deletedReason: l.deletedReason,
   }));
-  // O mesmo nome pode estar em dois anúncios ("Carrossel -"): a origem usa o
-  // rótulo com o conjunto quando o nome se repete, como as ações e o Dinheiro.
-  const perf = creativePerformance(data);
-  const nameById = new Map<string, string>(data.creatives.map((c) => [c.adId, c.name]));
-  for (const c of perf) nameById.set(c.adId, rotuloCriativo(c, perf));
+  const origem = rotuladorDeOrigem(data);
 
   const rows: LeadDirectoryRow[] = data.leads.map((l) => ({
     id: l.id,
@@ -69,13 +65,40 @@ export default async function PessoasPage() {
     name: l.name,
     email: l.email,
     phone: l.phone,
-    creativeName: originLabel(l.utmContent, nameById),
+    creativeName: origem(l.utmContent),
     status: l.status,
     jaAgendou: everBooked(l),
     meetingFor: l.meetingFor,
+    ...(() => {
+      const c = resumoContato(porLead.get(l.id) ?? []);
+      return { tentativas: c.tentativas, diasComTentativa: c.diasComTentativa };
+    })(),
   }));
 
   const { kpis } = comercial;
+
+  const revisarLead = (l: Lead): RevisarLead => ({
+    id: l.id,
+    name: l.name,
+    status: l.status,
+    createdAt: l.createdAt,
+    phone: l.phone,
+    email: l.email,
+    origem: origem(l.utmContent),
+  });
+  const rev = paraRevisar(data.leads);
+  const revisar: RevisarDados = {
+    testes: rev.testes.map((t) => ({ ...revisarLead(t.lead), porque: t.porque })),
+    duplicados: rev.duplicados.map((g) => ({
+      principal: revisarLead(g.principal),
+      duplicados: g.duplicados.map(revisarLead),
+      conflito: g.conflito,
+    })),
+    desistencias: rev.desistenciaSemReuniao.map(revisarLead),
+    contatos: rev.contatoComProblema.map((c) => ({ ...revisarLead(c.lead), problemas: c.problemas })),
+  };
+  const nRevisar =
+    revisar.testes.length + revisar.duplicados.length + revisar.desistencias.length + revisar.contatos.length;
 
   return (
     <div className="space-y-6">
@@ -121,6 +144,24 @@ export default async function PessoasPage() {
           <CardContent>
             <ComercialTable rows={comercial.rows} canEdit={canEdit} />
           </CardContent>
+        </Card>
+      ) : null}
+
+      {/* Higiene da base (D2): recolhida — é revisão, não o trabalho do dia. */}
+      {nRevisar > 0 && (canEdit || canDelete) ? (
+        <Card id="revisar" className="scroll-mt-24">
+          <details>
+            <summary className="cursor-pointer p-5 text-sm font-semibold select-none">
+              Revisar ({nRevisar}){" "}
+              <span className="font-normal text-muted-foreground">
+                · possíveis testes, a mesma pessoa duas vezes, desistência sem reunião e contato
+                com problema
+              </span>
+            </summary>
+            <CardContent>
+              <Revisar dados={revisar} podeAgir={canDelete} />
+            </CardContent>
+          </details>
         </Card>
       ) : null}
 

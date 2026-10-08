@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Download, Mail, MessageCircle, RotateCcw, Search, Trash2 } from "lucide-react";
 import { DataTable, type Column } from "@/components/ui/data-table";
@@ -19,8 +20,11 @@ export interface LeadDirectoryRow {
   phone?: string;
   creativeName: string;
   status: LeadStatus;
-  /** Já teve reunião marcada (`everBooked`) — libera "Desistência". */
+  /** Já teve reunião marcada (`everBooked`). */
   jaAgendou: boolean;
+  /** Tentativas de contato (decide a confirmação de "Sem resposta"). */
+  tentativas: number;
+  diasComTentativa: number;
   /** Data DA reunião. Lead agendado antes de out/2026 não tem (a coluna diz isso). */
   meetingFor?: string;
 }
@@ -110,7 +114,11 @@ function buildColumns(canEdit: boolean, canDelete: boolean): Column<LeadDirector
       header: "Nome",
       sortable: true,
       sortValue: (r) => r.name,
-      render: (r) => <span className="font-medium">{r.name}</span>,
+      render: (r) => (
+        <Link href={`/pessoas/${encodeURIComponent(r.id)}`} className="font-medium hover:underline">
+          {r.name}
+        </Link>
+      ),
     },
     {
       key: "status",
@@ -119,7 +127,15 @@ function buildColumns(canEdit: boolean, canDelete: boolean): Column<LeadDirector
       sortValue: (r) => LEAD_STATUS_META[r.status].order,
       render: (r) =>
         canEdit ? (
-          <RegistrarStatus id={r.id} name={r.name} status={r.status} jaAgendou={r.jaAgendou} />
+          <RegistrarStatus
+            id={r.id}
+            name={r.name}
+            status={r.status}
+            jaAgendou={r.jaAgendou}
+            tentativas={r.tentativas}
+            diasComTentativa={r.diasComTentativa}
+            podeReabrir={canDelete}
+          />
         ) : (
           <StatusBadge status={r.status} />
         ),

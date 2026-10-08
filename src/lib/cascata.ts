@@ -404,7 +404,11 @@ export function montarCascata(input: CascataInput): CascataResult {
       nota: divergem ? "idem — e sem valor de carta registrado" : undefined,
     });
   } else {
-    // Sem robô/comercial, o fundo do funil é o do painel.
+    // Sem robô/comercial, o fundo do funil é o do painel — e quem espera o 1º
+    // contato está parado AQUI, entre virar lead e ter reunião. Conta todos os
+    // leads ainda sem nenhuma tentativa (sem recorte de período), exatamente
+    // como a aba "Novos" da Fila: o número do farol é o número da página.
+    const semContato = data.leads.filter((l) => l.status === "lead").length;
     push({
       key: "reunioes",
       label: "Reuniões agendadas",
@@ -415,6 +419,9 @@ export function montarCascata(input: CascataInput): CascataResult {
       custoUnitario: custo(reunioesPainel),
       perda: Math.max(0, leadCount - reunioesPainel),
       dono: "COM",
+      parados: semContato > 0 ? semContato : undefined,
+      midiaParada: semContato > 0 ? semContato * (custo(leadCount) ?? 0) : undefined,
+      etapaFila: semContato > 0 ? "novo" : undefined,
     });
     push({
       key: "compareceu",

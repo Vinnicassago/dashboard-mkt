@@ -3,13 +3,16 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
-import { changeLeadStatus } from "@/app/(dashboard)/pessoas/actions";
+import { changeLeadStatus, reabrirLead } from "@/app/(dashboard)/pessoas/actions";
 import {
   LEAD_STATUS_META,
+  MOTIVOS_CONTATO_INVALIDO,
+  TENTATIVAS_PARA_SEM_RESPOSTA,
   dadoExigido,
   destinosPermitidos,
   isLostStatus,
   type DadosDaTransicao,
+  type EstadoParaTransicao,
 } from "@/lib/lead-status";
 import type { LeadStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -38,29 +41,45 @@ function lerValor(raw: string): number | undefined {
   return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
+/** Rótulo do botão quando o destino é o próprio status (remarcar). */
+function rotuloDestino(atual: LeadStatus, para: LeadStatus): string {
+  if (atual === "agendado" && para === "agendado") return "Remarcar";
+  if (atual === "no_show" && para === "agendado") return "Remarcar";
+  return LEAD_STATUS_META[para].label;
+}
+
 /**
  * Registrar o desfecho de um lead — o MESMO controle em Pessoas (`modo="select"`,
  * na linha da tabela) e na Fila (`modo="botoes"`). Só oferece destinos que a
- * régua permite (`destinosPermitidos`); "Agendado" pede data e hora e "Cliente"
- * pede o valor antes de confirmar. O servidor confere tudo de novo.
+ * máquina de estados permite (`destinosPermitidos`); pede o dado que a transição
+ * exige (data, valor, motivo, confirmação) antes de gravar. O servidor confere
+ * tudo de novo.
  */
 export function RegistrarStatus({
   id,
   name,
   status,
   jaAgendou,
+  tentativas,
+  diasComTentativa,
   modo = "select",
   opcoes,
+  podeReabrir = false,
   onDone,
 }: {
   id: string;
   name: string;
   status: LeadStatus;
-  /** O lead já teve reunião marcada (`everBooked`) — libera "Desistência". */
+  /** O lead já teve reunião marcada (`everBooked`). */
   jaAgendou: boolean;
+  /** Tentativas de contato já feitas — decidem se "Sem resposta" pede confirmação. */
+  tentativas?: number;
+  diasComTentativa?: number;
   modo?: "select" | "botoes";
-  /** Restringe os destinos (a Fila só mostra agendar e perdas). */
+  /** Restringe os destinos. */
   opcoes?: LeadStatus[];
+  /** Administrador: lead encerrado ganha "Reabrir" (com motivo). */
+  podeReabrir?: boolean;
   /** Depois de gravar. Sem isso, a página é recarregada. */
   onDone?: (message: string) => void;
 }) {
@@ -69,9 +88,12 @@ export function RegistrarStatus({
   const [escolhido, setEscolhido] = useState<LeadStatus | null>(null);
   const [data, setData] = useState("");
   const [valor, setValor] = useState("");
+  const [motivo, setMotivo] = useState("");
   const router = useRouter();
 
-  const destinos = destinosPermitidos({ status, jaAgendou }).filter((s) => !opcoes || opcoes.includes(s));
+  const estado: EstadoParaTransicao = { status, jaAgendou, tentativas, diasComTentativa };
+  const destinos = destinosPermitidos(estado).filter((s) => !opcoes || opcoes.includes(s));
+  const exigido = escolhido ? dadoExigido(escolhido, estado) : null;
 
   function enviar(para: LeadStatus, dados: DadosDaTransicao) {
     start(async () => {
@@ -81,6 +103,7 @@ export function RegistrarStatus({
       setEscolhido(null);
       setData("");
       setValor("");
+      setMotivo("");
       if (onDone) onDone(r.message);
       else router.refresh();
     });
@@ -88,11 +111,24 @@ export function RegistrarStatus({
 
   function escolher(para: LeadStatus) {
     setMsg(null);
-    if (dadoExigido(para)) setEscolhido(para);
+    if (dadoExigido(para, estado)) setEscolhido(para);
     else enviar(para, {});
   }
 
   function confirmar() {
+    if (!escolhido) return;
+    if (exigido === "motivo") {
+      if (!motivo) {
+        setMsg({ ok: false, text: "Diga por que o contato é inválido." });
+        return;
+      }
+      enviar(escolhido, { motivo });
+      return;
+    }
+    if (exigido === "confirmacao") {
+      enviar(escolhido, { confirmado: true });
+      return;
+    }
     if (escolhido === "agendado") {
       // datetime-local vem no horário do navegador; vira instante absoluto aqui.
       const t = data ? new Date(data) : null;
@@ -119,6 +155,29 @@ export function RegistrarStatus({
       {modo === "select" ? (
         <div className="flex items-center gap-2">
           <StatusBadge status={status} />
+          {destinos.length === 0 ? (
+            podeReabrir ? (
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() => {
+                  const motivo = window.prompt(`Reabrir o lead "${name}"? Diga o motivo (ex.: retornou o contato):`);
+                  if (!motivo?.trim()) return;
+                  start(async () => {
+                    const r = await reabrirLead(id, motivo);
+                    setMsg({ ok: r.ok, text: r.message });
+                    if (r.ok) {
+                      if (onDone) onDone(r.message);
+                      else router.refresh();
+                    }
+                  });
+                }}
+                className={cn(campoCls, "px-2 text-muted-foreground hover:text-foreground")}
+              >
+                Reabrir
+              </button>
+            ) : null
+          ) : (
           <select
             aria-label={`Mudar status de ${name}`}
             value=""
@@ -133,7 +192,7 @@ export function RegistrarStatus({
               <optgroup label="Em andamento">
                 {abertos.map((s) => (
                   <option key={s} value={s} title={LEAD_STATUS_META[s].hint}>
-                    {LEAD_STATUS_META[s].label}
+                    {rotuloDestino(status, s)}
                   </option>
                 ))}
               </optgroup>
@@ -148,6 +207,7 @@ export function RegistrarStatus({
               </optgroup>
             ) : null}
           </select>
+          )}
         </div>
       ) : (
         <div className="flex flex-wrap gap-1.5">
@@ -163,7 +223,7 @@ export function RegistrarStatus({
                 escolhido === s && "border-primary text-primary",
               )}
             >
-              {LEAD_STATUS_META[s].label}
+              {rotuloDestino(status, s)}
             </button>
           ))}
         </div>
@@ -171,7 +231,7 @@ export function RegistrarStatus({
 
       {escolhido ? (
         <div className="flex flex-wrap items-center gap-1.5">
-          {escolhido === "agendado" ? (
+          {exigido === "data" ? (
             <input
               type="datetime-local"
               aria-label="Data e hora da reunião"
@@ -179,7 +239,7 @@ export function RegistrarStatus({
               onChange={(e) => setData(e.target.value)}
               className={campoCls}
             />
-          ) : (
+          ) : exigido === "valor" ? (
             <input
               type="text"
               inputMode="decimal"
@@ -189,6 +249,24 @@ export function RegistrarStatus({
               onChange={(e) => setValor(e.target.value)}
               className={cn(campoCls, "w-40")}
             />
+          ) : exigido === "motivo" ? (
+            <select
+              aria-label="Por que o contato é inválido"
+              value={motivo}
+              onChange={(e) => setMotivo(e.target.value)}
+              className={campoCls}
+            >
+              <option value="">Por quê?</option>
+              {Object.entries(MOTIVOS_CONTATO_INVALIDO).map(([k, v]) => (
+                <option key={k} value={k}>
+                  {v}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span className="text-[11px] text-[var(--warning-text)]">
+              Só {tentativas ?? 0} tentativa(s) — a régua pede {TENTATIVAS_PARA_SEM_RESPOSTA} em 2 dias.
+            </span>
           )}
           <button
             type="button"
@@ -196,7 +274,15 @@ export function RegistrarStatus({
             disabled={pending}
             className="h-7 rounded-md bg-primary px-2.5 text-xs font-medium text-primary-foreground disabled:opacity-50"
           >
-            {escolhido === "agendado" ? "Agendar" : "Registrar venda"}
+            {exigido === "data"
+              ? status === "agendado" || status === "no_show"
+                ? "Remarcar"
+                : "Agendar"
+              : exigido === "valor"
+                ? "Registrar venda"
+                : exigido === "confirmacao"
+                  ? "Encerrar mesmo assim"
+                  : "Confirmar"}
           </button>
           <button
             type="button"

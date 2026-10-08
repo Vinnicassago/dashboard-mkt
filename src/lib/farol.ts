@@ -63,6 +63,8 @@ export interface FarolInput {
   parados: number;
   /** Mídia já paga pelas pessoas paradas. */
   midiaParada: number;
+  /** Onde a Fila mostra essas pessoas (o número do botão é o da página). */
+  filaHref?: string;
   /**
    * As fontes do fundo do funil (robô e atendimento) foram lidas com sucesso?
    *
@@ -141,7 +143,7 @@ export function montarFarol(input: FarolInput): Farol {
       base: input.midiaParada > 0 ? `${brl(input.midiaParada)} de mídia já paga` : undefined,
       piso: false,
       veredito: partes.join(". ") + ".",
-      acao: { label: `Abrir a fila (${input.parados})`, href: "/fila?etapa=quentes" },
+      acao: { label: `Abrir a fila (${input.parados})`, href: input.filaHref ?? "/fila?etapa=quentes" },
     };
   }
 
@@ -221,13 +223,23 @@ export function montarFarol(input: FarolInput): Farol {
 }
 
 /** Soma as pessoas paradas e a mídia já paga por elas, a partir da cascata. */
-export function contarParados(degraus: Degrau[]): { parados: number; midiaParada: number } {
+export function contarParados(degraus: Degrau[]): {
+  parados: number;
+  midiaParada: number;
+  /** Link da Fila que mostra EXATAMENTE essas pessoas. */
+  filaHref: string;
+} {
   let parados = 0;
   let midiaParada = 0;
+  const etapas = new Set<string>();
   for (const d of degraus) {
     if (!d.parados) continue;
     parados += d.parados;
     midiaParada += d.midiaParada ?? 0;
+    if (d.etapaFila) etapas.add(d.etapaFila);
   }
-  return { parados, midiaParada };
+  // Uma etapa só (ex.: "novo", sem robô) abre direto nela; as do robô juntas
+  // abrem em "quentes", o filtro que soma as duas.
+  const filaHref = etapas.size === 1 ? `/fila?etapa=${[...etapas][0]}` : "/fila?etapa=quentes";
+  return { parados, midiaParada, filaHref };
 }

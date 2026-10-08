@@ -16,6 +16,8 @@ import {
   resyncAdsCleanAction,
   setBrandMatchAction,
   setDmConversationsAction,
+  setMensagemWhatsappAction,
+  setRoboAtivoAction,
   setPresenceRoutineAction,
   setBudgetAction,
   setGoalsAction,
@@ -927,5 +929,61 @@ export function DiagnosticoLeadsPanel() {
       ) : null}
       <Message state={state} />
     </div>
+  );
+}
+
+// ---- integrações operacionais ---------------------------------------
+
+/** Chave liga/desliga do robô de WhatsApp + atendimento do especialista. */
+export function RoboToggle({ ativo }: { ativo: boolean }) {
+  const [pending, startTransition] = useTransition();
+  const [state, setState] = useState<ActionState | null>(null);
+  const router = useRouter();
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <button
+        type="button"
+        role="switch"
+        aria-checked={ativo}
+        disabled={pending}
+        onClick={() =>
+          startTransition(async () => {
+            const r = await setRoboAtivoAction(!ativo);
+            setState(r);
+            router.refresh();
+          })
+        }
+        className={cn(
+          "inline-flex h-7 items-center rounded-full border px-3 text-xs font-medium disabled:opacity-50",
+          ativo ? "border-[var(--success-text)]/40 text-[var(--success-text)]" : "text-muted-foreground",
+        )}
+      >
+        {pending ? "…" : ativo ? "Ativo — desativar" : "Desativado — ativar"}
+      </button>
+      {state ? <span className="max-w-56 text-right text-[11px] text-muted-foreground">{state.message}</span> : null}
+    </div>
+  );
+}
+
+/** Texto que o botão de WhatsApp da Fila já deixa escrito. */
+export function MensagemWhatsappForm({ atual, padrao }: { atual: string; padrao: string }) {
+  const [state, action] = useActionState(setMensagemWhatsappAction, null);
+  return (
+    <form action={action} className="space-y-2">
+      <textarea
+        name="mensagem"
+        defaultValue={atual === padrao ? "" : atual}
+        placeholder={padrao}
+        rows={3}
+        maxLength={600}
+        className="w-full rounded-lg border bg-background p-3 text-sm outline-none focus:ring-2 focus:ring-ring/40"
+      />
+      <p className="text-xs text-muted-foreground">
+        Use <code className="font-mono">{"{nome}"}</code> para o primeiro nome. Em branco = a mensagem
+        padrão (mostrada acima, apagada).
+      </p>
+      <SubmitButton>Salvar mensagem</SubmitButton>
+      <Message state={state} />
+    </form>
   );
 }

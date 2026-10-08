@@ -267,6 +267,8 @@ export const toLead = (r: Row): Lead => ({
   status: normalizeLeadStatus(s(r.status)),
   meetingAt: r.meeting_at ? iso(r.meeting_at) : undefined,
   meetingFor: r.meeting_for ? iso(r.meeting_for) : undefined,
+  firstContactAt: r.first_contact_at ? iso(r.first_contact_at) : undefined,
+  lostReasonDetail: r.lost_reason_detail ? s(r.lost_reason_detail) : undefined,
   value: r.value == null ? undefined : n(r.value),
   bookedAt: r.booked_at ? iso(r.booked_at) : undefined,
   attendedAt: r.attended_at ? iso(r.attended_at) : undefined,
@@ -295,6 +297,8 @@ export const fromLead = (l: Lead): Row => ({
   status: l.status,
   meeting_at: l.meetingAt ?? null,
   meeting_for: l.meetingFor ?? null,
+  first_contact_at: l.firstContactAt ?? null,
+  lost_reason_detail: l.lostReasonDetail ?? null,
   value: l.value ?? null,
   booked_at: l.bookedAt ?? null,
   attended_at: l.attendedAt ?? null,
@@ -426,6 +430,7 @@ export const toEvent = (r: Row): LeadEvent => ({
   fromStatus: r.from_status ? normalizeLeadStatus(s(r.from_status)) : undefined,
   toStatus: r.to_status ? normalizeLeadStatus(s(r.to_status)) : undefined,
   payload: r.payload && typeof r.payload === "object" ? (r.payload as Record<string, string>) : undefined,
+  occurredAt: r.occurred_at ? iso(r.occurred_at) : undefined,
   createdAt: iso(r.created_at),
 });
 
@@ -439,6 +444,7 @@ export const fromEvent = (e: LeadEvent): Row => ({
   from_status: e.fromStatus ?? null,
   to_status: e.toStatus ?? null,
   payload: e.payload ?? null,
+  occurred_at: e.occurredAt ?? null,
   created_at: e.createdAt,
 });
 

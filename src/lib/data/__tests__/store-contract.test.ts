@@ -99,6 +99,27 @@ function contrato(nome: string, abrir: () => Promise<{ backend: DataBackend; fec
       expect((await b.getLead(id))?.deletedAt).toBeUndefined();
     });
 
+    it("listLeads: só a marca, sem excluídos, mais recentes primeiro — e devolve cópia", async () => {
+      const velho = `LEAD-LP-lista-v-${sfx}`;
+      const novo = `LEAD-LP-lista-n-${sfx}`;
+      const fora = `LEAD-LP-lista-x-${sfx}`;
+      const outraMarca = `LEAD-LP-lista-k-${sfx}`;
+      await b.addLead({ id: velho, brand: "consorcio", createdAt: "2030-01-01T10:00:00.000Z", name: "Pessoa Teste", status: "lead" });
+      await b.addLead({ id: novo, brand: "consorcio", createdAt: "2030-01-02T10:00:00.000Z", name: "Pessoa Teste", status: "lead" });
+      await b.addLead({ id: fora, brand: "consorcio", createdAt: "2030-01-03T10:00:00.000Z", name: "Pessoa Teste", status: "lead" });
+      await b.addLead({ id: outraMarca, brand: "krone", createdAt: "2030-01-04T10:00:00.000Z", name: "Pessoa Teste", status: "lead" });
+      await b.softDeleteLead(fora, { at: new Date().toISOString(), by: "admin", reason: "teste" });
+
+      const ids = (await b.listLeads("consorcio")).map((l) => l.id);
+      expect(ids).not.toContain(fora);
+      expect(ids).not.toContain(outraMarca);
+      expect(ids.indexOf(novo)).toBeLessThan(ids.indexOf(velho));
+
+      const [primeiro] = (await b.listLeads("consorcio")).filter((l) => l.id === novo);
+      primeiro.status = "cliente";
+      expect((await b.getLead(novo))?.status).toBe("lead");
+    });
+
     it("histórico filtra por marca (eventos antigos sem marca aparecem em todas) e limit 0 = tudo", async () => {
       await b.addLeadEvent(evento(`L-k-${sfx}`, `EVT-k-${sfx}`, "created", "krone"));
       await b.addLeadEvent({ ...evento(`L-n-${sfx}`, `EVT-n-${sfx}`, "created"), brand: undefined });
@@ -134,6 +155,43 @@ function contrato(nome: string, abrir: () => Promise<{ backend: DataBackend; fec
       const ids = (await b.listLeadEvents({ limit: 0 })).map((e) => e.id);
       expect(ids).toContain(`EVT-r-${sfx}`);
       expect(ids.filter((x) => x === "EVT-S-1")).toHaveLength(1);
+    });
+
+    it("1º contato é marco (grava uma vez; só o desfazer limpa) e o evento guarda quando aconteceu", async () => {
+      const id = `LEAD-LP-contato-${sfx}`;
+      await b.addLead({ id, brand: "consorcio", createdAt: "2026-10-08T12:00:00.000Z", name: "Pessoa Teste", status: "lead" });
+      await b.setLeadStatus(id, "em_contato", { firstContactAt: "2026-10-08T12:30:00.000Z" });
+      await b.setLeadStatus(id, "em_contato", { firstContactAt: "2026-10-08T15:00:00.000Z" });
+      expect((await b.getLead(id))?.firstContactAt).toBe("2026-10-08T12:30:00.000Z");
+      await b.setLeadStatus(id, "lead", { firstContactAt: null });
+      expect((await b.getLead(id))?.firstContactAt).toBeUndefined();
+
+      await b.addLeadEvent({
+        ...evento(id, `EVT-t-${sfx}`, "tentativa"),
+        occurredAt: "2026-10-08T12:30:00.000Z",
+        payload: { canal: "whatsapp", falou: "nao" },
+      });
+      const ev = (await b.listLeadEvents({ leadId: id })).find((e) => e.id === `EVT-t-${sfx}`);
+      expect(ev?.occurredAt).toBe("2026-10-08T12:30:00.000Z");
+      expect(ev?.payload).toEqual({ canal: "whatsapp", falou: "nao" });
+    });
+
+    it("motivo da perda é gravado e limpo quando o lead sai da perda", async () => {
+      const id = `LEAD-LP-motivo-${sfx}`;
+      await b.addLead({ id, brand: "consorcio", createdAt: new Date().toISOString(), name: "Pessoa Teste", status: "lead" });
+      await b.setLeadStatus(id, "contato_invalido", { lostAt: new Date().toISOString(), lostReasonDetail: "Sem WhatsApp" });
+      expect((await b.getLead(id))?.lostReasonDetail).toBe("Sem WhatsApp");
+      await b.setLeadStatus(id, "lead", { lostAt: null, lostReasonDetail: null });
+      expect((await b.getLead(id))?.lostReasonDetail).toBeUndefined();
+    });
+
+    it("getLead devolve uma cópia: escrever depois não muda o que já foi lido", async () => {
+      const id = `LEAD-LP-copia-${sfx}`;
+      await b.addLead({ id, brand: "consorcio", createdAt: new Date().toISOString(), name: "Pessoa Teste", status: "lead" });
+      const lido = await b.getLead(id);
+      await b.setLeadStatus(id, "em_contato", {});
+      expect(lido?.status).toBe("lead");
+      expect((await b.getLead(id))?.status).toBe("em_contato");
     });
 
     it("registro de auditoria", async () => {

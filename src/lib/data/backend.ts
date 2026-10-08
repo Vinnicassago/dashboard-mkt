@@ -36,6 +36,13 @@ export interface LeadStatusPatch {
   meetingAt?: string;
   /** Data da reunião — sobrescreve (remarcar troca a data). */
   meetingFor?: string;
+  /**
+   * Marco da 1ª tentativa de contato — gravado uma vez, como os outros marcos.
+   * `null` limpa: só quando a única tentativa foi desfeita (o fato não aconteceu).
+   */
+  firstContactAt?: string | null;
+  /** Detalhe do motivo de perda. `null` limpa (lead saiu da perda). */
+  lostReasonDetail?: string | null;
   value?: number;
   bookedAt?: string;
   attendedAt?: string;
@@ -119,6 +126,11 @@ export interface DataBackend {
   softDeleteLead(id: string, info: { at: string; by: string; reason: string }): Promise<void>;
   restoreLead(id: string): Promise<void>;
   listDeletedLeads(brand: string): Promise<Lead[]>;
+  /**
+   * Leads da marca, sem os excluídos, mais recentes primeiro — só os leads, sem
+   * carregar o resto de `getData` (a entrada da LP procura a mesma pessoa aqui).
+   */
+  listLeads(brand: string): Promise<Lead[]>;
   upsertGoal(goal: Goal): Promise<void>;
   /** Grava o orçamento da campanha da marca, criando a linha da campanha se o
    *  banco ainda não tiver uma (produção nunca rodou o seed). */

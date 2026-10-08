@@ -1,7 +1,12 @@
 import "server-only";
 import { addLeadEvent, setLeadStatus } from "../data/store";
 import { isBooked } from "../metrics";
-import { isBookedStatus, isLostStatus, type DadosDaTransicao } from "../lead-status";
+import {
+  MOTIVOS_CONTATO_INVALIDO,
+  isBookedStatus,
+  isLostStatus,
+  type DadosDaTransicao,
+} from "../lead-status";
 import { currentActor, newEventId } from "../auth/actor";
 import { sendCapiEvent } from "../meta/capi";
 import { sendGa4Event } from "../ga4/measurement-protocol";
@@ -10,6 +15,15 @@ import type { Lead, LeadStatus } from "../types";
 export interface StatusResult {
   ok: boolean;
   message: string;
+}
+
+/** O que a mudança carregou junto, para o histórico (reunião, motivo, confirmação). */
+function payloadDaMudanca(dados: DadosDaTransicao, motivo?: string): Record<string, string> | undefined {
+  const p: Record<string, string> = {};
+  if (dados.meetingFor) p.reuniao = dados.meetingFor;
+  if (motivo) p.motivo = motivo;
+  if (dados.confirmado) p.abaixoDaRegua = "sim";
+  return Object.keys(p).length ? p : undefined;
 }
 
 /**
@@ -27,6 +41,7 @@ export async function aplicarStatus(
   const wasBooked = isBooked(lead);
   const becomesBooked = isBookedStatus(status);
   const now = new Date().toISOString();
+  const motivo = dados.motivo ? (MOTIVOS_CONTATO_INVALIDO[dados.motivo] ?? dados.motivo) : undefined;
 
   /**
    * Carimba os marcos desta transição. O store só grava o que ainda estiver
@@ -40,6 +55,7 @@ export async function aplicarStatus(
     attendedAt: status === "reuniao_realizada" || status === "cliente" ? now : undefined,
     closedAt: status === "cliente" ? now : undefined,
     lostAt: isLostStatus(status) ? now : null,
+    lostReasonDetail: isLostStatus(status) ? (motivo ?? null) : null,
   });
 
   // Audit trail: record who changed the status, and from/to what.
@@ -53,7 +69,7 @@ export async function aplicarStatus(
       action: "status_changed",
       fromStatus: prevStatus,
       toStatus: status,
-      payload: dados.meetingFor ? { reuniao: dados.meetingFor } : undefined,
+      payload: payloadDaMudanca(dados, motivo),
       createdAt: now,
     });
   }

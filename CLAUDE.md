@@ -19,6 +19,14 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   reconhecido). Exclusão é **reversível** (`softDeleteLead`, `deleted_at`): o lead
   some de `getData` e das métricas, a linha e os eventos ficam. Nunca `DELETE` em
   `leads` nem em `lead_events` — nem no reset do exemplo.
+- **Identidade** (Fase 2, `lib/identidade.ts`, pura): lead é PESSOA. Envio com
+  event_id novo cujo telefone/e-mail já é de um lead da marca (`acharMesmaPessoa`)
+  vira `reenvio` NESSE lead; se ele estava perdido, volta a "Novo" (evento
+  `reaberto`, aviso ao n8n) — o mesmo event_id reenviado nunca reabre nada. Pelo
+  CONTATO, nunca pelo nome. Teste, duplicado e desistência sem reunião aparecem em
+  Pessoas → Revisar e só uma pessoa decide: mesclar (`mesclarLeads`) = o principal
+  recebe contato e marcos vazios, o duplicado é excluído de forma reversível com o
+  motivo e o principal ganha evento `mesclado`. Nada é corrigido sozinho.
 - **APIs Meta** (`src/lib/meta/*`): versão **fixada** em `config.ts` — não use o
   default. Janela retroativa + upsert (insights atrasam até 48h). No Instagram, só
   `reach` tem série temporal; o resto é 1 request por dia. Leads vêm de
@@ -73,7 +81,15 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   clique), "Cliente" exige valor, "Desistência" só para quem já agendou
   (`everBooked`). A tela usa `destinosPermitidos`; o servidor confere de novo
   (`changeLeadStatus`). Gravar status = `aplicarStatus` (`lib/leads/mudar-status.ts`),
-  usado pela tela e pela ponte do robô.
+  usado pela tela e pela ponte do robô. **Máquina** (Fase 2): `TRANSICOES` é a fonte
+  ÚNICA dos destinos; perda e cliente ENCERRAM (sair = `reabrirLead`, admin, com
+  motivo); "Em contato" nunca é escolhido — nasce da 1ª tentativa; "Não compareceu"
+  (`no_show`) conta como agendou; "Sem resposta" antes de 3 tentativas em 2 dias pede
+  confirmação; "Contato inválido" exige motivo (`MOTIVOS_CONTATO_INVALIDO`).
+- **Tentativas** (`lib/contato.ts`, puro): NÃO há contador no lead — tudo sai dos
+  eventos `tentativa` (canal, falou, próxima pela `CADENCIA_HORAS`; `occurredAt` =
+  quando aconteceu). `resumoContato` é a leitura única. Desfazer = evento `desfeito`
+  apontando para ela (nada é apagado). A 1ª carimba o marco `firstContactAt`.
 - **Marcos vs. status** (migração `0012`): `status` é o estado ATUAL (rótulo, cor,
   fila) e é mutável; `bookedAt`/`attendedAt`/`closedAt` são o FATO, gravados uma vez
   e nunca sobrescritos (`coalesce` no Postgres, `??=` nos outros backends). A
@@ -109,7 +125,14 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   `src/lib/phone.ts` (fonte única do pareamento, usada também pela ponte do Comercial) —
   a mesma pessoa costuma estar em duas filas, e vence a etapa mais funda. Etapa nova =
   entrada em `FILA_ETAPAS` + um ramo em `montarFila`. Rótulo de dono (marketing, robô,
-  comercial) vem de `src/lib/dono.ts`.
+  comercial) vem de `src/lib/dono.ts`. Etapas do painel saem de `etapaDoLead` (novo,
+  retornar, confirmar, sem desfecho); prazos em **horas úteis** (`lib/horario-util.ts`,
+  seg–sex 9h–18h Brasília, UTC−3 fixo, sem feriados) — "novo" é 1 hora útil. Lead
+  reaberto recomeça o relógio no `reaberto`. Robô desligado em Ajustes
+  (`robo_desativado`, `roboLigado()`) some com as etapas dele — desligado não é erro.
+  A ficha (`/pessoas/[id]`) não é página de menu: abre pelo nome em Pessoas, Fila,
+  histórico e no link do aviso. Aviso de lead novo = webhook do n8n (`lib/avisos.ts`,
+  `N8N_LEAD_WEBHOOK_URL`); falha no aviso nunca derruba a entrada do lead.
 - **Navegação** (`components/layout/nav-items.ts`): 7 páginas nomeadas pela PERGUNTA
   que respondem (Hoje, Dinheiro, Jornada, Fila, Pessoas, Conteúdo, Ajustes), não pela
   fonte do dado — eram 14, uma por sistema, e a mesma pessoa aparecia contada em três

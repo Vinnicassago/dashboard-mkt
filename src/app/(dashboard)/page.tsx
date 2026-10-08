@@ -145,7 +145,7 @@ export default async function OverviewPage({
    * duas vezes com valores 2,4x diferentes, e "Transferidos: 6" duplicava um
    * degrau da cascata lendo outra view do banco.
    */
-  const { parados, midiaParada } = contarParados(cascata.degraus);
+  const { parados, midiaParada, filaHref } = contarParados(cascata.degraus);
 
   // As juntas com gente parada viram a ação nº 1 — o motor de recomendação não
   // enxergava robô nem fila, então nunca propunha falar com quem já foi pago.
@@ -174,6 +174,7 @@ export default async function OverviewPage({
     metaCpr: data.goals.find((g) => g.metric === "cpr")?.target,
     parados,
     midiaParada,
+    filaHref,
     // Robô DESLIGADO (sem credencial) é ausência, não falha: a cascata cai no
     // funil do painel e o farol segue. Só a leitura que QUEBROU vira "não sei".
     fontesOk: fontesCascata.falha?.tipo !== "erro",

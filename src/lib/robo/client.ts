@@ -1,6 +1,7 @@
 import "server-only";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { CascataComercial, CascataRobo } from "@/lib/cascata";
+import { roboDesativado } from "@/lib/integracoes";
 
 /**
  * Cliente do Supabase do robô de WhatsApp — banco SEPARADO do store do painel.
@@ -15,6 +16,14 @@ const key = process.env.ROBO_SUPABASE_KEY;
 
 export function isRoboConfigured(): boolean {
   return Boolean(url && key);
+}
+
+/**
+ * Credencial presente E não desativado em Ajustes. Desativado devolve
+ * "desligado" em toda leitura — as etapas do robô somem, sem erro (D5).
+ */
+async function roboLigado(): Promise<boolean> {
+  return isRoboConfigured() && !(await roboDesativado());
 }
 
 let cached: SupabaseClient | null = null;
@@ -132,7 +141,7 @@ function primeiroErro(...res: { error: { message: string } | null }[]): RoboFalh
  * vez de zeros, que seriam indistinguíveis de "o robô não fez nada hoje".
  */
 export async function getRoboSnapshot(desde?: string): Promise<RoboSnapshot> {
-  if (!isRoboConfigured()) {
+  if (!(await roboLigado())) {
     return { kpis: null, diario: [], motivos: [], saude: null, pendentes: [], falha: DESLIGADO };
   }
   const sb = client();
@@ -181,7 +190,7 @@ export async function getTransferidos(
   desde?: string,
   ate?: string,
 ): Promise<{ valor: number | null; falha: RoboFalha }> {
-  if (!isRoboConfigured()) return { valor: null, falha: DESLIGADO };
+  if (!(await roboLigado())) return { valor: null, falha: DESLIGADO };
   const q = client().from("vw_robo_diario").select("transferidos");
   if (desde) q.gte("dia", desde);
   if (ate) q.lte("dia", ate);
@@ -203,7 +212,7 @@ export async function getTransferidos(
 export async function getRoboLeads(
   etapa = "convite_pendente",
 ): Promise<{ rows: RoboPendente[]; falha: RoboFalha }> {
-  if (!isRoboConfigured()) return { rows: [], falha: DESLIGADO };
+  if (!(await roboLigado())) return { rows: [], falha: DESLIGADO };
   const res = await client()
     .from("vw_robo_leads")
     .select("nome,telefone,score,ultima_interacao")
@@ -225,7 +234,7 @@ export async function getCascataFontes(): Promise<{
   comercial: CascataComercial | null;
   falha: RoboFalha;
 }> {
-  if (!isRoboConfigured()) return { robo: null, comercial: null, falha: DESLIGADO };
+  if (!(await roboLigado())) return { robo: null, comercial: null, falha: DESLIGADO };
   const sb = client();
   const [kpis, com] = await Promise.all([
     sb.from("vw_robo_kpis").select("*").maybeSingle(),
@@ -297,7 +306,7 @@ export async function getComercial(): Promise<{
   kpis: ComercialKpis | null;
   falha: RoboFalha;
 }> {
-  if (!isRoboConfigured()) return { rows: [], kpis: null, falha: DESLIGADO };
+  if (!(await roboLigado())) return { rows: [], kpis: null, falha: DESLIGADO };
   const sb = client();
   const [rows, kpis] = await Promise.all([
     sb.from("vw_robo_comercial").select("*").order("transferido_em", { ascending: false }),

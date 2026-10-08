@@ -70,9 +70,9 @@ const POST_COLS = ["id", "brand", "published_at", "type", "caption", "permalink"
 const CREATIVE_COLS = ["ad_id", "brand", "name", "format", "thumbnail_url", "video_plays", "thru_plays", "instagram_media_id", "instagram_permalink"];
 const AD_COLS = ["brand", "date", "ad_id", "campaign", "adset", "objective", "spend", "impressions", "reach", "frequency", "clicks", "leads"];
 const LP_COLS = ["brand", "date", "visits", "clicks", "form_submits"];
-const LEAD_COLS = ["id", "brand", "created_at", "name", "email", "phone", "utm_source", "utm_campaign", "utm_content", "status", "meeting_at", "meeting_for", "value", "booked_at", "attended_at", "closed_at", "lost_at", "robo_session_id", "fbc", "fbp", "ga_client_id", "ga_session_id", "deleted_at", "deleted_by", "deleted_reason"];
+const LEAD_COLS = ["id", "brand", "created_at", "name", "email", "phone", "utm_source", "utm_campaign", "utm_content", "status", "meeting_at", "meeting_for", "first_contact_at", "lost_reason_detail", "value", "booked_at", "attended_at", "closed_at", "lost_at", "robo_session_id", "fbc", "fbp", "ga_client_id", "ga_session_id", "deleted_at", "deleted_by", "deleted_reason"];
 const GOAL_COLS = ["brand", "metric", "period", "target", "lower_is_better"];
-const EVENT_COLS = ["id", "lead_id", "brand", "lead_name", "actor", "action", "from_status", "to_status", "payload", "created_at"];
+const EVENT_COLS = ["id", "lead_id", "brand", "lead_name", "actor", "action", "from_status", "to_status", "payload", "occurred_at", "created_at"];
 const AUDIT_COLS = ["id", "at", "actor", "action", "detail"];
 const DRAFT_COLS = ["id", "brand", "status", "created_at", "updated_at", "planned_for", "type", "pillar", "hook_text", "hook_spoken", "promise", "script", "caption", "cta_type", "cta_keyword", "duration_sec", "has_burned_captions", "score", "validated_at", "playbook_version", "published_post_id", "notes", "ai_review", "validation_failed"];
 
@@ -357,8 +357,11 @@ export const postgresBackend: DataBackend = {
 
     if (patch?.meetingAt !== undefined) set("meeting_at", patch.meetingAt);
     if (patch?.meetingFor !== undefined) set("meeting_for", patch.meetingFor);
+    if (patch?.lostReasonDetail !== undefined) set("lost_reason_detail", patch.lostReasonDetail);
     if (patch?.value !== undefined) set("value", patch.value);
     if (patch?.roboSessionId !== undefined) set("robo_session_id", patch.roboSessionId);
+    if (patch?.firstContactAt === null) set("first_contact_at", null);
+    else stamp("first_contact_at", patch?.firstContactAt);
     stamp("booked_at", patch?.bookedAt);
     stamp("attended_at", patch?.attendedAt);
     stamp("closed_at", patch?.closedAt);
@@ -388,6 +391,14 @@ export const postgresBackend: DataBackend = {
   async listDeletedLeads(brand: string): Promise<Lead[]> {
     const rows = await q(
       "select * from leads where brand = $1 and deleted_at is not null order by deleted_at desc",
+      [brand],
+    );
+    return rows.map(toLead);
+  },
+
+  async listLeads(brand: string): Promise<Lead[]> {
+    const rows = await q(
+      "select * from leads where brand = $1 and deleted_at is null order by created_at desc",
       [brand],
     );
     return rows.map(toLead);

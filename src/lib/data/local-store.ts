@@ -122,7 +122,8 @@ function migrateLeadMilestones(file: LocalFile) {
 
   for (const l of file.data.leads ?? []) {
     const ev = earliest.get(l.id);
-    const advanced = l.status === "agendado" || l.status === "reuniao_realizada" || l.status === "cliente";
+    const advanced =
+      l.status === "agendado" || l.status === "no_show" || l.status === "reuniao_realizada" || l.status === "cliente";
     const attended = l.status === "reuniao_realizada" || l.status === "cliente";
     l.bookedAt ??= l.meetingAt ?? ev?.booked ?? (advanced ? l.createdAt : undefined);
     l.attendedAt ??= ev?.attended ?? (attended ? l.createdAt : undefined);
@@ -336,7 +337,10 @@ export const localBackend: DataBackend = {
   },
 
   async getLead(id: string) {
-    return file().data.leads.find((l) => l.id === id) ?? null;
+    // CÓPIA: devolver o objeto do cache fazia quem leu ver a própria escrita
+    // seguinte (o "status anterior" mudava junto) — o Postgres nunca faz isso.
+    const l = file().data.leads.find((x) => x.id === id);
+    return l ? { ...l } : null;
   },
 
   async setLeadCreatedAt(id: string, createdAt: string) {
@@ -353,10 +357,13 @@ export const localBackend: DataBackend = {
       lead.status = status;
       if (patch?.meetingAt !== undefined) lead.meetingAt = patch.meetingAt;
       if (patch?.meetingFor !== undefined) lead.meetingFor = patch.meetingFor;
+      if (patch?.lostReasonDetail !== undefined) lead.lostReasonDetail = patch.lostReasonDetail ?? undefined;
       if (patch?.value !== undefined) lead.value = patch.value;
       if (patch?.roboSessionId !== undefined) lead.roboSessionId = patch.roboSessionId;
       // Marcos: gravados uma vez, nunca sobrescritos — é o que impede uma perda
       // registrada depois de apagar a reunião que aconteceu.
+      if (patch?.firstContactAt === null) delete lead.firstContactAt;
+      else lead.firstContactAt ??= patch?.firstContactAt;
       lead.bookedAt ??= patch?.bookedAt;
       lead.attendedAt ??= patch?.attendedAt;
       lead.closedAt ??= patch?.closedAt;
@@ -388,6 +395,13 @@ export const localBackend: DataBackend = {
     return file()
       .data.leads.filter((l) => l.brand === brand && l.deletedAt)
       .sort((a, b) => (b.deletedAt ?? "").localeCompare(a.deletedAt ?? ""));
+  },
+
+  async listLeads(brand: string) {
+    return file()
+      .data.leads.filter((l) => l.brand === brand && !l.deletedAt)
+      .map((l) => ({ ...l }))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   },
 
   async upsertGoal(goal: Goal) {

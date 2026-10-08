@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
-import { addLead, addLeadEvent, bumpLpDaily, getLead } from "@/lib/data/store";
+import { addLead, addLeadEvent, bumpLpDaily, getLead, listLeads, setLeadStatus } from "@/lib/data/store";
 import { DEFAULT_BRAND, type Lead } from "@/lib/types";
 import { candidatosIdLead, resolverIdLead } from "@/lib/lead-id";
 import { mesmoTelefone } from "@/lib/phone";
+import { acharMesmaPessoa } from "@/lib/identidade";
+import { isLostStatus } from "@/lib/lead-status";
 import { newEventId } from "@/lib/auth/actor";
+import { avisarLeadNovo } from "@/lib/avisos";
 import { sendCapiEvent } from "@/lib/meta/capi";
 import { sendGa4Event } from "@/lib/ga4/measurement-protocol";
 
@@ -149,7 +152,16 @@ export async function POST(request: Request) {
     (id) => candidatos.get(id),
     () => randomUUID().slice(0, 8),
   );
-  const leadId = resolucao.id;
+  let leadId = resolucao.id;
+
+  // A mesma pessoa com OUTRO event_id (outro dia, outra LP, outro anúncio): o
+  // contato identifica. Vira reenvio no lead que já existe — dois leads da mesma
+  // pessoa contavam em dobro no custo por lead e caíam duas vezes na fila (D2).
+  let jaCadastrado: Lead | undefined;
+  if (resolucao.tipo !== "reenvio") {
+    jaCadastrado = acharMesmaPessoa({ phone, email }, await listLeads(DEFAULT_BRAND), DEFAULT_BRAND);
+    if (jaCadastrado) leadId = jaCadastrado.id;
+  }
 
   // Envio de formulário é EVENTO (conta reenvios); lead é PESSOA.
   await bumpLpDaily(date, { formSubmits: 1 });
@@ -174,13 +186,19 @@ export async function POST(request: Request) {
 
   // No reenvio, o contato que chegou diferente do gravado fica no histórico
   // (o lead não é sobrescrito — quem atende decide qual vale).
-  const anterior = candidatos.get(leadId);
+  const anterior = jaCadastrado ?? candidatos.get(leadId);
   const payload: Record<string, string> = {};
   if (!created && anterior) {
     if (phone && anterior.phone && !mesmoTelefone(phone, anterior.phone)) payload.telefoneNovo = phone;
     if (email && anterior.email && email.toLowerCase() !== anterior.email.toLowerCase()) payload.emailNovo = email;
   }
-  if (resolucao.tipo === "colisao") payload.idOcupado = resolucao.idOcupado;
+  if (jaCadastrado) {
+    payload.pelo = phone && jaCadastrado.phone && mesmoTelefone(phone, jaCadastrado.phone) ? "telefone" : "e-mail";
+    // O anúncio que trouxe a pessoa DE VOLTA (a origem gravada é a da 1ª entrada).
+    if (attr.utm_content && attr.utm_content !== jaCadastrado.utmContent) payload.origemNova = attr.utm_content;
+  } else if (resolucao.tipo === "colisao") {
+    payload.idOcupado = resolucao.idOcupado;
+  }
 
   await addLeadEvent({
     id: newEventId(),
@@ -194,9 +212,34 @@ export async function POST(request: Request) {
     createdAt: new Date().toISOString(),
   });
 
+  // Quem foi dado como perdido e preencheu o formulário DE NOVO (envio novo, não
+  // o mesmo reenviado) quer conversa: volta para a fila como novo, com aviso.
+  // O mesmo event_id reenviado (retentativa, relay) nunca reabre nada.
+  if (!created && jaCadastrado && isLostStatus(jaCadastrado.status)) {
+    await setLeadStatus(leadId, "lead", { lostAt: null, lostReasonDetail: null });
+    await addLeadEvent({
+      id: newEventId(),
+      leadId,
+      brand: DEFAULT_BRAND,
+      leadName: jaCadastrado.name,
+      actor: "Landing page",
+      action: "reaberto",
+      fromStatus: jaCadastrado.status,
+      toStatus: "lead",
+      payload: { motivo: "Preencheu o formulário de novo" },
+      createdAt: new Date().toISOString(),
+    });
+    const voltou = await getLead(leadId);
+    if (voltou) await avisarLeadNovo(voltou, "lead_voltou");
+  }
+
   // Reenvio não é conversão nova: a Meta deduplicaria pelo event_id, mas o GA4
   // contaria duas vezes. Nada sai.
   if (!created) return NextResponse.json({ ok: true, leadId }, { headers });
+
+  // Lead novo: avisa quem atende (n8n). Velocidade de contato é a alavanca nº 1.
+  const novo = await getLead(leadId);
+  if (novo) await avisarLeadNovo(novo);
 
   // The user agent of THIS request is the visitor's browser (the landing page
   // posts directly), which is exactly what CAPI requires.

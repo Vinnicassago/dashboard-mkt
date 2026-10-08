@@ -25,11 +25,19 @@
 
 import { formatarEspera } from "./format";
 import { chaveTelefone } from "./phone";
-import type { Lead } from "./types";
+import { horasUteisEntre, somarHorasUteis } from "./horario-util";
+import { eventosPorLead, resumoContato, type ResumoContato } from "./contato";
+import type { Lead, LeadEvent, LeadStatus } from "./types";
 
 // ---------------------------------------------------------------- vocabulário
 
-export type FilaEtapa = "aguardando-contato" | "convite-pendente" | "sem-status";
+export type FilaEtapa =
+  | "aguardando-contato"
+  | "convite-pendente"
+  | "novo"
+  | "retornar"
+  | "confirmar"
+  | "sem-desfecho";
 export type FilaDono = "COM" | "BOT";
 
 /**
@@ -43,11 +51,15 @@ export type FilaDono = "COM" | "BOT";
  */
 export type FiltroFila = FilaEtapa | "todos" | "quentes";
 export const ETAPAS_QUENTES: FilaEtapa[] = ["aguardando-contato", "convite-pendente"];
+/** Etapas que só existem com o robô ligado. */
+export const ETAPAS_DO_ROBO: FilaEtapa[] = ["aguardando-contato", "convite-pendente"];
 
 export interface EtapaMeta {
   label: string;
   /** Prazo em horas a partir do qual o item está atrasado. */
   slaHoras: number;
+  /** O prazo conta só horas úteis (`lib/horario-util.ts`), não corridas. */
+  horasUteis?: boolean;
   dono: FilaDono;
   /** O que aconteceu, para o card não precisar de legenda. */
   hint: string;
@@ -77,14 +89,48 @@ export const FILA_ETAPAS: Record<FilaEtapa, EtapaMeta> = {
     hint: "O robô ofereceu falar com o especialista e o lead não respondeu — retome pelo WhatsApp.",
     profundidade: 2,
   },
-  "sem-status": {
-    label: "Sem contato registrado",
-    slaHoras: 48,
+  /*
+   * Etapas do painel (o comercial registra tudo aqui). O prazo do 1º contato era
+   * 48h; com o robô parado, todo primeiro contato é manual, e quem tenta na 1ª
+   * hora qualifica ~7× mais que quem tenta uma hora depois (HBR, 2011).
+   */
+  novo: {
+    label: "Novos — ligar agora",
+    slaHoras: 1,
+    horasUteis: true,
     dono: "COM",
-    hint: "Entrou pela landing page e ninguém marcou nenhum desfecho.",
+    hint: "Entrou e ninguém tentou contato. Prazo: 1 hora útil.",
     profundidade: 1,
   },
+  retornar: {
+    label: "Retornar hoje",
+    slaHoras: 4,
+    horasUteis: true,
+    dono: "COM",
+    hint: "Já houve tentativa e o retorno combinado pela cadência venceu.",
+    profundidade: 1.5,
+  },
+  confirmar: {
+    label: "Reuniões a confirmar",
+    slaHoras: 48,
+    dono: "COM",
+    hint: "Reunião nas próximas 48 horas — confirme com a pessoa.",
+    profundidade: 4,
+  },
+  "sem-desfecho": {
+    label: "Reuniões sem desfecho",
+    slaHoras: 24,
+    horasUteis: true,
+    dono: "COM",
+    hint: "A data da reunião passou e ninguém registrou se ela aconteceu.",
+    profundidade: 5,
+  },
 };
+
+/** Horas sem resposta depois de falar com a pessoa até ela voltar à fila. */
+const HORAS_APOS_CONVERSA = 24;
+/** Reunião agendada antes de existir data (legado): sem desfecho depois disto. */
+const DIAS_AGENDADO_SEM_DATA = 7;
 
 export interface FilaItem {
   /** Chave estável para React e para as ações. */
@@ -104,8 +150,16 @@ export interface FilaItem {
   sessionId?: string;
   /** Lead no painel — habilita mudar status. */
   leadId?: string;
+  /** Status atual do lead do painel (decide quais desfechos aparecem). */
+  status?: LeadStatus;
   /** O lead do painel já teve reunião marcada — só então "Desistência" é opção. */
   jaAgendou?: boolean;
+  /** Tentativas de contato já feitas (painel). */
+  contato?: ResumoContato;
+  /** Data da reunião (confirmar / sem desfecho). */
+  reuniao?: string;
+  /** Até quando cumpre o prazo (1º contato): "vence às…". */
+  venceEm?: string;
   /** Contexto que o robô já colheu, para não começar a conversa do zero. */
   briefing?: string;
   /** Outras etapas em que esta mesma pessoa também aparece. */
@@ -151,6 +205,8 @@ export interface FilaInput {
   nowIso: string;
   /** Leads do painel. Só os que ainda não têm desfecho entram. */
   leads: Lead[];
+  /** Histórico dos leads (tentativas de contato). Sem ele, ninguém está "em retorno". */
+  eventos?: LeadEvent[];
   convites: EntradaConvite[];
   comercial: EntradaComercial[];
 }
@@ -214,22 +270,28 @@ export function montarFila(input: FilaInput): FilaResult {
     });
   }
 
-  // 3. Leads do painel sem desfecho registrado.
+  // 3. Leads do painel: o trabalho do comercial, etapa por etapa.
+  const porLead = eventosPorLead(input.eventos ?? []);
   for (const l of input.leads) {
-    if (l.status !== "lead") continue;
-    const horas = horasDesde(l.createdAt, now);
+    const etapa = etapaDoLead(l, porLead.get(l.id) ?? [], input.nowIso);
+    if (!etapa) continue;
+    const { nome: e, desde, horasUteis, reuniao, venceEm, contato } = etapa;
+    const meta = FILA_ETAPAS[e];
     itens.push({
       id: `lead:${l.id}`,
-      etapa: "sem-status",
+      etapa: e,
       nome: l.name,
       telefone: l.phone,
       email: l.email,
-      desde: l.createdAt,
-      horasEsperando: horas,
-      atraso: calcAtraso(horas, FILA_ETAPAS["sem-status"].slaHoras),
+      desde,
+      horasEsperando: horasDesde(desde, now),
+      atraso: e === "confirmar" ? etapa.atraso! : calcAtraso(horasUteis, meta.slaHoras),
       leadId: l.id,
-      // Na fila só entra status "lead": aqui o marco é o único sinal de agendamento.
-      jaAgendou: Boolean(l.bookedAt),
+      status: l.status,
+      jaAgendou: Boolean(l.bookedAt) || ["agendado", "no_show", "reuniao_realizada"].includes(l.status),
+      contato,
+      reuniao,
+      venceEm,
       tambemEm: [],
     });
   }
@@ -305,6 +367,88 @@ export function montarFila(input: FilaInput): FilaResult {
   });
 
   return { itens: finais, resumo, total: finais.length };
+}
+
+interface EtapaCalculada {
+  nome: FilaEtapa;
+  /** Desde quando esta etapa está esperando. */
+  desde: string;
+  /** Horas (úteis quando a etapa conta úteis) desde `desde`. */
+  horasUteis: number;
+  /** Só "confirmar": 0–1, mais perto da reunião = mais alto. */
+  atraso?: number;
+  reuniao?: string;
+  venceEm?: string;
+  contato?: ResumoContato;
+}
+
+/**
+ * Em que etapa da fila um lead do painel está AGORA — ou nenhuma (não há nada a
+ * fazer com ele neste momento). Pura; exportada para os testes.
+ */
+export function etapaDoLead(l: Lead, eventos: LeadEvent[], nowIso: string): EtapaCalculada | null {
+  const now = Date.parse(nowIso);
+  const uteis = (de: string) => horasUteisEntre(de, nowIso);
+  // Lead reaberto (pelo administrador, ou porque preencheu o formulário de novo):
+  // o relógio recomeça ali — senão quem voltou hoje entraria com "3 semanas".
+  const reaberto = eventos
+    .filter((e) => e.action === "reaberto")
+    .map((e) => e.createdAt)
+    .sort()
+    .at(-1);
+  const desdeReaberto = (base: string) => (reaberto && reaberto > base ? reaberto : base);
+
+  if (l.status === "lead") {
+    const desde = desdeReaberto(l.createdAt);
+    return {
+      nome: "novo",
+      desde,
+      horasUteis: uteis(desde),
+      venceEm: somarHorasUteis(desde, FILA_ETAPAS.novo.slaHoras),
+    };
+  }
+
+  if (l.status === "em_contato" || l.status === "no_show") {
+    const contato = resumoContato(eventos);
+    // Retorno devido: o combinado pela cadência; depois de uma conversa sem
+    // desfecho, no dia seguinte; quem não compareceu, a partir da reunião.
+    const devido = desdeReaberto(
+      l.status === "no_show"
+        ? (l.meetingFor ?? contato.ultima ?? l.createdAt)
+        : (contato.proxima ??
+          (contato.ultima
+            ? new Date(Date.parse(contato.ultima) + HORAS_APOS_CONVERSA * 3_600_000).toISOString()
+            : l.createdAt)),
+    );
+    if (Date.parse(devido) > now) return null; // ainda não é hora
+    return { nome: "retornar", desde: devido, horasUteis: uteis(devido), contato };
+  }
+
+  if (l.status === "agendado") {
+    if (l.meetingFor) {
+      const ate = (Date.parse(l.meetingFor) - now) / 3_600_000;
+      if (ate > FILA_ETAPAS.confirmar.slaHoras) return null; // longe ainda
+      if (ate > 0) {
+        return {
+          nome: "confirmar",
+          desde: l.bookedAt ?? l.createdAt,
+          horasUteis: 0,
+          atraso: 1 - ate / FILA_ETAPAS.confirmar.slaHoras,
+          reuniao: l.meetingFor,
+        };
+      }
+      return { nome: "sem-desfecho", desde: l.meetingFor, horasUteis: uteis(l.meetingFor), reuniao: l.meetingFor };
+    }
+    // Agendado antes de a data ser obrigatória: sem data, vira "sem desfecho"
+    // uma semana depois do agendamento.
+    const base = l.bookedAt ?? l.createdAt;
+    const limite = Date.parse(base) + DIAS_AGENDADO_SEM_DATA * 86_400_000;
+    if (limite > now) return null;
+    const desde = new Date(limite).toISOString();
+    return { nome: "sem-desfecho", desde, horasUteis: uteis(desde) };
+  }
+
+  return null;
 }
 
 /** A espera em linguagem de quem vai ligar — ver `formatarEspera` (format.ts). */

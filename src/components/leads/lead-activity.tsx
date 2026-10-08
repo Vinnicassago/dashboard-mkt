@@ -1,19 +1,62 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { ArrowRight, Search } from "lucide-react";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { Badge } from "@/components/ui/badge";
 import { statusMeta } from "@/components/tables/lead-status";
 import type { LeadEvent } from "@/lib/types";
 import { formatDateTime } from "@/lib/format";
+import { CANAL_LABEL, type CanalContato } from "@/lib/contato";
 
-function ChangeCell({ e }: { e: LeadEvent }) {
+/** O que aconteceu, em uma linha — usado no histórico de Pessoas e na ficha. */
+export function DescricaoEvento({ e }: { e: LeadEvent }) {
+  if (e.action === "nota") {
+    return <span className="whitespace-pre-line">{e.payload?.texto}</span>;
+  }
+  if (e.action === "mesclado") {
+    return (
+      <span className="text-muted-foreground">
+        Recebeu o cadastro duplicado de {e.payload?.nome ?? "outra entrada"}
+        {e.payload?.status ? ` (estava como ${e.payload.status})` : ""}
+      </span>
+    );
+  }
+  if (e.action === "tentativa") {
+    const canal = CANAL_LABEL[(e.payload?.canal ?? "") as CanalContato] ?? "Contato";
+    return (
+      <span className="text-muted-foreground">
+        Tentativa por {canal.toLowerCase()} —{" "}
+        {e.payload?.falou === "sim" ? "falou com a pessoa" : "sem resposta"}
+        {e.payload?.proxima ? ` · próxima ${formatDateTime(e.payload.proxima)}` : ""}
+        {e.occurredAt && Math.abs(Date.parse(e.occurredAt) - Date.parse(e.createdAt)) > 15 * 60_000
+          ? ` · feita em ${formatDateTime(e.occurredAt)}`
+          : ""}
+      </span>
+    );
+  }
+  if (e.action === "desfeito") {
+    return <span className="text-muted-foreground">Desfez uma tentativa registrada por engano</span>;
+  }
+  if (e.action === "reaberto") {
+    return (
+      <span className="flex items-center gap-1.5">
+        Reaberto{e.payload?.motivo ? ` — ${e.payload.motivo}` : ""}
+        {e.toStatus ? <Badge variant={statusMeta[e.toStatus].variant}>{statusMeta[e.toStatus].label}</Badge> : null}
+      </span>
+    );
+  }
   if (e.action === "reenvio") {
     const novo = [e.payload?.telefoneNovo, e.payload?.emailNovo].filter(Boolean).join(" · ");
     return (
       <span className="text-muted-foreground">
-        Reenviou o formulário{novo ? ` com contato diferente: ${novo}` : ""} — o lead não foi alterado
+        {e.payload?.pelo
+          ? `Preencheu o formulário de novo (reconhecido pelo ${e.payload.pelo})`
+          : "Reenviou o formulário"}
+        {novo ? ` com contato diferente: ${novo}` : ""}
+        {e.payload?.origemNova ? ` · veio por ${e.payload.origemNova.split("|")[0]}` : ""} — o cadastro
+        não foi alterado
       </span>
     );
   }
@@ -38,7 +81,7 @@ function ChangeCell({ e }: { e: LeadEvent }) {
     );
   }
   return (
-    <span className="flex items-center gap-1.5">
+    <span className="flex flex-wrap items-center gap-1.5">
       {e.fromStatus ? (
         <Badge variant={statusMeta[e.fromStatus].variant}>{statusMeta[e.fromStatus].label}</Badge>
       ) : null}
@@ -46,6 +89,11 @@ function ChangeCell({ e }: { e: LeadEvent }) {
       {e.toStatus ? (
         <Badge variant={statusMeta[e.toStatus].variant}>{statusMeta[e.toStatus].label}</Badge>
       ) : null}
+      {e.payload?.correcao ? <span className="text-xs text-muted-foreground">correção: {e.payload.correcao}</span> : null}
+      {e.payload?.reuniao ? (
+        <span className="text-xs text-muted-foreground">reunião {formatDateTime(e.payload.reuniao)}</span>
+      ) : null}
+      {e.payload?.motivo ? <span className="text-xs text-muted-foreground">{e.payload.motivo}</span> : null}
     </span>
   );
 }
@@ -70,12 +118,16 @@ const columns: Column<LeadEvent>[] = [
     header: "Lead",
     sortable: true,
     sortValue: (r) => r.leadName,
-    render: (r) => r.leadName,
+    render: (r) => (
+      <Link href={`/pessoas/${encodeURIComponent(r.leadId)}`} className="hover:underline">
+        {r.leadName}
+      </Link>
+    ),
   },
   {
     key: "change",
     header: "Mudança",
-    render: (r) => <ChangeCell e={r} />,
+    render: (r) => <DescricaoEvento e={r} />,
   },
 ];
 

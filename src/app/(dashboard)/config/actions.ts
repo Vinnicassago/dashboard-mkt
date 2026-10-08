@@ -34,6 +34,7 @@ import { candidatosIdLead, resolverIdLead } from "@/lib/lead-id";
 import { CONFIRMACAO_PERIGO } from "@/lib/perigo";
 import { diagnosticarLeads, type DiagnosticoLeads } from "@/lib/diagnostico-leads";
 import { registrarAuditoria } from "@/lib/auditoria";
+import { setMensagemWhatsapp, setRoboDesativado } from "@/lib/integracoes";
 import { randomUUID } from "node:crypto";
 import {
   DEFAULT_BRAND,
@@ -651,4 +652,36 @@ export async function repararLeadsAction(ids: string[]): Promise<ActionState> {
   );
   revalidateAll();
   return { ok: true, message: `${escolhidos.length} lead(s) reparado(s).` };
+}
+
+// ---- integrações operacionais (D5) ----------------------------------------
+
+/**
+ * Liga/desliga o robô de WhatsApp e o atendimento do especialista. Desligado,
+ * as etapas dele somem do painel (sem "SEM LEITURA", sem "fila incompleta").
+ */
+export async function setRoboAtivoAction(ativo: boolean): Promise<ActionState> {
+  if (!(await can("data:write"))) return DENIED;
+  await setRoboDesativado(!ativo);
+  await registrarAuditoria(ativo ? "Robô de WhatsApp ativado" : "Robô de WhatsApp desativado");
+  revalidateAll();
+  return {
+    ok: true,
+    message: ativo
+      ? "Robô ativado: as etapas dele voltam para a cascata, a Fila e Pessoas."
+      : "Robô desativado: as etapas dele saem do painel até você religar.",
+  };
+}
+
+/** Mensagem que o botão de WhatsApp da Fila já deixa escrita. */
+export async function setMensagemWhatsappAction(
+  _prev: ActionState | null,
+  formData: FormData,
+): Promise<ActionState> {
+  if (!(await can("leads:write")) && !(await can("data:write"))) return DENIED;
+  const texto = String(formData.get("mensagem") ?? "").trim();
+  if (texto.length > 600) return { ok: false, message: "Mensagem longa demais (máx. 600 caracteres)." };
+  await setMensagemWhatsapp(texto);
+  revalidateAll();
+  return { ok: true, message: texto ? "Mensagem salva." : "Mensagem padrão restaurada." };
 }

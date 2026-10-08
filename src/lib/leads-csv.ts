@@ -69,6 +69,9 @@ function buildHeaderMap(headers: string[]): Partial<Record<Field, string>> {
 // as variações que nenhuma das duas formas cobre, para as tabelas não drifitarem.
 const STATUS_ALIASES: Record<string, LeadStatus> = {
   "sem contato": "lead",
+  "em contato": "em_contato",
+  "tentando contato": "em_contato",
+  "em atendimento": "em_contato",
   agendada: "agendado",
   marcada: "agendado",
   "reuniao agendada": "agendado",
@@ -92,8 +95,10 @@ const STATUS_ALIASES: Record<string, LeadStatus> = {
   "nao qualificado": "sem_interesse",
   desistiu: "desistencia",
   cancelou: "desistencia",
-  "no show": "desistencia",
-  faltou: "desistencia",
+  "no show": "no_show",
+  faltou: "no_show",
+  "nao compareceu": "no_show",
+  "nao apareceu": "no_show",
 };
 
 function toStatus(raw?: string): LeadStatus {

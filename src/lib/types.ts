@@ -320,13 +320,17 @@ export interface LpDaily {
 // ------------------------- Leads & meetings -------------------------
 
 /**
- * Estágio do lead. `lead` é a entrada (chegou, ninguém contatou ainda); os
- * quatro motivos de perda encerram o lead — o que muda entre eles é a decisão
- * que provocam. Rótulo, cor e agrupamento ficam em `lib/lead-status.ts`.
+ * Estágio do lead. `lead` é a entrada (chegou, NINGUÉM tentou contato ainda);
+ * `em_contato` = já houve tentativa; `no_show` = tinha reunião e não apareceu
+ * (pode remarcar). Os quatro motivos de perda encerram o lead — o que muda
+ * entre eles é a decisão que provocam. Rótulo, cor, agrupamento e transições
+ * ficam em `lib/lead-status.ts`.
  */
 export type LeadStatus =
   | "lead"
+  | "em_contato"
   | "agendado"
+  | "no_show"
   | "reuniao_realizada"
   | "cliente"
   | "contato_invalido"
@@ -353,6 +357,13 @@ export interface Lead {
   meetingAt?: string;
   /** Data e hora DA REUNIÃO (ISO), exigida ao agendar. */
   meetingFor?: string;
+  /**
+   * MARCO: quando aconteceu a 1ª tentativa de contato (gravado uma vez). É o fato
+   * que mede velocidade de contato — a alavanca nº 1 com o robô parado.
+   */
+  firstContactAt?: string;
+  /** Detalhe do motivo de perda (ex.: "número inexistente" em Contato inválido). */
+  lostReasonDetail?: string;
   /** Valor da carta/contrato (BRL), preenchido quando o lead vira cliente. */
   value?: number;
 
@@ -408,7 +419,17 @@ export interface Lead {
  * - status_changed → mudança de status
  * - excluido / restaurado → exclusão reversível
  */
-export type LeadEventAction = "created" | "reenvio" | "status_changed" | "excluido" | "restaurado";
+export type LeadEventAction =
+  | "created"
+  | "reenvio"
+  | "status_changed"
+  | "tentativa"
+  | "desfeito"
+  | "reaberto"
+  | "nota"
+  | "mesclado"
+  | "excluido"
+  | "restaurado";
 
 /** One entry in the "quem alterou o lead" trail. */
 export interface LeadEvent {
@@ -423,7 +444,13 @@ export interface LeadEvent {
   toStatus?: LeadStatus;
   /** Detalhe do evento (ex.: motivo da exclusão, contato novo num reenvio). */
   payload?: Record<string, string>;
-  createdAt: string; // full ISO datetime
+  /**
+   * Quando o fato ACONTECEU, se diferente de quando foi registrado
+   * (`createdAt`). Uma tentativa feita às 9h e registrada às 15h tem os dois —
+   * é a diferença que mede o atraso de registro.
+   */
+  occurredAt?: string;
+  createdAt: string; // full ISO datetime — quando foi REGISTRADO
 }
 
 // ------------------------- Audit log (ações administrativas) ----------

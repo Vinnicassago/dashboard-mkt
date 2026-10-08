@@ -47,26 +47,40 @@ export const LEAD_STATUS_META: Record<LeadStatus, LeadStatusMeta> = {
     variant: "muted",
     order: 4,
     lost: false,
-    hint: "Entrou e ainda não foi contatado — é este o estoque da fila do comercial.",
+    hint: "Entrou e ninguém tentou contato ainda — é o topo da fila do comercial.",
+  },
+  em_contato: {
+    label: "Em contato",
+    variant: "outline",
+    order: 5,
+    lost: false,
+    hint: "Já houve tentativa de contato; a próxima segue a cadência.",
   },
   agendado: {
     label: "Agendado",
     variant: "default",
-    order: 5,
+    order: 6,
     lost: false,
     hint: "Reunião marcada, com data e hora.",
+  },
+  no_show: {
+    label: "Não compareceu",
+    variant: "warning",
+    order: 7,
+    lost: false,
+    hint: "Tinha reunião marcada e não apareceu. Dá para remarcar.",
   },
   reuniao_realizada: {
     label: "Reunião realizada",
     variant: "good",
-    order: 6,
+    order: 8,
     lost: false,
     hint: "Compareceu à reunião.",
   },
   cliente: {
     label: "Cliente",
     variant: "good",
-    order: 7,
+    order: 9,
     lost: false,
     hint: "Fechou — com o valor da carta registrado.",
   },
@@ -117,7 +131,9 @@ export const LEAD_STATUS_META: Record<LeadStatus, LeadStatusMeta> = {
  */
 export const LEAD_STATUSES: LeadStatus[] = [
   "lead",
+  "em_contato",
   "agendado",
+  "no_show",
   "reuniao_realizada",
   "cliente",
   "contato_invalido",
@@ -132,8 +148,11 @@ export const LOST_STATUSES: LeadStatus[] = LEAD_STATUSES.filter((s) => LEAD_STAT
 /** O caminho happy-path — tudo que ainda não é perda. */
 export const OPEN_STATUSES: LeadStatus[] = LEAD_STATUSES.filter((s) => !LEAD_STATUS_META[s].lost);
 
-/** Status que contam como reunião marcada (o denominador do CPR). */
-export const BOOKED_STATUSES: LeadStatus[] = ["agendado", "reuniao_realizada", "cliente"];
+/**
+ * Status que contam como reunião marcada (o denominador do CPR). "Não
+ * compareceu" entra: a reunião FOI agendada — o comparecimento é outra métrica.
+ */
+export const BOOKED_STATUSES: LeadStatus[] = ["agendado", "no_show", "reuniao_realizada", "cliente"];
 
 export function statusLabel(s: LeadStatus): string {
   return LEAD_STATUS_META[s].label;
@@ -158,51 +177,118 @@ export function isLead(l: Lead): boolean {
 
 // ---------------------------------------------------------------- transições
 
-/** O que uma transição precisa saber do lead. `jaAgendou` = `everBooked()` (metrics.ts). */
+/**
+ * MÁQUINA DE ESTADOS — de onde se pode ir para onde. Fonte ÚNICA (D3).
+ *
+ * - `em_contato` NÃO é destino manual: quem põe o lead nele é a tentativa de
+ *   contato (`registrarTentativa`), que é o que conta para velocidade e cadência.
+ * - "Desistência" só a partir de quem teve reunião (agendado, não compareceu,
+ *   realizada). Havia 11 leads em "Desistência" sem nunca terem agendado.
+ * - Status de perda e "Cliente" encerram: sair deles é REABRIR (só
+ *   administrador, com motivo — `reabrirLead`), não uma transição comum.
+ * - "Agendado → Agendado" é remarcar (nova data).
+ */
+export const TRANSICOES: Record<LeadStatus, LeadStatus[]> = {
+  lead: ["agendado", "contato_invalido", "sem_resposta", "sem_interesse"],
+  em_contato: ["agendado", "contato_invalido", "sem_resposta", "sem_interesse"],
+  agendado: ["agendado", "reuniao_realizada", "no_show", "desistencia"],
+  no_show: ["agendado", "sem_resposta", "desistencia"],
+  reuniao_realizada: ["cliente", "sem_interesse", "desistencia"],
+  cliente: [],
+  contato_invalido: [],
+  sem_resposta: [],
+  sem_interesse: [],
+  desistencia: [],
+};
+
+/** Estados de onde não se sai sem reabrir. */
+export function encerrado(s: LeadStatus): boolean {
+  return TRANSICOES[s].length === 0;
+}
+
+/** Motivos de "Contato inválido" — dizem se o problema é do formulário ou do número. */
+export const MOTIVOS_CONTATO_INVALIDO: Record<string, string> = {
+  numero_inexistente: "Número não existe",
+  sem_whatsapp: "Sem WhatsApp",
+  pessoa_errada: "Pessoa errada",
+  email_invalido: "E-mail inválido",
+  outro: "Outro",
+};
+
+/**
+ * Régua de "Sem resposta": 3 tentativas em pelo menos 2 dias diferentes. Antes
+ * disso o painel pede confirmação — "Sem resposta" registrado na 1ª ligação
+ * vira, na quebra de perdas, um problema de mídia que era de insistência.
+ */
+export const TENTATIVAS_PARA_SEM_RESPOSTA = 3;
+export const DIAS_PARA_SEM_RESPOSTA = 2;
+
+/** O que uma transição precisa saber do lead. */
 export interface EstadoParaTransicao {
   status: LeadStatus;
+  /** `everBooked()` (metrics.ts) — o lead já teve reunião marcada. */
   jaAgendou: boolean;
+  /** Tentativas registradas (`resumoContato`) — decidem se "Sem resposta" pede confirmação. */
+  tentativas?: number;
+  diasComTentativa?: number;
 }
 
 /** O que algumas transições exigem junto. */
 export interface DadosDaTransicao {
-  /** Data e hora da reunião (ISO) — obrigatória para "Agendado". */
+  /** Data e hora da reunião (ISO) — obrigatória para "Agendado" (e para remarcar). */
   meetingFor?: string;
   /** Valor da carta (R$) — obrigatório para "Cliente". */
   value?: number;
+  /** Chave de MOTIVOS_CONTATO_INVALIDO — obrigatória para "Contato inválido". */
+  motivo?: string;
+  /** Encerrar como "Sem resposta" antes da régua de tentativas. */
+  confirmado?: boolean;
+}
+
+export type DadoExigido = "data" | "valor" | "motivo" | "confirmacao";
+
+function abaixoDaRegua(l: EstadoParaTransicao): boolean {
+  return (
+    (l.tentativas ?? 0) < TENTATIVAS_PARA_SEM_RESPOSTA ||
+    (l.diasComTentativa ?? 0) < DIAS_PARA_SEM_RESPOSTA
+  );
 }
 
 /** Que dado extra a interface precisa pedir antes de confirmar. */
-export function dadoExigido(para: LeadStatus): "data" | "valor" | null {
+export function dadoExigido(para: LeadStatus, l?: EstadoParaTransicao): DadoExigido | null {
   if (para === "agendado") return "data";
   if (para === "cliente") return "valor";
+  if (para === "contato_invalido") return "motivo";
+  if (para === "sem_resposta" && (!l || abaixoDaRegua(l))) return "confirmacao";
   return null;
 }
 
-/**
- * Destinos que a interface oferece para este lead. O servidor confere de novo
- * com `podeTransitar` — a lista é conveniência, a regra mora lá.
- */
+/** Destinos que a interface oferece. O servidor confere de novo com `podeTransitar`. */
 export function destinosPermitidos(l: EstadoParaTransicao): LeadStatus[] {
-  return LEAD_STATUSES.filter((s) => s !== l.status && (s !== "desistencia" || l.jaAgendou));
+  return TRANSICOES[l.status];
 }
 
 /**
  * A transição pode acontecer? `null` = pode; texto = por que não (vai direto
- * para a tela). Máquina mínima da Fase 1 — tentativas e no-show chegam na Fase 2:
- * - "Desistência" é de quem chegou a agendar (havia 11 leads assim sem nunca
- *   terem agendado, contados como perda por decisão);
- * - "Agendado" exige a data da reunião (antes gravava a hora do clique);
- * - "Cliente" exige o valor da carta.
+ * para a tela).
  */
 export function podeTransitar(
   l: EstadoParaTransicao,
   para: LeadStatus,
   dados: DadosDaTransicao = {},
 ): string | null {
-  if (para === l.status) return `O lead já está em "${statusLabel(para)}".`;
-  if (para === "desistencia" && !l.jaAgendou) {
-    return "Desistência é de quem chegou a agendar. Para quem nunca agendou, use “Não tem interesse”.";
+  if (para === "em_contato") {
+    return "“Em contato” é registrado pela tentativa de contato, não escolhido na lista.";
+  }
+  if (encerrado(l.status)) {
+    return `O lead está encerrado como “${statusLabel(l.status)}”. Para reabrir, peça a um administrador.`;
+  }
+  if (!TRANSICOES[l.status].includes(para)) {
+    if (para === "desistencia") {
+      return "Desistência é de quem chegou a agendar. Para quem nunca agendou, use “Não tem interesse”.";
+    }
+    if (para === l.status) return `O lead já está em “${statusLabel(para)}”.`;
+    return `De “${statusLabel(l.status)}” não dá para ir direto para “${statusLabel(para)}”.`;
   }
   if (para === "agendado") {
     const t = dados.meetingFor ? Date.parse(dados.meetingFor) : NaN;
@@ -210,6 +296,12 @@ export function podeTransitar(
   }
   if (para === "cliente" && !(dados.value != null && dados.value > 0)) {
     return "Informe o valor da carta (R$).";
+  }
+  if (para === "contato_invalido" && !(dados.motivo && dados.motivo in MOTIVOS_CONTATO_INVALIDO)) {
+    return "Diga por que o contato é inválido.";
+  }
+  if (para === "sem_resposta" && abaixoDaRegua(l) && !dados.confirmado) {
+    return `Só ${l.tentativas ?? 0} tentativa(s) em ${l.diasComTentativa ?? 0} dia(s) — a régua pede ${TENTATIVAS_PARA_SEM_RESPOSTA} em pelo menos ${DIAS_PARA_SEM_RESPOSTA} dias. Confirme para encerrar mesmo assim.`;
   }
   return null;
 }
@@ -224,6 +316,9 @@ const LEGACY_STATUS: Record<string, LeadStatus> = {
   agendou: "agendado",
   compareceu: "reuniao_realizada",
   perdido: "sem_resposta",
+  "no show": "no_show",
+  noshow: "no_show",
+  faltou: "no_show",
 };
 
 /** Sem acento, minúsculo, `_`/pontuação viram espaço: "Reunião realizada" === "reuniao_realizada". */

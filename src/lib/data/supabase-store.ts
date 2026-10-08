@@ -288,6 +288,7 @@ export const supabaseBackend: DataBackend = {
     const row: Row = { status };
     if (patch?.meetingAt !== undefined) row.meeting_at = patch.meetingAt;
     if (patch?.meetingFor !== undefined) row.meeting_for = patch.meetingFor;
+    if (patch?.lostReasonDetail !== undefined) row.lost_reason_detail = patch.lostReasonDetail;
     if (patch?.value !== undefined) row.value = patch.value;
     if (patch?.roboSessionId !== undefined) row.robo_session_id = patch.roboSessionId;
     if (patch?.lostAt !== undefined) row.lost_at = patch.lostAt;
@@ -296,17 +297,20 @@ export const supabaseBackend: DataBackend = {
     // então lemos o que já existe e só preenchemos o que estiver vazio — assim
     // uma perda registrada depois não apaga a reunião que aconteceu.
     const wantsStamp =
+      patch?.firstContactAt !== undefined ||
       patch?.bookedAt !== undefined ||
       patch?.attendedAt !== undefined ||
       patch?.closedAt !== undefined;
     if (wantsStamp) {
       const cur = await supabase()
         .from("leads")
-        .select("booked_at, attended_at, closed_at")
+        .select("first_contact_at, booked_at, attended_at, closed_at")
         .eq("id", id)
         .maybeSingle();
       check(cur.error, "read lead milestones");
       const has = (cur.data ?? {}) as Row;
+      if (patch?.firstContactAt === null) row.first_contact_at = null;
+      else if (patch?.firstContactAt !== undefined && !has.first_contact_at) row.first_contact_at = patch.firstContactAt;
       if (patch?.bookedAt !== undefined && !has.booked_at) row.booked_at = patch.bookedAt;
       if (patch?.attendedAt !== undefined && !has.attended_at) row.attended_at = patch.attendedAt;
       if (patch?.closedAt !== undefined && !has.closed_at) row.closed_at = patch.closedAt;
@@ -343,6 +347,17 @@ export const supabaseBackend: DataBackend = {
       .not("deleted_at", "is", null)
       .order("deleted_at", { ascending: false });
     check(error, "list deleted leads");
+    return (data ?? []).map(toLead);
+  },
+
+  async listLeads(brand: string) {
+    const { data, error } = await supabase()
+      .from("leads")
+      .select("*")
+      .eq("brand", brand)
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false });
+    check(error, "list leads");
     return (data ?? []).map(toLead);
   },
 

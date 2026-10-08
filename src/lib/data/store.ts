@@ -93,6 +93,7 @@ export const softDeleteLead = (id: string, info: { at: string; by: string; reaso
   backend().softDeleteLead(id, info);
 export const restoreLead = (id: string) => backend().restoreLead(id);
 export const listDeletedLeads = (brand: string = DEFAULT_BRAND) => backend().listDeletedLeads(brand);
+export const listLeads = (brand: string = DEFAULT_BRAND) => backend().listLeads(brand);
 
 export const upsertGoal = (goal: Goal) => backend().upsertGoal(goal);
 

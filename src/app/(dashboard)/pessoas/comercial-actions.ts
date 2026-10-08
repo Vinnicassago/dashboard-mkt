@@ -74,6 +74,8 @@ function statusDaDecisao(
     if (campo === "reuniao_realizada") return "reuniao_realizada";
     if (campo === "negocio_fechado") return "cliente";
   }
+  // "Reunião realizada: não" é não comparecimento — dá para remarcar.
+  if (valor === "nao" && campo === "reuniao_realizada") return "no_show";
   if (valor === "nao" && campo === "negocio_fechado") {
     return jaAgendou ? "desistencia" : "sem_interesse";
   }
