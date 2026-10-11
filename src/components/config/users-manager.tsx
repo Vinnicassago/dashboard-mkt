@@ -4,12 +4,7 @@ import { useActionState, useState, useTransition } from "react";
 import { useFormStatus } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Trash2, UserPlus } from "lucide-react";
-import {
-  addUserAction,
-  deleteUserAction,
-  setUserRoleAction,
-  type AuthState,
-} from "@/lib/auth/actions";
+import { addUserAction, deleteUserAction, setUserRoleAction } from "@/lib/auth/actions";
 import type { PublicUser } from "@/lib/data/backend";
 import { ROLES, ROLE_LABELS, type Role } from "@/lib/auth/roles";
 import { cn } from "@/lib/utils";

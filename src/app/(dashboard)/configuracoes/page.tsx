@@ -1,239 +1,39 @@
-import Link from "next/link";
-import { CalendarCheck, Camera, Clapperboard, Database, FileSpreadsheet, ShieldAlert, Stethoscope, Layers, Link2, ListChecks, MessageCircle, Plug, Target, UserPlus, Users, UsersRound, Wallet } from "lucide-react";
-import {
-  BrandMatchForm,
-  BudgetForm,
-  CleanResyncAdsButton,
-  DiagnosticoLeadsPanel,
-  MensagemWhatsappForm,
-  RoboToggle,
-  DmForm,
-  GoalsForm,
-  ImportForm,
-  LeadForm,
-  LeadsImportForm,
-  ManualIgForm,
-  PostsMetaForm,
-  ReclassifyAdsButton,
-  ResetButton,
-  RoutineForm,
-  SyncPanel,
-  type PostMetaRow,
-} from "@/components/config/config-forms";
-import { UsersManager } from "@/components/config/users-manager";
-import { UtmBuilder } from "@/components/utm/utm-builder";
+import { Target, Wallet } from "lucide-react";
+import { BudgetForm, CalculadoraDeMetas, GoalsForm, MetaManualForm } from "@/components/config/metas-forms";
+import { PendenciasCard } from "@/components/config/pendencias-card";
+import { SemPermissao } from "@/components/config/sem-permissao";
+import { StatusMetaBadge } from "@/components/kpi/status-meta";
 import { RolarParaAncora } from "@/components/ui/rolar-para-ancora";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { activeBackend, getData, getState, listAuditEntries, listUsers } from "@/lib/data/store";
-import { VERSAO } from "@/lib/version";
-import { isRoboConfigured } from "@/lib/robo/client";
-import { MENSAGEM_WHATSAPP_PADRAO, mensagemWhatsapp, roboDesativado } from "@/lib/integracoes";
-import { isAiConfigured } from "@/lib/ai/config";
-import { STATE_KEYS } from "@/lib/data/backend";
-import { activeBrandSlug } from "@/lib/active-brand";
-import { BRANDS, brandDef } from "@/lib/brands";
-import { DEFAULT_BRAND } from "@/lib/types";
-import { ADS_CSV_TEMPLATE } from "@/lib/csv";
-import { LEADS_CSV_TEMPLATE } from "@/lib/leads-csv";
-import { LEAD_STATUSES, statusLabel } from "@/lib/lead-status";
-import {
-  NAO_CLASSIFICADO,
-  brandForCampaign,
-  integrationStatus,
-  metaBrandConfig,
-  resolveMetaBrands,
-} from "@/lib/meta/config";
-import { cn } from "@/lib/utils";
-import { coberturaDeAnuncios, estadoDaFonte, type EstadoFonte } from "@/lib/sincronizacao";
+import { getData } from "@/lib/data/store";
+import { resolveMetaBrands } from "@/lib/meta/config";
+import { coberturaDeAnuncios } from "@/lib/sincronizacao";
 import { kpisDoPeriodo, mostrar, reguaDoPeriodo, type LinhaDaRegua } from "@/lib/kpis";
 import { META_DEF, formatarAlvo, precisaRecalibrar, taxasObservadas } from "@/lib/metas";
-import { hojeEmBrasilia } from "@/lib/range";
-import { CalculadoraDeMetas, MetaManualForm } from "@/components/config/metas-forms";
-import { StatusMetaBadge } from "@/components/kpi/status-meta";
-import { isAuthEnabled } from "@/lib/auth/config";
-import { getCurrentUser } from "@/lib/auth/current-user";
-import { can } from "@/lib/auth/guard";
-import { formatCurrency0, formatDateShort, formatDateTime } from "@/lib/format";
-import { CTA_LABEL, detectCta } from "@/lib/metrics";
+import { pendenciasDeConfiguracoes } from "@/lib/configuracoes";
+import { dica } from "@/lib/dicionario";
+import { formatDateTime } from "@/lib/format";
 import { pageRange } from "@/lib/page-range";
-import type { Trava } from "@/lib/trust";
+import { hojeEmBrasilia } from "@/lib/range";
+import { contextoDeConfiguracoes } from "./_carregar";
 
-// Integration status and last-sync times must reflect runtime, never build time.
+// Pendências e régua refletem o banco agora, nunca o build.
 export const dynamic = "force-dynamic";
 
-function StatusRow({
-  label,
-  ok,
-  hint,
-}: {
-  label: string;
-  ok: boolean;
-  hint: string;
-}) {
-  return (
-    <div className="flex items-start justify-between gap-3 border-b py-2.5 last:border-0">
-      <div className="min-w-0">
-        <p className="text-sm font-medium">{label}</p>
-        <p className="text-xs text-muted-foreground">{hint}</p>
-      </div>
-      <Badge variant={ok ? "good" : "muted"}>{ok ? "Conectado" : "Não configurado"}</Badge>
-    </div>
-  );
-}
-
-/** Um grupo da lista "O que falta aqui": o que é, por que importa, e o link ao campo. */
-function Pendencias({ titulo, itens }: { titulo: string; itens: Trava[] }) {
-  if (itens.length === 0) return null;
-  return (
-    <div className="space-y-2">
-      <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-        {titulo} ({itens.length})
-      </p>
-      <ul className="space-y-3">
-        {itens.map((t) => (
-          <li key={t.id} className="space-y-0.5">
-            <p className="text-sm font-medium">{t.titulo}</p>
-            <p className="text-xs leading-relaxed text-muted-foreground">{t.detalhe}</p>
-            {t.cta ? (
-              <Link
-                href={t.cta.href}
-                className="inline-block pt-0.5 text-xs font-medium text-primary underline-offset-4 hover:underline"
-              >
-                {t.cta.label} →
-              </Link>
-            ) : null}
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-export default async function ConfigPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ range?: string }>;
-}) {
-  const brand = brandDef(await activeBrandSlug());
-  const data = await getData(brand.slug);
-  const status = integrationStatus();
-  // Estado de cada fonte POR MARCA, do registro de sincronizações (ADR-04).
-  const estadoIg = new Map<string, EstadoFonte>();
-  for (const b of BRANDS) estadoIg.set(b.slug, await estadoDaFonte("instagram", b.slug));
-  const estadoAds = await estadoDaFonte("ads", brand.slug);
-  const backend = activeBackend();
-  const dbConnected = backend !== "local";
-  const dbLabel = backend === "postgres" ? "Postgres" : backend === "supabase" ? "Supabase" : "JSON local";
-  const users = await listUsers();
-  const sessionUser = await getCurrentUser();
-  const currentUser = sessionUser?.username ?? null;
-  const authEnabled = isAuthEnabled();
-  const isAdmin = await can("users:manage");
-  const canData = await can("data:write");
-  const canLeads = await can("leads:write");
-  const canDanger = await can("danger:run");
-  const auditoria = canDanger ? await listAuditEntries(10) : [];
-  const ingestKey = Boolean(process.env.TRACK_INGEST_KEY?.trim());
-  const roboConfigurado = isRoboConfigured();
-  const roboOff = await roboDesativado();
-  const mensagemAtual = await mensagemWhatsapp();
-
-  const creatives = data.creatives.map((c) => ({ adId: c.adId, name: c.name }));
-  const currentGoals: Record<string, number> = {};
-  for (const g of data.goals) currentGoals[g.metric] = g.target;
-
-  // Metadados manuais de conteúdo: duração de reel, pilar e CTA por post.
-  const TYPE_LABEL: Record<string, string> = { feed: "Feed", carrossel: "Carrossel", reel: "Reel", story: "Story" };
-  const postMeta: PostMetaRow[] = [...data.igPosts]
-    .sort((a, b) => b.publishedAt.localeCompare(a.publishedAt))
-    .map((p) => {
-      // Sempre a heurística pura: o rótulo "Auto (…)" mostra o que valeria ao
-      // voltar para Auto, mesmo com override manual ativo.
-      const detected = detectCta(p.caption);
-      return {
-        id: p.id,
-        dateLabel: formatDateShort(p.publishedAt),
-        type: TYPE_LABEL[p.type] ?? p.type,
-        caption: p.caption,
-        durationSec: p.durationSec,
-        pillar: p.pillar,
-        ctaType: p.ctaType,
-        detectedCta: detected ? CTA_LABEL[detected] : undefined,
-        isTest: p.isTest,
-      };
-    });
-
-  // Separação por marca: gasto + campanhas atribuídas a cada marca + regra atual,
-  // com a PRÉVIA — para onde cada campanha iria se reclassificasse agora.
-  const multiBrand = BRANDS.length > 1;
-  const regrasDeMarca = multiBrand ? await resolveMetaBrands() : [];
-  const nomeDaMarca = (slug: string) =>
-    slug === NAO_CLASSIFICADO ? "não classificado" : (BRANDS.find((b) => b.slug === slug)?.label ?? slug);
-  const brandSpend = multiBrand
-    ? (
-        await Promise.all(
-          [...BRANDS.map((b) => ({ slug: b.slug, label: b.label })), { slug: NAO_CLASSIFICADO, label: "Não classificado" }].map(
-            async (b) => {
-              const d = await getData(b.slug);
-              const byCamp = new Map<string, { spend: number; id?: string }>();
-              for (const r of d.adDaily) {
-                const name = r.campaign || "(sem nome)";
-                const cur = byCamp.get(name) ?? { spend: 0, id: r.campaignId };
-                byCamp.set(name, { spend: cur.spend + r.spend, id: cur.id ?? r.campaignId });
-              }
-              const campaigns = [...byCamp.entries()]
-                .map(([name, c]) => {
-                  const destino = brandForCampaign(name, c.id, regrasDeMarca);
-                  return {
-                    name,
-                    spend: c.spend,
-                    vaiPara: destino !== b.slug ? nomeDaMarca(destino) : undefined,
-                  };
-                })
-                .sort((a, b) => b.spend - a.spend);
-              return {
-                slug: b.slug,
-                label: b.label,
-                spend: campaigns.reduce((s, c) => s + c.spend, 0),
-                campaigns,
-              };
-            },
-          ),
-        )
-      ).filter((b) => b.slug !== NAO_CLASSIFICADO || b.campaigns.length > 0)
-    : [];
-  const matchState = (await getState<Record<string, string[]>>(STATE_KEYS.brandCampaignMatch)) ?? {};
-  const currentMatch: Record<string, string> = {};
-  for (const [slug, list] of Object.entries(matchState)) currentMatch[slug] = (list ?? []).join(", ");
-
-  // Status do Instagram POR MARCA — mostra se IG_USER_ID_<MARCA>/token foram
-  // reconhecidos pelo código em execução (diagnóstico da conexão da krone).
-  const brandIg = BRANDS.filter((b) => b.slug !== DEFAULT_BRAND).map((b) => {
-    const m = metaBrandConfig(b.slug);
-    return { slug: b.slug, label: b.label, configured: Boolean(m.igUserId && m.igToken) };
-  });
-
-  // Vocabulário aceito na coluna Status do CSV de leads — sai da régua, para a
-  // ajuda nunca divergir do que o importador realmente reconhece.
-  const statusList = LEAD_STATUSES.map(statusLabel).join(", ");
-
-  const syncHint = (e: EstadoFonte | undefined) =>
-    (e?.ultimoOk ? `Última sincronização que deu certo: ${formatDateTime(e.ultimoOk)}` : "Ainda não sincronizado") +
-    (e?.falha ? ` · falhando desde ${formatDateTime(e.falha.desde)}: ${e.falha.erro}` : "");
-
-  /*
-   * O que falta aqui — a mesma avaliação de confiança da home, filtrada pelo que
-   * se conserta NESTA página. "Preencher" é o que a home chama de configurações
-   * pendentes (o número do link de lá é o deste grupo); "Corrigir" são travas de
-   * número cujo conserto mora aqui (regra de marca, sincronização).
-   */
-  const { range } = pageRange(data, (await searchParams).range);
+/**
+ * Configurações → Metas e orçamento (vista padrão, relatório §7.7 item 1).
+ * Primeiro o que falta (a mesma avaliação de confiança da home), depois a régua:
+ * orçamento, metas do funil com vigência e calculadora, metas de conteúdo.
+ */
+export default async function MetasPage({ searchParams }: { searchParams: Promise<{ range?: string }> }) {
+  const ctx = await contextoDeConfiguracoes(searchParams);
+  const data = await getData(ctx.brand.slug);
+  const { range } = pageRange(data, ctx.rangeKey);
   const kp = kpisDoPeriodo(data, range, {
     brandRules: await resolveMetaBrands(),
-    cobertura: await coberturaDeAnuncios(brand.slug),
+    cobertura: await coberturaDeAnuncios(ctx.brand.slug),
   });
-  const trust = kp.trust;
+  const pendencias = pendenciasDeConfiguracoes(kp.trust.travas, ctx.rangeKey);
 
   // A régua (Fase 4): metas com vigência, calculadora e histórico.
   const hoje = hojeEmBrasilia();
@@ -251,407 +51,23 @@ export default async function ConfigPage({
     if (f === "pct") return l.medida.n > 0 ? `${mostrar(l.medida, "pct")} (n=${l.medida.n})` : "—";
     return mostrar(l.medida, "int");
   };
-  const preencher = trust.travas.filter((t) => t.nivel === "config");
-  const corrigir = trust.travas.filter(
-    (t) => t.nivel !== "config" && (t.cta?.href.startsWith("/configuracoes") ?? false),
-  );
+  const currentGoals: Record<string, number> = {};
+  for (const g of data.goals) currentGoals[g.metric] = g.target;
 
   return (
     <div className="max-w-3xl space-y-6">
       <RolarParaAncora />
       <p className="text-sm text-muted-foreground">
-        Conecte as APIs da Meta para a coleta rodar sozinha, ou alimente o
-        dashboard à mão com o CSV do Ads Manager enquanto isso.
+        A régua do painel: sem orçamento e metas, nenhum número fica verde ou vermelho — só se compara com
+        a semana passada.
       </p>
 
-      {preencher.length + corrigir.length > 0 ? (
-        <Card id="pendencias" className="scroll-mt-24 border-[var(--warning)]/40">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <ListChecks className="size-4 text-primary" />
-              O que falta aqui
-            </CardTitle>
-            <CardDescription>
-              Cada item desliga um número ou uma regra em outra tela. O link leva direto ao
-              campo.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-5">
-            <Pendencias titulo="Preencher" itens={preencher} />
-            <Pendencias titulo="Corrigir" itens={corrigir} />
-          </CardContent>
-        </Card>
+      <PendenciasCard pendencias={pendencias} />
+
+      {!ctx.papeis.dados ? (
+        <SemPermissao quem="Administrador e Marketing" oque="cadastram orçamento e metas" />
       ) : (
-        <p id="pendencias" className="text-sm text-muted-foreground">
-          Nada pendente: nenhum número do painel está escondido por falta de configuração.
-        </p>
-      )}
-
-      {/* Integrações */}
-      <Card id="integracoes" className="scroll-mt-24">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Plug className="size-4 text-primary" />
-            Integrações
-          </CardTitle>
-          <CardDescription>
-            As credenciais ficam só em variáveis de ambiente — nunca aparecem aqui
-            nem no navegador.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div>
-            <StatusRow
-              label="Banco de dados"
-              ok={dbConnected}
-              hint={
-                dbConnected
-                  ? `${dbLabel} conectado — servindo os dados`
-                  : "Usando o arquivo JSON local (modo desenvolvimento)"
-              }
-            />
-            <StatusRow
-              label={brandIg.length ? `Instagram · ${BRANDS[0].label}` : "Instagram (orgânico)"}
-              ok={status.instagram}
-              hint={status.instagram ? syncHint(estadoIg.get(BRANDS[0].slug)) : "Faltam IG_USER_ID e IG_ACCESS_TOKEN"}
-            />
-            {brandIg.map((b) => (
-              <StatusRow
-                key={b.slug}
-                label={`Instagram · ${b.label}`}
-                ok={b.configured}
-                hint={
-                  b.configured
-                    ? `IG_USER_ID_${b.slug.toUpperCase()} e token reconhecidos · ${syncHint(estadoIg.get(b.slug))}`
-                    : `Faltam IG_USER_ID_${b.slug.toUpperCase()} e IG_ACCESS_TOKEN_${b.slug.toUpperCase()} (confira o nome exato e reinicie o serviço)`
-                }
-              />
-            ))}
-            <StatusRow
-              label="Tráfego pago (Marketing API)"
-              ok={status.ads}
-              hint={status.ads ? syncHint(estadoAds) : "Faltam META_AD_ACCOUNT_ID e META_ADS_ACCESS_TOKEN"}
-            />
-            <StatusRow
-              label="Coleta automática diária"
-              ok={status.cronSecret}
-              hint={
-                status.cronSecret
-                  ? "CRON_SECRET definido — /api/sync protegido e agendado"
-                  : "Defina CRON_SECRET para liberar o cron em produção"
-              }
-            />
-            <StatusRow
-              label="Conversions API (CAPI)"
-              ok={status.capi}
-              hint={
-                status.capi
-                  ? "Lead e Schedule enviados pelo servidor, deduplicados com o Pixel"
-                  : "Faltam META_DATASET_ID e META_CAPI_TOKEN"
-              }
-            />
-            <StatusRow
-              label="GA4 (Measurement Protocol)"
-              ok={status.ga4}
-              hint={
-                status.ga4
-                  ? "Eventos generate_lead (lead) e qualify_lead (reunião agendada) enviados ao GA4"
-                  : "Faltam GA4_MEASUREMENT_ID e GA4_API_SECRET"
-              }
-            />
-            <StatusRow
-              label="Rastreio da landing page"
-              ok={status.lpTracking}
-              hint={
-                ingestKey
-                  ? "TRACK_INGEST_KEY definido — só a LP com a chave consegue enviar leads"
-                  : "Sem TRACK_INGEST_KEY o endereço de envio aceita lead de QUALQUER origem: defina a chave no servidor (a mesma que está na LP)"
-              }
-            />
-            {/* Robô e atendimento: escolha operacional, não só credencial (D5). */}
-            <div className="flex items-start justify-between gap-3 border-b py-2.5">
-              <div className="min-w-0">
-                <p className="text-sm font-medium">Robô de WhatsApp e atendimento do especialista</p>
-                <p className="text-xs text-muted-foreground">
-                  {!roboConfigurado
-                    ? "Faltam ROBO_SUPABASE_URL e ROBO_SUPABASE_KEY — o painel funciona sem o robô."
-                    : roboOff
-                      ? "Desativado: as etapas do robô não aparecem na cascata, na Fila nem em Leads."
-                      : "Ativo: o painel lê o robô. Se a leitura falhar, a Fila avisa que está incompleta."}
-                </p>
-              </div>
-              {roboConfigurado && canData ? (
-                <RoboToggle ativo={!roboOff} />
-              ) : (
-                <Badge variant={roboConfigurado && !roboOff ? "good" : "muted"}>
-                  {!roboConfigurado ? "Não configurado" : roboOff ? "Desativado" : "Ativo"}
-                </Badge>
-              )}
-            </div>
-            <StatusRow
-              label="Análise por IA (Claude)"
-              ok={isAiConfigured()}
-              hint={
-                isAiConfigured()
-                  ? "ANTHROPIC_API_KEY definido — resumo da semana e revisão de peças"
-                  : "Defina ANTHROPIC_API_KEY para o resumo da semana e a revisão de peças"
-              }
-            />
-            <StatusRow
-              label="Resumo da semana (IA) por cron"
-              ok={isAiConfigured() && status.cronSecret}
-              hint={
-                isAiConfigured() && status.cronSecret
-                  ? "Agende no cron-job.org: segunda 08:00 (Brasília) → GET /api/resumo-semanal?secret=CRON_SECRET (≈ US$ 0,09 por execução)"
-                  : "Precisa de ANTHROPIC_API_KEY e CRON_SECRET; depois agende GET /api/resumo-semanal?secret=… na segunda às 08:00"
-              }
-            />
-            <StatusRow
-              label="Acesso ao painel (login)"
-              ok={authEnabled}
-              hint={
-                authEnabled
-                  ? "AUTH_SECRET definido — o painel exige usuário e senha"
-                  : "Defina AUTH_SECRET para exigir login (o painel está aberto)"
-              }
-            />
-          </div>
-
-          {canData ? <SyncPanel /> : null}
-
-          {!status.instagram && !status.ads ? (
-            <p className="text-xs text-muted-foreground">
-              Nenhuma API conectada ainda. O passo a passo (criar o app na Meta,
-              obter os tokens e criar o projeto no Supabase) está no README e no
-              arquivo <code className="font-mono">.env.example</code>.
-            </p>
-          ) : null}
-        </CardContent>
-      </Card>
-
-      {/* Usuários — só administrador */}
-      {isAdmin ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Users className="size-4 text-primary" />
-              Usuários do painel
-            </CardTitle>
-            <CardDescription>
-              Quem pode acessar e o papel de cada um. Senhas guardadas com hash
-              (scrypt). Só <strong>Comercial</strong> e <strong>Administrador</strong>{" "}
-              alteram leads; <strong>Marketing</strong> opera dados de marketing.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <UsersManager users={users} currentUser={currentUser} authEnabled={authEnabled} />
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {/* Manual lead — admin/comercial */}
-      {canLeads ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <UserPlus className="size-4 text-primary" />
-              Adicionar lead / reunião
-            </CardTitle>
-            <CardDescription>
-              Cadastre um lead e marque quando ele agenda ou comparece — é assim que o
-              funil calcula reuniões e o custo por reunião.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <LeadForm creatives={creatives} />
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {/* Importar leads (CSV do rastreamento da LP) — admin/comercial */}
-      {canLeads ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <UsersRound className="size-4 text-primary" />
-              Importar leads (CSV / planilha)
-            </CardTitle>
-            <CardDescription>
-              Backfill dos leads que a landing page registrou antes do rastreio estar
-              ligado. Exporte a planilha como CSV (UTF-8) e envie. Os leads são
-              mesclados pelo <code className="font-mono">event_id</code> — reimportar
-              atualiza, não duplica, e um lead já capturado ao vivo vira a mesma linha.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <LeadsImportForm template={LEADS_CSV_TEMPLATE} />
-            <p className="text-xs text-muted-foreground">
-              Colunas reconhecidas: created_at, event_id, Status, nome, whatsapp,
-              email, utm_source, utm_campaign, utm_content, fbp, fbc. Status vazio
-              entra como &quot;Novo&quot;.
-            </p>
-            <p className="text-xs text-muted-foreground">
-              Na coluna Status vale o nome do estágio — {statusList} — ou como o
-              comercial costuma escrever: &quot;não atende&quot;, &quot;sem retorno&quot;,
-              &quot;não quis&quot;, &quot;desistiu&quot;, &quot;faltou&quot;,
-              &quot;fechado&quot;. O que não for reconhecido entra como &quot;Novo&quot;.
-            </p>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {/* Dados de marketing — admin/marketing */}
-      {canData ? (
         <>
-          {multiBrand ? (
-            <Card id="marcas" className="scroll-mt-24">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Layers className="size-4 text-primary" />
-                  Separação de marcas (tráfego pago)
-                </CardTitle>
-                <CardDescription>
-                  Como as marcas dividem o mesmo ad account, o gasto é separado pela
-                  campanha. Defina como reconhecer as campanhas de cada marca e
-                  reclassifique os anúncios já coletados.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {brandSpend.map((b) => (
-                    <div
-                      key={b.slug}
-                      className={cn("rounded-lg border p-3", b.slug === NAO_CLASSIFICADO && "border-[var(--warning)]/50")}
-                    >
-                      <div className="flex items-baseline justify-between gap-2">
-                        <p className="text-sm font-medium">{b.label}</p>
-                        <p className="tabular text-lg font-semibold">{formatCurrency0(b.spend)}</p>
-                      </div>
-                      <p className="text-xs text-muted-foreground">gasto atribuído · campanhas:</p>
-                      <ul className="mt-1.5 space-y-1">
-                        {b.campaigns.length === 0 ? (
-                          <li className="text-xs text-muted-foreground">nenhuma campanha</li>
-                        ) : (
-                          b.campaigns.map((c) => (
-                            <li key={c.name} className="flex items-baseline justify-between gap-2 text-xs">
-                              <span className="min-w-0 truncate text-muted-foreground" title={c.name}>
-                                {c.name}
-                                {c.vaiPara ? (
-                                  <span className="ml-1.5 font-medium text-[var(--warning-text)]">
-                                    → {c.vaiPara} ao reclassificar
-                                  </span>
-                                ) : null}
-                              </span>
-                              <span className="tabular shrink-0 text-muted-foreground">{formatCurrency0(c.spend)}</span>
-                            </li>
-                          ))
-                        )}
-                      </ul>
-                    </div>
-                  ))}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Confira acima se cada campanha está na marca certa. Uma campanha na marca
-                  errada? Ajuste a regra abaixo (ou renomeie a campanha no Ads Manager) e clique
-                  em Reclassificar.
-                </p>
-                <BrandMatchForm current={currentMatch} />
-                <ReclassifyAdsButton />
-              </CardContent>
-            </Card>
-          ) : null}
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <FileSpreadsheet className="size-4 text-primary" />
-                Importar anúncios (CSV do Ads Manager)
-              </CardTitle>
-              <CardDescription>
-                Exporte o relatório em CSV e envie aqui. As linhas são mescladas por
-                data + anúncio (reimportar atualiza os valores).
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <ImportForm template={ADS_CSV_TEMPLATE} />
-              <p className="text-xs text-muted-foreground">
-                Colunas reconhecidas (PT ou EN): Dia, Nome/ID do anúncio, Conjunto,
-                Campanha, Valor gasto, Impressões, Alcance, Cliques no link, Leads.
-                Baixe o modelo para ver o formato exato.
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Camera className="size-4 text-primary" />
-                Snapshot diário do Instagram
-              </CardTitle>
-              <CardDescription>
-                Registre os números do dia (Instagram Insights). Guardar snapshots é o
-                que constrói o histórico de crescimento — a API só retém ~90 dias.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ManualIgForm />
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <MessageCircle className="size-4 text-primary" />
-                Conversas de DM
-              </CardTitle>
-              <CardDescription>
-                A métrica de negócio do perfil — a API do Instagram não expõe DMs, então o
-                registro é manual. Anote as conversas iniciadas por dia (ou a soma da semana
-                num dia só); o painel agrega por semana.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <DmForm />
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <CalendarCheck className="size-4 text-primary" />
-                Rotina diária de presença
-              </CardTitle>
-              <CardDescription>
-                Os 15–20 min por dia útil que o guia cobra e que nenhuma API expõe: 3–5 stories
-                (ao menos 1 interativo), 20 comentários em perfis do nicho, responder 100% e
-                seguir 10–15 contas. Sem registro não há como cobrar aderência — nem saber se a
-                base esquentou por causa disso.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <RoutineForm />
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Clapperboard className="size-4 text-primary" />
-                Conteúdo dos posts
-              </CardTitle>
-              <CardDescription>
-                A duração do reel habilita a retenção % real (a API não a fornece); pilar/série e
-                CTA alimentam a comparação por categoria e os alertas (ex.: DM em excesso).
-                O CTA em &quot;Auto&quot; é detectado pela legenda. Marque{" "}
-                <strong>Teste? = Sim</strong> nos reels de validação de formato/gancho — eles
-                ganham selo e ficam FORA de toda a análise orgânica.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <PostsMetaForm posts={postMeta} />
-            </CardContent>
-          </Card>
-
           <Card id="orcamento" className="scroll-mt-24">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -659,8 +75,8 @@ export default async function ConfigPage({
                 Orçamento da campanha
               </CardTitle>
               <CardDescription>
-                Sem ele, o painel não mostra quanto da verba já foi consumido nem projeta se ela
-                acaba antes do fim. Com a data de fim, o ritmo de gasto vira projeção.
+                Sem ele, o painel não mostra quanto da verba já foi consumido nem projeta se ela acaba antes do
+                fim. Com a data de fim, o ritmo de gasto vira projeção.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -681,9 +97,8 @@ export default async function ConfigPage({
                 Metas
               </CardTitle>
               <CardDescription>
-                A régua do funil: o placar, o farol, as ações e as tabelas pintam cada número
-                contra a meta que vale no período. Mudar uma meta não reescreve o passado — a
-                nova vale a partir da data escolhida.
+                A régua do funil: o placar, as ações e as tabelas pintam cada número contra a meta que vale no
+                período. Mudar uma meta não reescreve o passado — a nova vale a partir da data escolhida.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
@@ -700,7 +115,12 @@ export default async function ConfigPage({
                     <tbody className="divide-y">
                       {regua.map((l) => (
                         <tr key={l.metrica}>
-                          <td className="py-1.5">{META_DEF[l.metrica].nome}</td>
+                          {/* ⓘ: a definição do dicionário, a mesma do briefing e das outras telas. */}
+                          <td className="py-1.5">
+                            <span title={dica(l.metrica)} className="cursor-help underline decoration-dotted underline-offset-4">
+                              {META_DEF[l.metrica].nome}
+                            </span>
+                          </td>
                           <td className="py-1.5 text-right tabular">{valorDaLinha(l)}</td>
                           <td className="py-1.5 pl-4">
                             {l.alvo != null ? (
@@ -720,9 +140,9 @@ export default async function ConfigPage({
                     </tbody>
                   </table>
                   <p className="mt-2 text-xs text-muted-foreground">
-                    Contagens e orçamento somam a meta semanal dia a dia no período escolhido no
-                    topo; custo e taxa valem como estão. Sem status quando o número não se sustenta
-                    (custo por reunião com menos de 3 reuniões, taxa sem ninguém na base).
+                    Contagens e orçamento somam a meta semanal dia a dia no período escolhido no topo; custo e
+                    taxa valem como estão. Sem status quando o número não se sustenta (custo por reunião com
+                    menos de 3 reuniões, taxa sem ninguém na base).
                   </p>
                 </div>
               ) : null}
@@ -743,7 +163,7 @@ export default async function ConfigPage({
                   <CalculadoraDeMetas
                     sugestao={{
                       ultimas: ultimaCalculadora,
-                      observadas: observadas,
+                      observadas,
                       suficiente: observadas.suficiente,
                       amostra: { leads: observadas.amostra.leads, agendadas: observadas.amostra.agendadas },
                       hoje,
@@ -791,115 +211,16 @@ export default async function ConfigPage({
                 Metas de conteúdo
               </CardTitle>
               <CardDescription>
-                Seguidores e o plano de 90 dias do diagnóstico (retenção 40%, salvos/1k 8+, 4
-                posts/semana…) — lidas pela tela Conteúdo.
+                Seguidores e o plano de 90 dias do diagnóstico (retenção 40%, salvos/1k 8+, 4 posts/semana…) —
+                lidas pela tela Conteúdo.
               </CardDescription>
             </CardHeader>
             <CardContent>
               <GoalsForm current={currentGoals} />
             </CardContent>
           </Card>
-
         </>
-      ) : null}
-
-      {/* Mensagem do WhatsApp da Fila — quem usa é o comercial. */}
-      {canLeads || canData ? (
-        <Card id="whatsapp" className="scroll-mt-24">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <MessageCircle className="size-4 text-primary" />
-              Mensagem do WhatsApp (Fila)
-            </CardTitle>
-            <CardDescription>
-              O botão de WhatsApp da Fila abre a conversa com este texto já escrito.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <MensagemWhatsappForm atual={mensagemAtual} padrao={MENSAGEM_WHATSAPP_PADRAO} />
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {/* Diagnóstico dos leads — lê o histórico, só altera com aprovação. */}
-      {canDanger ? (
-        <Card id="diagnostico-leads" className="scroll-mt-24">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Stethoscope className="size-4 text-primary" />
-              Diagnóstico dos leads
-            </CardTitle>
-            <CardDescription>
-              Até out/2026, quando alguém reenviava o formulário da landing page, o lead voltava
-              a &ldquo;Novo&rdquo;, perdia a data de entrada e a reunião registrada. O histórico
-              guardou tudo: aqui dá para ver quantos foram afetados e devolver cada um ao estado
-              certo. Nada muda até você aplicar.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <DiagnosticoLeadsPanel />
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {/* Gerador de UTMs — era uma aba só para ele; é configuração de anúncio. */}
-      {brand.type !== "awareness" ? (
-        <Card id="utm" className="scroll-mt-24">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Link2 className="size-4 text-primary" />
-              Gerador de UTMs
-            </CardTitle>
-            <CardDescription>
-              Um link com as macros da Meta ({"{{campaign.id}}"}, {"{{adset.id}}"}, {"{{ad.id}}"}) para
-              todos os anúncios: cada lead chega com campanha › conjunto › anúncio resolvidos. UTM
-              que não foi marcada no anúncio não tem como ser reconstruída depois.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <UtmBuilder defaultBase={process.env.LP_BASE_URL ?? ""} creatives={creatives} />
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {/* Zona de perigo — por último, só administrador, tudo registrado. */}
-      {canDanger ? (
-        <Card id="perigo" className="scroll-mt-24 border-[var(--danger-text)]/30">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <ShieldAlert className="size-4 text-[var(--danger-text)]" />
-              Zona de perigo
-            </CardTitle>
-            <CardDescription>
-              Ações que mexem em muitos dados de uma vez. Só administrador; cada uma fica
-              registrada abaixo. Banco ativo: <strong>{dbLabel}</strong>
-              {dbConnected ? "." : " (defina DATABASE_URL para persistir os dados de verdade)."}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <ResetButton />
-            <CleanResyncAdsButton />
-            <div className="border-t pt-3">
-              <p className="mb-2 text-xs font-medium text-muted-foreground">Últimas ações</p>
-              {auditoria.length ? (
-                <ul className="space-y-1 text-xs">
-                  {auditoria.map((a) => (
-                    <li key={a.id}>
-                      <span className="text-muted-foreground">{formatDateTime(a.at)}</span> ·{" "}
-                      <strong>{a.actor}</strong> · {a.action}
-                      {a.detail ? <span className="text-muted-foreground"> — {a.detail}</span> : null}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-xs text-muted-foreground">Nenhuma ainda.</p>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      <p className="text-xs text-muted-foreground">Versão do painel: {VERSAO}</p>
+      )}
     </div>
   );
 }
