@@ -1,36 +1,41 @@
-import { AlertTriangle, EyeOff, ShieldAlert } from "lucide-react";
-import { Cascata } from "@/components/charts/cascata";
+import { AlertTriangle, ShieldAlert } from "lucide-react";
 import { MotivosTable } from "@/components/robo/robo-tables";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { ChartCard } from "@/components/ui/chart-card";
+import { VistaToggle } from "@/components/funil/vista-toggle";
+import { FunilConversao } from "@/components/funil/funil-conversao";
+import { FunilDescoberta } from "@/components/funil/funil-descoberta";
+import { TendenciaChart } from "@/components/funil/tendencia-chart";
+import { CoortesTable } from "@/components/funil/coortes-table";
+import { PerdasTable } from "@/components/funil/perdas-table";
+import { NotasMedicao } from "@/components/funil/notas-medicao";
 import { getData, listLeadEvents } from "@/lib/data/store";
 import { activeBrandSlug } from "@/lib/active-brand";
 import { pageRange } from "@/lib/page-range";
 import { resolveMetaBrands } from "@/lib/meta/config";
 import { coberturaDeAnuncios } from "@/lib/sincronizacao";
-import { kpisDoPeriodo } from "@/lib/kpis";
+import { kpisDoPeriodo, periodoDaRegua } from "@/lib/kpis";
+import { gargalo, transicoesDoFunil } from "@/lib/gargalo";
+import { hojeEmBrasilia } from "@/lib/range";
 import { dica } from "@/lib/dicionario";
-import { eventosPorLead, resumoContato } from "@/lib/contato";
 import { alertasDeAtribuicao, alertasDeConfianca } from "@/lib/alertas";
 import { RegistrarAlertas } from "@/components/layout/alertas";
 import { getCascataFontes, getRoboSnapshot } from "@/lib/robo/client";
-import { maiorVazamento, montarCascata } from "@/lib/cascata";
-import { DONO_LABEL } from "@/lib/dono";
-import { LEAD_STATUS_META } from "@/lib/lead-status";
-import { cohortWeekly, perdasDoPeriodo } from "@/lib/metrics";
 import {
-  formatCurrency0,
-  formatDecimal,
-  formatInt,
-  formatPercent,
-  formatPercentValue,
-  formatarEspera,
-} from "@/lib/format";
+  confiancaDoRegistro,
+  coortesDoFunil,
+  fraseDoGargalo,
+  funilDeDescoberta,
+  montarFunil,
+  notasDeMedicao,
+  perdasConfiaveis,
+  tendenciaDasTaxas,
+  vistaDoFunil,
+} from "@/lib/funil";
+import { formatCurrency0, formatDecimal, formatInt, formatarEspera, formatPercentValue } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
-
-/** Abaixo disto, a taxa lead→reunião de uma semana é anedota, não taxa. */
-const AMOSTRA_COORTE = 5;
 
 /** Média que pode não existir ainda (robô sem nenhuma transferência). */
 function media(v: number | null | undefined): string {
@@ -40,283 +45,214 @@ function media(v: number | null | undefined): string {
 /** Horas médias do robô → a mesma escrita de espera do resto do painel. */
 const horas = (n: number | null) => formatarEspera(n);
 
+/** Semanas da tendência (o relatório pede 10–12). */
+const SEMANAS_TENDENCIA = 12;
+
 /**
- * Funil — onde exatamente estamos perdendo reuniões.
+ * Funil — onde exatamente estamos perdendo reuniões (7.1 do relatório).
  *
- * Absorveu Funil & LP e Robô. As três desenhavam o mesmo funil em três recortes
- * (painel, robô, cascata) com números que não somavam entre si. Ficou a cascata
- * como funil único, e das outras só o que ela não diz: POR QUE as pessoas saem
- * (motivo de perda, onde a conversa com o robô parou), se as semanas recentes
- * ainda estão maturando, e o que volta em receita no fim.
- *
- * A página abre com a resposta escrita — o maior vazamento depois do lead —, não
- * com o método nem com o alerta de gente parada, que já mora no farol e na Fila.
+ * Abre com a resposta: o gargalo, com dono e impacto — o MESMO da Bússola. Em
+ * seguida, dois funis com escopo próprio (conversão × descoberta), a alternância
+ * período × coorte, a tendência das três taxas, as coortes semana a semana, as
+ * perdas confiáveis e, recolhidas, as notas de medição. O robô aparece quando
+ * está ligado; "Receita e retorno" fecha a página.
  */
 export default async function FunilPage({
   searchParams,
 }: {
-  searchParams: Promise<{ range?: string }>;
+  searchParams: Promise<{ range?: string; vista?: string }>;
 }) {
   const brand = await activeBrandSlug();
   const data = await getData(brand);
-  const { range } = pageRange(data, (await searchParams).range);
+  const sp = await searchParams;
+  const { range, rangeKey } = pageRange(data, sp.range);
+  const vista = vistaDoFunil(sp.vista);
+  const agoraDate = new Date();
+  const agora = agoraDate.toISOString();
+  const hoje = hojeEmBrasilia(agoraDate);
 
-  // Os MESMOS números da home e da Mídia (kpisDoPeriodo).
-  const kp = kpisDoPeriodo(data, range, {
-    brandRules: await resolveMetaBrands(),
-    cobertura: await coberturaDeAnuncios(brand),
-  });
-  const k = kp.overview;
-  const [fontes, robo, eventos] = await Promise.all([
+  const [brandRules, cobertura, fontes, robo, eventos] = await Promise.all([
+    resolveMetaBrands(),
+    coberturaDeAnuncios(brand),
     getCascataFontes(),
     getRoboSnapshot(range?.from),
     listLeadEvents({ brand, limit: 0 }),
   ]);
 
-  const cascata = montarCascata({
-    data,
-    range,
-    robo: fontes.robo,
-    comercial: fontes.comercial,
-    kpis: kp,
-  });
+  // Os MESMOS números da home e da Mídia (kpisDoPeriodo), com Δ do período anterior.
+  const kp = kpisDoPeriodo(data, range, { brandRules, cobertura, comparar: true, hoje, agora });
+  const k = kp.overview;
+
+  // A resposta: o gargalo da Bússola, calculado do mesmo jeito.
+  const transicoes = transicoesDoFunil(data, range, kp, { agora, hoje });
+  const g = gargalo(transicoes, periodoDaRegua(data, range, hoje));
+  const resposta = fraseDoGargalo(g);
+
+  const funil = montarFunil({ data, range, kpis: kp, robo: fontes.robo, comercial: fontes.comercial, vista, hoje, agora });
+  const descoberta = funilDeDescoberta(data, range, kp);
+  const tendencia = tendenciaDasTaxas(data, hoje, SEMANAS_TENDENCIA, agora);
+  const coortes = coortesDoFunil(data, range, { agora, hoje, cobertura });
+  const perdas = perdasConfiaveis(data, range, eventos);
+  const confianca = confiancaDoRegistro(data, range, eventos);
+  const notas = notasDeMedicao({ data, range, kpis: kp, cascata: funil.cascata });
 
   const parcial = fontes.falha?.tipo === "erro";
   const semRobo = fontes.falha?.tipo === "desligado";
-
-  const vazamento = maiorVazamento(cascata.degraus);
-  const donoVazamento = vazamento?.degrau.dono
-    ? vazamento.degrau.dono === "BOT"
-      ? "robô (o roteiro é do marketing)"
-      : DONO_LABEL[vazamento.degrau.dono]
-    : null;
-
-  // Perdas do período, pelo motivo registrado. "Sem resposta" sem nenhuma
-  // tentativa registrada sai da conta da mídia (é processo, não anúncio).
-  const comTentativa = new Set(
-    [...eventosPorLead(eventos)].filter(([, evs]) => resumoContato(evs).tentativas > 0).map(([id]) => id),
-  );
-  const perdas = perdasDoPeriodo(data, range, comTentativa);
-  const lossRows = perdas.linhas;
-  const byKind = perdas.porTipo;
-  const lossTotal = perdas.total;
-  const perdasDepoisDaReuniao = perdas.depoisDaReuniao;
-  const origem = (row: (typeof lossRows)[number]) =>
-    LEAD_STATUS_META[row.status].origemDaPerda ?? "—";
-  const leituras = lossRows
-    .filter((r) => LEAD_STATUS_META[r.status].leituraDaPerda)
-    .map((r) => `“${r.label}” ${LEAD_STATUS_META[r.status].leituraDaPerda}.`);
-
-  const cohorts = cohortWeekly(data, range, new Date().toISOString());
+  const comRobo = Boolean(fontes.robo || fontes.comercial);
+  const ex = perdas.excluidos;
+  const excluidos = [
+    ex.testes > 0 ? `${formatInt(ex.testes)} ${ex.testes === 1 ? "teste" : "testes"}` : "",
+    ex.duplicados > 0 ? `${formatInt(ex.duplicados)} ${ex.duplicados === 1 ? "duplicado" : "duplicados"}` : "",
+    ex.comReuniao > 0 ? `${formatInt(ex.comReuniao)} ${ex.comReuniao === 1 ? "encerrado depois de ter reunião" : "encerrados depois de ter reunião"}` : "",
+  ].filter(Boolean);
 
   return (
     <div className="space-y-6">
       <RegistrarAlertas alertas={[...alertasDeConfianca(kp.trust.travas), ...alertasDeAtribuicao(data, range)]} />
-      <div className="max-w-3xl space-y-2">
-        <p className="text-base leading-relaxed">
-          {vazamento ? (
-            <>
-              <span className="font-semibold">Maior vazamento depois do lead:</span>{" "}
-              {formatInt(vazamento.pessoas)} de {formatInt(vazamento.anterior.valor ?? 0)}{" "}
-              {vazamento.frase}
-              {donoVazamento ? ` · dono: ${donoVazamento}` : ""}.{" "}
-              {vazamento.degrau.fonte === "robo" && robo.kpis ? (
-                <a href="#robo" className="text-primary underline-offset-4 hover:underline">
-                  Ver onde a conversa parou ↓
-                </a>
-              ) : null}
-            </>
-          ) : (
-            "Nenhuma perda depois do lead tem amostra suficiente para ser apontada como vazamento."
-          )}
-        </p>
-        <details className="text-sm text-muted-foreground">
-          <summary className="cursor-pointer select-none">Como ler esta cascata</summary>
-          <p className="mt-2 leading-relaxed">
-            Cada degrau vem de um sistema diferente — Meta, landing page, painel, robô e
-            atendimento. A junta <span className="font-medium text-foreground">tracejada</span>{" "}
-            marca onde o dado troca de dono, que é onde os números costumam parar de bater.
-            Percentuais têm duas âncoras: acima de Leads medem sobre as impressões; de Leads
-            para baixo, Leads é 100%. Abaixo de 3 pessoas não há taxa nem custo por unidade:
-            um número desses não é medida.
-          </p>
-        </details>
-      </div>
+
+      {/* 1. A resposta — o mesmo gargalo da Bússola, com dono e impacto. */}
+      <p className="max-w-3xl text-base leading-relaxed">
+        <span className={g ? "font-semibold text-[var(--status-fora-text)]" : "font-semibold"}>
+          {g ? "► " : ""}
+          {resposta.titulo}
+        </span>{" "}
+        <span className="text-muted-foreground">{resposta.detalhe}</span>
+      </p>
+
+      {/* 2. Período × coorte — a vista viaja na URL, o período fica. */}
+      <VistaToggle vista={vista} />
 
       {parcial ? (
         <Card className="border-[var(--warning)]/40">
           <CardContent className="flex items-start gap-3 p-4">
             <AlertTriangle className="mt-0.5 size-4 shrink-0 text-[var(--warning-text)]" />
             <p className="text-sm text-muted-foreground">
-              <span className="font-medium text-foreground">A cascata está truncada.</span> Não
-              consegui ler o robô, então ela termina nos leads — o fundo do funil não está
-              aqui, e não é porque não aconteceu.
+              <span className="font-medium text-foreground">O funil está truncado.</span> Não consegui ler o robô,
+              então ele termina nos leads — o fundo do funil não está aqui, e não é porque não aconteceu.
             </p>
           </CardContent>
         </Card>
       ) : null}
 
+      {/* 3. Dois funis, cada um com o seu escopo. */}
+      <div className="grid gap-4 lg:grid-cols-3">
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle>Funil de conversão</CardTitle>
+            <CardDescription>
+              Só campanhas de conversão: custo por unidade sobre{" "}
+              <span title={dica("investimento_conversao")}>{formatCurrency0(funil.investimentoConversao)} de verba de conversão</span>.
+              Cada etapa reparte o mesmo dinheiro — não some entre linhas. Acima de Leads a base são impressões; de
+              Leads para baixo, Leads é 100%.
+              {comRobo && vista === "periodo" ? " As etapas do robô e do atendimento são contagens da campanha inteira." : ""}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <FunilConversao etapas={funil.etapas} rangeKey={rangeKey} />
+            {semRobo ? (
+              <p className="mt-4 border-t pt-4 text-xs text-muted-foreground">
+                O robô de WhatsApp não está conectado, então o funil usa o painel do lead para baixo. Com ele ligado,
+                aparecem as etapas de conversa, convite e transferência ao especialista.
+              </p>
+            ) : null}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Funil de descoberta</CardTitle>
+            <CardDescription>
+              A conta do Instagram no período — alcance, visitas ao perfil e seguidores. Outro escopo: a verba de descoberta
+              não entra no CPL nem no custo por reunião.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <FunilDescoberta funil={descoberta} />
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* 4. Tendência semanal das três taxas. */}
+      <ChartCard
+        title="Tendência semanal das taxas"
+        description={`Últimas ${SEMANAS_TENDENCIA} semanas (segunda a domingo): visita → lead, lead → 1º contato no prazo e lead → agendada, cada ponto com os KPIs daquela semana. A última semana ainda não fechou; semana sem denominador fica sem ponto.`}
+      >
+        <TendenciaChart data={tendencia} />
+      </ChartCard>
+
+      {/* 5. Coortes — todas as semanas, inclusive as de 0 lead. */}
+      {coortes.length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Coorte por semana de entrada</CardTitle>
+            <CardDescription>
+              O que aconteceu com os leads de cada semana, em qualquer data. Semana sem lead aparece com 0 e o motivo;
+              coortes sombreadas ainda estão maturando — não compare a conversão delas com as semanas mais antigas.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <CoortesTable coortes={coortes} />
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {/* 6. Perdas, confiáveis. */}
       <Card>
         <CardHeader>
-          <CardTitle>Do anúncio à venda</CardTitle>
-          <CardDescription>
-            Custo por unidade acumulado sobre {formatCurrency0(cascata.investimentoConversao)} de
-            verba de conversão. Cada degrau reparte o mesmo dinheiro — não some entre linhas.
-          </CardDescription>
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="space-y-1">
+              <CardTitle>Por que perdemos</CardTitle>
+              <CardDescription>
+                {formatInt(perdas.total)} {perdas.total === 1 ? "lead encerrado" : "leads encerrados"} sem nunca ter tido
+                reunião, de {formatInt(perdas.base)} que entraram no período
+                {excluidos.length > 0 ? ` (fora da conta: ${excluidos.join(", ")})` : ""}.
+              </CardDescription>
+            </div>
+            {confianca.baixa ? (
+              <Badge variant="warning" title={confianca.texto}>
+                Baixa confiança no registro: {formatPercentValue(confianca.share * 100, 0)} em lote ou com atraso
+              </Badge>
+            ) : confianca.total > 0 ? (
+              <span className="text-xs text-muted-foreground" title={confianca.texto}>
+                registro: {formatPercentValue(confianca.share * 100, 0)} suspeito em {formatInt(confianca.total)}
+              </span>
+            ) : null}
+          </div>
         </CardHeader>
-        <CardContent>
-          <Cascata
-            degraus={cascata.degraus}
-            vazamentoKey={vazamento?.degrau.key}
-            tomVazamento="perigo"
-          />
-
-          {semRobo ? (
-            <p className="mt-4 border-t pt-4 text-xs text-muted-foreground">
-              O robô de WhatsApp não está conectado, então a cascata usa o funil do painel do
-              lead para baixo. Com ele ligado, aparecem as etapas de conversa, convite e
-              transferência ao especialista.
-            </p>
-          ) : null}
-
-          {cascata.conversoesPixel > 0 ? (
-            <p className="mt-4 border-t pt-4 text-xs text-muted-foreground">
-              <span className="font-medium text-foreground">
-                Número-sombra: {formatInt(cascata.conversoesPixel)} conversões do Pixel.
-              </span>{" "}
-              É a janela de atribuição da Meta, carimbada na data do clique — serve para a Meta
-              otimizar a entrega e não entra em nenhuma taxa desta cascata. Quando ele diverge
-              da contagem de leads, os dois estão certos: contam coisas diferentes.
-            </p>
-          ) : null}
+        <CardContent className="space-y-3">
+          <PerdasTable linhas={perdas.linhas} />
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            <span className="font-medium text-foreground">Onde atacar, pela regra:</span> “Sem resposta” aponta para o
+            comercial quando houve menos de 3 tentativas ou a 1ª tentativa saiu depois de 1 hora útil; só com 3 ou mais
+            tentativas, a primeira no prazo, aponta para mídia/formulário. “Contato inválido” abre pelo motivo registrado.
+            “Não tem interesse” e “Desistência” são oferta e pitch.
+            {perdas.semTentativa > 0
+              ? ` ${formatInt(perdas.semTentativa)} “Sem resposta” não ${perdas.semTentativa === 1 ? "tem" : "têm"} nenhuma tentativa registrada — sem tentativa, ninguém sabe se a pessoa responderia.`
+              : ""}
+            {confianca.baixa
+              ? ` ${confianca.texto}: registro tardio distorce o 1º contato, a taxa lead → reunião e a comparação entre semanas.`
+              : ""}
+          </p>
         </CardContent>
       </Card>
 
-      {cascata.naoAgir.length > 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <EyeOff className="size-4 text-muted-foreground" />
-              Onde não agir
-            </CardTitle>
-            <CardDescription>
-              Metade da resposta a “para onde olhar” é saber o que ignorar. Estas parecem as
-              maiores perdas do funil e não são perdas.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {cascata.naoAgir.map((n) => (
-              <div key={n.titulo} className="space-y-1">
-                <p className="text-sm font-medium text-muted-foreground line-through decoration-1">
-                  {n.titulo}
-                </p>
-                <p className="text-xs leading-relaxed text-muted-foreground">{n.detalhe}</p>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      ) : null}
+      {/* 7. Notas de medição, recolhidas. */}
+      <NotasMedicao notas={notas} />
 
-      {/* Por que as pessoas saem — só faz sentido com perda registrada no período */}
-      {lossTotal > 0 || perdas.semTentativa > 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Por que perdemos</CardTitle>
-            <CardDescription>
-              Leads encerrados sem nunca ter tido reunião, pelo motivo registrado.
-              {perdasDepoisDaReuniao > 0
-                ? ` ${formatInt(perdasDepoisDaReuniao)} ${perdasDepoisDaReuniao === 1 ? "lead chegou" : "leads chegaram"} a agendar antes de encerrar e não ${perdasDepoisDaReuniao === 1 ? "entra" : "entram"} aqui: ali o motivo descreve o fim da conversa, não por que ela não começou.`
-                : ""}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {/* Uma tabela de uma linha é uma frase com moldura. */}
-            {lossRows.length === 0 ? null : lossRows.length === 1 ? (
-              <p className="text-sm">
-                <span className="font-medium">
-                  {formatInt(lossRows[0].count)}{" "}
-                  {lossRows[0].count === 1 ? "lead encerrado" : "leads encerrados"} como “
-                  {lossRows[0].label}”.
-                </span>{" "}
-                <span className="text-muted-foreground">
-                  Onde está o problema: {origem(lossRows[0]).toLowerCase()}.
-                </span>
-              </p>
-            ) : (
-              <Table>
-                <THead>
-                  <TR className="hover:bg-transparent">
-                    <TH>Motivo</TH>
-                    <TH>Onde está o problema</TH>
-                    <TH className="text-right">Leads</TH>
-                    <TH className="text-right">% das perdas</TH>
-                  </TR>
-                </THead>
-                <TBody>
-                  {lossRows.map((row) => (
-                    <TR key={row.status}>
-                      <TD className="font-medium">{row.label}</TD>
-                      <TD>
-                        <div className="flex items-center gap-2">
-                          <span
-                            aria-hidden
-                            className="h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-foreground/10"
-                          >
-                            <span
-                              className="block h-full rounded-full"
-                              style={{
-                                width: `${Math.round(row.share * 100)}%`,
-                                background:
-                                  row.kind === "qualidade" ? "var(--warning)" : "var(--critical)",
-                              }}
-                            />
-                          </span>
-                          <span className="text-xs text-muted-foreground">{origem(row)}</span>
-                        </div>
-                      </TD>
-                      <TD className="text-right tabular">{formatInt(row.count)}</TD>
-                      <TD className="text-right tabular">{formatPercent(row.share)}</TD>
-                    </TR>
-                  ))}
-                </TBody>
-              </Table>
-            )}
-            {perdas.semTentativa > 0 ? (
-              <p className="text-xs leading-relaxed text-muted-foreground">
-                <span className="font-medium text-foreground">
-                  {formatInt(perdas.semTentativa)} “Sem resposta” sem nenhuma tentativa registrada
-                </span>{" "}
-                ficam fora desta conta: sem tentativa, não dá para dizer que a pessoa não
-                responderia — é processo, não mídia. Registre as tentativas na Fila de contato.
-              </p>
-            ) : null}
-            {leituras.length > 0 || byKind.decisao > 0 ? (
-              <p className="text-xs leading-relaxed text-muted-foreground">
-                {leituras.join(" ")}
-                {byKind.decisao > 0
-                  ? ` ${formatInt(byKind.decisao)} ${byKind.decisao === 1 ? "chegou" : "chegaram"} a falar com a equipe e ${byKind.decisao === 1 ? "recusou" : "recusaram"}: aí o problema é oferta e pitch.`
-                  : ""}
-              </p>
-            ) : null}
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {/* Dentro do robô — o que a cascata não diz: por que a conversa parou */}
+      {/* 8. Dentro do robô — só com o robô ligado. */}
       {robo.kpis ? (
         <Card id="robo" className="scroll-mt-24">
           <CardHeader>
             <CardTitle>Dentro do robô: onde cada conversa parou</CardTitle>
             <CardDescription>
-              A decisão que o robô registrou no último turno de cada lead. Score baixo com
-              muitos turnos costuma indicar pergunta que não gera sinal.
+              A decisão que o robô registrou no último turno de cada lead. Score baixo com muitos turnos costuma indicar
+              pergunta que não gera sinal.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">
               <span>
-                Score médio {media(robo.kpis.score_medio)} ·{" "}
-                {media(robo.kpis.score_medio_transferidos)} entre os transferidos
+                Score médio {media(robo.kpis.score_medio)} · {media(robo.kpis.score_medio_transferidos)} entre os transferidos
               </span>
               <span>
                 Da saudação à transferência: {horas(robo.kpis.horas_medias_ate_transferir)},{" "}
@@ -335,18 +271,12 @@ export default async function FunilPage({
                 <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
                   <div>
                     <p className="text-xs text-muted-foreground">Respostas enviadas</p>
-                    <p className="mt-1 text-xl font-semibold tabular">
-                      {formatInt(robo.saude.respostas_robo)}
-                    </p>
+                    <p className="mt-1 text-xl font-semibold tabular">{formatInt(robo.saude.respostas_robo)}</p>
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">Corrigidas pelo filtro</p>
-                    <p className="mt-1 text-xl font-semibold tabular">
-                      {formatPercentValue(robo.saude.taxa_bloqueio)}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {formatInt(robo.saude.respostas_bloqueadas)} respostas
-                    </p>
+                    <p className="mt-1 text-xl font-semibold tabular">{formatPercentValue(robo.saude.taxa_bloqueio)}</p>
+                    <p className="text-xs text-muted-foreground">{formatInt(robo.saude.respostas_bloqueadas)} respostas</p>
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">Convite fora de hora</p>
@@ -357,73 +287,12 @@ export default async function FunilPage({
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">Sem identificação</p>
-                    <p className="mt-1 text-xl font-semibold tabular">
-                      {formatInt(robo.saude.pendencias_identidade)}
-                    </p>
+                    <p className="mt-1 text-xl font-semibold tabular">{formatInt(robo.saude.pendencias_identidade)}</p>
                     <p className="text-xs text-muted-foreground">leads a reconciliar</p>
                   </div>
                 </div>
               </div>
             ) : null}
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {/* Coorte semanal — maturação por semana de entrada */}
-      {cohorts.length >= 2 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Coorte por semana de entrada</CardTitle>
-            <CardDescription>
-              Coortes recentes ainda estão maturando — não compare a conversão delas com as
-              semanas mais antigas.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <THead>
-                <TR className="hover:bg-transparent">
-                  <TH>Semana</TH>
-                  <TH className="text-right">Leads</TH>
-                  <TH className="text-right" title={dica("agendaram")}>Agendaram</TH>
-                  <TH className="text-right" title={dica("taxa_lead_agendada")}>Lead→Reunião</TH>
-                  <TH className="text-right">Clientes</TH>
-                  <TH className="text-right">Receita</TH>
-                </TR>
-              </THead>
-              <TBody>
-                {cohorts.map((c) => (
-                  <TR key={c.week}>
-                    <TD className="font-medium">
-                      {c.label}
-                      {c.immature ? (
-                        <span className="ml-1.5 text-xs font-normal text-muted-foreground">
-                          (maturando)
-                        </span>
-                      ) : null}
-                      {c.semVeiculacao ? (
-                        <span
-                          className="ml-1.5 text-xs font-normal text-muted-foreground"
-                          title="Nenhuma linha de anúncio nesta semana: campanha pausada ou sincronização falhou"
-                        >
-                          (sem veiculação)
-                        </span>
-                      ) : null}
-                    </TD>
-                    <TD className="text-right tabular">{formatInt(c.leads)}</TD>
-                    <TD className="text-right tabular">{formatInt(c.meetings)}</TD>
-                    <TD
-                      className="text-right tabular"
-                      title={c.leads > 0 && c.leads < AMOSTRA_COORTE ? `Só ${c.leads} lead(s): ainda não é taxa` : undefined}
-                    >
-                      {c.leads >= AMOSTRA_COORTE ? formatPercent(c.leadToMeeting) : "—"}
-                    </TD>
-                    <TD className="text-right tabular">{formatInt(c.clients)}</TD>
-                    <TD className="text-right tabular">{formatCurrency0(c.revenue)}</TD>
-                  </TR>
-                ))}
-              </TBody>
-            </Table>
           </CardContent>
         </Card>
       ) : null}
@@ -434,8 +303,8 @@ export default async function FunilPage({
           <CardHeader>
             <CardTitle>Receita e retorno</CardTitle>
             <CardDescription>
-              Dos leads que entraram no período. CAC = gasto de conversão ÷ clientes · ROAS =
-              receita ÷ investimento total · valor por reunião = receita ÷ quem agendou.
+              Dos leads que entraram no período. CAC = gasto de conversão ÷ clientes · ROAS = receita ÷ investimento total ·
+              valor por reunião = receita ÷ quem agendou.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -443,10 +312,11 @@ export default async function FunilPage({
               {[
                 { label: "Clientes", value: formatInt(k.clients) },
                 { label: "Receita", value: formatCurrency0(k.revenue) },
-                { label: "CAC", value: formatCurrency0(k.cac) },
-                { label: "ROAS", value: `${formatDecimal(k.roas, 2)}×` },
-                { label: "Ticket médio", value: formatCurrency0(k.ticket) },
-                { label: "Valor / reunião", value: formatCurrency0(k.valuePerMeeting) },
+                // Custo com denominador zero não existe: "—", nunca "R$ 0".
+                { label: "CAC", value: k.clients > 0 && k.spendConversao > 0 ? formatCurrency0(k.cac) : "—" },
+                { label: "ROAS", value: k.spend > 0 ? `${formatDecimal(k.roas, 2)}×` : "—" },
+                { label: "Ticket médio", value: k.clients > 0 ? formatCurrency0(k.ticket) : "—" },
+                { label: "Valor / reunião", value: k.meetingsCoorte > 0 ? formatCurrency0(k.valuePerMeeting) : "—" },
               ].map((s) => (
                 <div key={s.label}>
                   <p className="text-xs text-muted-foreground">{s.label}</p>
