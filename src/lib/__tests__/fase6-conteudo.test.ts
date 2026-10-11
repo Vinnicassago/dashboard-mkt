@@ -1,0 +1,292 @@
+/**
+ * Fase 6.5 — Conteúdo: variações de anúncio, cadência sem testes e impulsionados,
+ * alcance orgânico dos posts e a série de seguidores (B10/B11/S14).
+ * Fixture sintética (nenhum dado real).
+ */
+import { describe, expect, it } from "vitest";
+import {
+  alcanceOrganicoDosPosts,
+  metaDeConversasDm,
+  metaDeSeguidores,
+  normalizarLegenda,
+  reconstruirSeguidores,
+  resumoSeguidores,
+  variacoesDeAnuncio,
+} from "../conteudo";
+import { postingCadence } from "../metrics";
+import type { Creative, Goal, IgAccountDaily, IgPost } from "../types";
+
+const post = (id: string, publishedAt: string, caption: string, over: Partial<IgPost> = {}): IgPost => ({
+  id,
+  brand: "consorcio",
+  publishedAt,
+  type: "reel",
+  caption,
+  permalink: `https://www.instagram.com/reel/${id}/`,
+  reach: 100,
+  views: 200,
+  likes: 1,
+  comments: 0,
+  saved: 0,
+  shares: 0,
+  ...over,
+});
+
+const criativo = (adId: string, over: Partial<Creative> = {}): Creative => ({
+  adId,
+  brand: "consorcio",
+  name: `Anúncio ${adId}`,
+  format: "imagem",
+  ...over,
+});
+
+const dia = (date: string, over: Partial<IgAccountDaily> = {}): IgAccountDaily => ({
+  brand: "consorcio",
+  date,
+  followers: 100,
+  reach: 10,
+  views: 20,
+  profileLinkTaps: 1,
+  accountsEngaged: 2,
+  totalInteractions: 3,
+  profileViews: 4,
+  ...over,
+});
+
+describe("6.5 — variações de anúncio (mesma legenda, mesmo dia em Brasília)", () => {
+  it("normaliza a legenda: pontas, caixa e espaços repetidos", () => {
+    expect(normalizarLegenda("  Gancho   A \n novo ")).toBe("gancho a novo");
+  });
+
+  it("agrupa 2+ posts com a mesma legenda no mesmo dia e ignora os sozinhos", () => {
+    const posts = [
+      post("A1", "2026-10-05T12:00:00Z", "Gancho A — três caminhos"),
+      post("A2", "2026-10-05T15:30:00Z", "gancho a —  três caminhos", { type: "feed" }),
+      post("A3", "2026-10-05T18:00:00Z", "  GANCHO A — TRÊS CAMINHOS  "),
+      post("B1", "2026-10-05T13:00:00Z", "Legenda única do dia"),
+      post("C1", "2026-10-06T13:00:00Z", "Gancho A — três caminhos"), // outro dia: não é variação
+    ];
+    const grupos = variacoesDeAnuncio(posts);
+    expect(grupos).toHaveLength(1);
+    expect(grupos[0].dia).toBe("2026-10-05");
+    expect(grupos[0].legenda).toBe("Gancho A — três caminhos");
+    expect(grupos[0].posts.map((p) => p.id)).toEqual(["A1", "A2", "A3"]);
+    expect(grupos[0].pendentes).toEqual(["A1", "A2", "A3"]);
+  });
+
+  it("o dia é o de Brasília: 23h30 e 2h30 UTC do dia seguinte são o mesmo dia", () => {
+    const posts = [
+      post("N1", "2026-10-05T23:30:00Z", "Mesma legenda"), // 20h30 em Brasília, dia 05
+      post("N2", "2026-10-06T02:30:00Z", "Mesma legenda"), // 23h30 em Brasília, dia 05
+      post("N3", "2026-10-06T03:30:00Z", "Mesma legenda"), // 00h30 em Brasília, dia 06
+    ];
+    const grupos = variacoesDeAnuncio(posts);
+    expect(grupos).toHaveLength(1);
+    expect(grupos[0].dia).toBe("2026-10-05");
+    expect(grupos[0].posts.map((p) => p.id)).toEqual(["N1", "N2"]);
+  });
+
+  it("grupo já confirmado como teste não volta; parcialmente marcado sugere só os pendentes", () => {
+    const posts = [
+      post("T1", "2026-10-05T12:00:00Z", "Teste confirmado", { isTest: true }),
+      post("T2", "2026-10-05T13:00:00Z", "Teste confirmado", { isTest: true }),
+      post("P1", "2026-10-07T12:00:00Z", "Metade marcada", { isTest: true }),
+      post("P2", "2026-10-07T13:00:00Z", "Metade marcada"),
+    ];
+    const grupos = variacoesDeAnuncio(posts);
+    expect(grupos).toHaveLength(1);
+    expect(grupos[0].legenda).toBe("Metade marcada");
+    expect(grupos[0].pendentes).toEqual(["P2"]);
+    expect(grupos[0].posts.find((p) => p.id === "P1")?.isTest).toBe(true);
+  });
+
+  it("posts sem legenda não viram variação; o período filtra pelo dia de Brasília", () => {
+    const posts = [
+      post("S1", "2026-10-05T12:00:00Z", "(sem legenda)"),
+      post("S2", "2026-10-05T13:00:00Z", "(sem legenda)"),
+      post("V1", "2026-10-09T12:00:00Z", "Fora do período"),
+      post("V2", "2026-10-09T13:00:00Z", "Fora do período"),
+      post("D1", "2026-10-05T12:00:00Z", "Dentro"),
+      post("D2", "2026-10-05T13:00:00Z", "Dentro"),
+    ];
+    expect(variacoesDeAnuncio(posts).map((g) => g.legenda)).toEqual(["Fora do período", "Dentro"]);
+    expect(variacoesDeAnuncio(posts, { from: "2026-10-01", to: "2026-10-07" }).map((g) => g.legenda)).toEqual(["Dentro"]);
+  });
+});
+
+describe("6.5 — cadência ignora testes e impulsionados", () => {
+  const posts = [
+    post("G1", "2026-10-01T12:00:00Z", "Da grade"),
+    post("G2", "2026-10-04T12:00:00Z", "Da grade também", { type: "carrossel" }),
+    post("T1", "2026-10-04T13:00:00Z", "[TESTE] gancho", { isTest: true }),
+    post("I1", "2026-10-06T12:00:00Z", "Impulsionado por id"),
+    post("I2", "2026-10-06T13:00:00Z", "Impulsionado por permalink"),
+  ];
+  const creatives = [
+    criativo("AD-1", { instagramMediaId: "I1" }),
+    criativo("AD-2", { instagramPermalink: "https://www.instagram.com/reel/I2/" }),
+  ];
+  const range = { from: "2026-10-01", to: "2026-10-07" };
+  const agora = "2026-10-07T12:00:00Z";
+
+  it("com os criativos: só os posts da grade contam (mesma regra do postPerformance)", () => {
+    const c = postingCadence(posts, range, agora, creatives);
+    expect(c.count).toBe(2);
+    expect(c.postsPerWeek).toBe(2);
+    expect(c.maxSameDay).toBe(1);
+    expect(c.daysWithPileup).toBe(0);
+    expect(c.reelsPerWeek).toBe(1);
+    expect(c.carrosseisPerWeek).toBe(1);
+    expect(c.daysSinceLast).toBe(3); // o último da GRADE foi 04/10, não o impulsionado de 06/10
+  });
+
+  it("aceita também um conjunto de ids a excluir", () => {
+    const c = postingCadence(posts, range, agora, new Set(["I1", "I2"]));
+    expect(c.count).toBe(2);
+  });
+
+  it("sem o 4º argumento, os testes continuam fora; os impulsionados entram", () => {
+    const c = postingCadence(posts, range, agora);
+    expect(c.count).toBe(4);
+    expect(c.maxSameDay).toBe(2);
+    expect(c.busiestDay).toBe("2026-10-06");
+  });
+});
+
+describe("6.5 — alcance orgânico dos posts (B11)", () => {
+  it("soma só os posts que não são teste nem impulsionados e diz quantos ficaram de fora", () => {
+    const posts = [
+      post("G1", "2026-10-01T12:00:00Z", "Da grade", { reach: 1000 }),
+      post("G2", "2026-10-02T12:00:00Z", "Da grade também", { reach: 500 }),
+      post("T1", "2026-10-03T12:00:00Z", "[TESTE]", { reach: 9000, isTest: true }),
+      post("I1", "2026-10-04T12:00:00Z", "Impulsionado", { reach: 50000 }),
+      post("F1", "2026-10-20T12:00:00Z", "Fora do período", { reach: 777 }),
+    ];
+    const r = alcanceOrganicoDosPosts(posts, { from: "2026-10-01", to: "2026-10-10" }, [
+      criativo("AD-1", { instagramMediaId: "I1" }),
+    ]);
+    expect(r).toEqual({ alcance: 1500, posts: 2, testes: 1, impulsionados: 1 });
+  });
+});
+
+describe("6.5 — seguidores (B10 / S14)", () => {
+  it("reconstrói para trás com o LÍQUIDO (ganhos − perdas), nunca com o bruto", () => {
+    const serie = reconstruirSeguidores({
+      dias: ["2026-10-05", "2026-10-06", "2026-10-07"],
+      seguidoresAgora: 1000,
+      ganhosPorDia: new Map([
+        ["2026-10-07", 10],
+        ["2026-10-06", 5],
+      ]),
+      perdasPorDia: new Map([
+        ["2026-10-07", 4],
+        ["2026-10-06", 1],
+      ]),
+      snapshots: new Map(),
+    });
+    expect(serie.get("2026-10-07")).toBe(1000);
+    expect(serie.get("2026-10-06")).toBe(994); // 1000 − (10 − 4): com o bruto seria 990
+    expect(serie.get("2026-10-05")).toBe(990); // 994 − (5 − 1)
+  });
+
+  it("só ganhos (sem perdas) não é variação líquida: cai no snapshot gravado", () => {
+    const serie = reconstruirSeguidores({
+      dias: ["2026-10-05", "2026-10-06", "2026-10-07"],
+      seguidoresAgora: 1000,
+      ganhosPorDia: new Map([
+        ["2026-10-07", 10],
+        ["2026-10-06", 5],
+      ]),
+      perdasPorDia: new Map(),
+      snapshots: new Map([["2026-10-05", 980]]),
+    });
+    expect(serie.get("2026-10-07")).toBe(1000);
+    expect(serie.get("2026-10-06")).toBe(1000); // sem snapshot: o valor conhecido mais próximo, nunca 0
+    expect(serie.get("2026-10-05")).toBe(980); // o que foi gravado
+  });
+
+  it("série parcial: reconstrói até onde há os dois lados e segue com os snapshots", () => {
+    const serie = reconstruirSeguidores({
+      dias: ["2026-10-03", "2026-10-04", "2026-10-05", "2026-10-06"],
+      seguidoresAgora: 500,
+      ganhosPorDia: new Map([
+        ["2026-10-06", 3],
+        ["2026-10-05", 2],
+      ]),
+      perdasPorDia: new Map([
+        ["2026-10-06", 1],
+        ["2026-10-05", 0],
+      ]),
+      snapshots: new Map([
+        ["2026-10-03", 480],
+        ["2026-10-04", 0],
+      ]),
+    });
+    expect([...serie.entries()]).toEqual([
+      ["2026-10-06", 500],
+      ["2026-10-05", 498],
+      ["2026-10-04", 496], // fim da série: o total do dia ainda é conhecido
+      ["2026-10-03", 480],
+    ]);
+  });
+
+  it("o líquido sai com sinal certo — nunca “+-12” — e a nota diz desde quando há série", () => {
+    const rows = [
+      dia("2026-10-01", { followers: 112 }),
+      dia("2026-10-02", { followers: 108 }),
+      dia("2026-10-03", { followers: 104, followsDay: 2, unfollowsDay: 6 }),
+      dia("2026-10-04", { followers: 100, followsDay: 1, unfollowsDay: 5 }),
+    ];
+    const r = resumoSeguidores(rows, { from: "2026-10-01", to: "2026-10-04" });
+    expect(r.liquido).toBe(-12);
+    expect(r.liquidoTexto).toBe("−12");
+    expect(r.liquidoTexto).not.toContain("+-");
+    expect(r.ganhos).toBe(3);
+    expect(r.perdas).toBe(11);
+    expect(r.serieDesde).toBe("2026-10-03");
+    expect(r.serieCompleta).toBe(false);
+    expect(r.nota).toBe("ganhos e perdas: +3 / −11 · série disponível desde 03/10 (a API só fornece com 100+ seguidores)");
+  });
+
+  it("sem nenhum dia com os dois lados, a nota diz que não há série (não diz 0 perdas)", () => {
+    const r = resumoSeguidores([dia("2026-10-01", { followers: 90 }), dia("2026-10-02", { followers: 95 })]);
+    expect(r.liquidoTexto).toBe("+5");
+    expect(r.temSerie).toBe(false);
+    expect(r.nota).toBe("ganhos e perdas: sem série (a API só fornece com 100+ seguidores)");
+  });
+
+  it("série completa no período: só ganhos e perdas; zero vira 0, não −0", () => {
+    const r = resumoSeguidores([
+      dia("2026-10-01", { followers: 100, followsDay: 4, unfollowsDay: 0 }),
+      dia("2026-10-02", { followers: 100, followsDay: 0, unfollowsDay: 0 }),
+    ]);
+    expect(r.liquidoTexto).toBe("0");
+    expect(r.serieCompleta).toBe(true);
+    expect(r.nota).toBe("ganhos e perdas: +4 / 0");
+  });
+});
+
+describe("6.5 — metas dos cards de conteúdo", () => {
+  const metaDm: Goal = { brand: "consorcio", metric: "conversas_dm", period: "campanha", target: 60 };
+  const metaSeg: Goal = { brand: "consorcio", metric: "followers", period: "campanha", target: 1000 };
+
+  it("sem meta cadastrada o card diz “sem meta”", () => {
+    expect(metaDeConversasDm([], 10, true, true)).toEqual({ alvoTexto: "sem meta" });
+    expect(metaDeSeguidores([], 10, true)).toEqual({ alvoTexto: "sem meta" });
+  });
+
+  it("DM: status só na campanha inteira e com registro; fora disso, só o alvo", () => {
+    expect(metaDeConversasDm([metaDm], 0, false, true)).toEqual({ alvoTexto: "meta 60 na campanha" });
+    expect(metaDeConversasDm([metaDm], 50, true, false)).toEqual({ alvoTexto: "meta 60 na campanha" });
+    const r = metaDeConversasDm([metaDm], 50, true, true);
+    expect(r.alvoTexto).toBe("meta 60");
+    expect(r.avaliacao?.status).toBe("ambar");
+    expect(r.avaliacao?.rotulo).toContain("83%");
+  });
+
+  it("seguidores: a meta é um total, compara em qualquer período", () => {
+    const r = metaDeSeguidores([metaSeg], 1200, true);
+    expect(r.avaliacao?.status).toBe("verde");
+    expect(metaDeSeguidores([metaSeg], 0, false)).toEqual({ alvoTexto: "meta 1.000" });
+  });
+});

@@ -1459,16 +1459,36 @@ export interface PostingCadence {
  * Consistência de publicação da janela. `nowIso` como parâmetro mantém a função
  * pura (mesmo padrão de campaignPacing/leadQueue). Sem range, usa o intervalo
  * entre o primeiro e o último post.
+ *
+ * Fase 6.5: a cadência é a da GRADE. Posts de teste (cortes de validação e
+ * variações de anúncio confirmadas) e impulsionados ficam fora, como já ficam
+ * das médias — senão três cortes do mesmo gancho viram "3 posts/semana" e um
+ * dia de canibalização que não existe. `foraDaGrade` aceita os criativos
+ * (impulsionado = criativo aponta para a mídia por id ou permalink, a MESMA
+ * regra de `postPerformance`) ou um conjunto de ids já resolvido.
  */
 export function postingCadence(
   posts: IgPost[],
   range: DateRange | undefined,
   nowIso: string,
+  foraDaGrade?: ReadonlySet<string> | Creative[],
 ): PostingCadence {
-  // Cadência conta TODO post publicado (inclusive testes): mede o ritmo físico
-  // da grade — a exclusão de teste vale para performance, não para frequência.
+  const idsImpulsionados = new Set<string>();
+  const permalinksImpulsionados = new Set<string>();
+  if (Array.isArray(foraDaGrade)) {
+    for (const c of foraDaGrade) {
+      if (c.instagramMediaId) idsImpulsionados.add(c.instagramMediaId);
+      if (c.instagramPermalink) permalinksImpulsionados.add(c.instagramPermalink);
+    }
+  } else if (foraDaGrade) {
+    for (const id of foraDaGrade) idsImpulsionados.add(id);
+  }
+  const daGrade = (p: IgPost) =>
+    !p.isTest &&
+    !idsImpulsionados.has(p.id) &&
+    !(p.permalink !== "" && permalinksImpulsionados.has(p.permalink));
   const sorted = posts
-    .filter((p) => inRange(dayOf(p.publishedAt), range))
+    .filter((p) => daGrade(p) && inRange(dayOf(p.publishedAt), range))
     .sort((a, b) => a.publishedAt.localeCompare(b.publishedAt));
   const first = sorted[0] ? dayOf(sorted[0].publishedAt) : undefined;
   const last = sorted.at(-1) ? dayOf(sorted.at(-1)!.publishedAt) : undefined;

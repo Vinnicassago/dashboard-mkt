@@ -56,7 +56,8 @@ export default async function PostsPage({
   const testCount = posts.filter((p) => p.isTest).length;
   const boostedCount = posts.filter((p) => p.boosted && !p.isTest).length;
   // Universo ORGÂNICO: alimenta todos os números e gráficos da página; a tabela
-  // mostra tudo (testes/impulsionados com selo). Cadência usa a grade completa.
+  // mostra tudo (testes/impulsionados com selo). A cadência segue a mesma regra
+  // (Fase 6.5): recebe os criativos e deixa testes e impulsionados de fora.
   const organic = posts.filter((p) => !p.isTest && !p.boosted);
   const organicIds = new Set(organic.map((p) => p.id));
   const organicIgPosts = data.igPosts.filter((p) => organicIds.has(p.id));
@@ -82,7 +83,7 @@ export default async function PostsPage({
   // Campeão = melhor formato COM amostra confiável (a lista vem ordenada por engajamento).
   const champion = formats.find((f) => f.sampleOk) ?? formats[0];
 
-  const cadence = postingCadence(data.igPosts, range, new Date().toISOString());
+  const cadence = postingCadence(data.igPosts, range, new Date().toISOString(), data.creatives);
   const reelSeries = reelWatchSeries(organicIgPosts, range);
   const topReels = [...organic]
     .filter((p) => p.type === "reel" && p.avgWatchTime != null)
@@ -128,7 +129,7 @@ export default async function PostsPage({
           {testCount > 0 ? `${formatInt(testCount)} post(s) de teste` : null}
           {testCount > 0 && boostedCount > 0 ? " · " : null}
           {boostedCount > 0 ? `${formatInt(boostedCount)} impulsionado(s)` : null}
-          {" — aparecem na tabela com selo, mas ficam fora de todos os números e gráficos desta página (exceto a cadência, que conta tudo que foi publicado)."}
+          {" — aparecem na tabela com selo, mas ficam fora de todos os números e gráficos desta página, inclusive da cadência."}
         </p>
       ) : null}
 
