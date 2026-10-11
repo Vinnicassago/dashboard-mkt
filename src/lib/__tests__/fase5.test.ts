@@ -376,13 +376,20 @@ describe("motor v2 — cada regra dispara pelo seu gatilho, com dono e amostra",
   });
 
   it("M3: criativo fadigado (CTR caindo + CPL subindo) — renove ou pause", () => {
-    const dias = ["2026-10-02", "2026-10-03", "2026-10-04", "2026-10-05", "2026-10-06", "2026-10-07"];
-    const rows = dias.map((d, i) => ad(d, "100001", 100, i < 3 ? { clicks: 100, leads: 10 } : { clicks: 50, leads: 4 }));
+    // Regra da Fase 6.3 (S13/B17): duas janelas de 7 dias terminando no fim do
+    // período — CTR 10% → 5% (≤ 75%) e CPL R$ 10 → R$ 25 (≥ 120%), ≥ 1.000
+    // impressões em cada janela.
+    const rows: AdDaily[] = [];
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date("2026-10-08T00:00:00Z");
+      d.setUTCDate(d.getUTCDate() - i);
+      rows.push(ad(d.toISOString().slice(0, 10), "100001", 100, i >= 7 ? { clicks: 100, leads: 10 } : { clicks: 50, leads: 4 }));
+    }
     const data = base({ adDaily: rows });
     const m3 = regra(rodar(data), "M3")!;
     expect(m3.id).toBe("M3:100001");
     expect(m3.titulo).toMatch(/Renove a arte de “Anúncio A”/);
-    expect(m3.detalhe).toMatch(/CTR caindo · CPL subindo/);
+    expect(m3.detalhe).toMatch(/CTR 5,0% vs 10,0% nos 7 d anteriores \(≤ 75%\) e CPL 7 d R\$ 25,00 vs R\$ 10,00/);
   });
 
   it("M4: conjunto com mais de 25% de contatos inválidos em 10 leads ou mais", () => {
