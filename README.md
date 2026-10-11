@@ -23,7 +23,7 @@ npm run dev
 
 Abre em `http://localhost:3000`. O dashboard já sobe com **dados de exemplo**
 (seed) para você ver tudo funcionando. Substitua pelos dados reais em
-**Ajustes**.
+**Configurações**.
 
 Build de produção:
 
@@ -37,13 +37,13 @@ npm run build && npm start
 src/
   app/
     (dashboard)/            # grupo de rotas com o layout (sidebar + header)
-      page.tsx              # Hoje — farol, ações da semana, cascata resumida
-      dinheiro/             # verba por conjunto, criativos, orçamento
-      jornada/              # cascata ponta a ponta, perdas, robô, coorte
+      page.tsx              # Bússola — placar, motores, onde trava, ações, resumo
+      funil/                # funis de conversão e descoberta, coortes, perdas
+      midia/                # verba por campanha › conjunto, criativos, ritmo
       fila/                 # fila de contato única (painel + robô + especialista)
-      pessoas/              # leads e atendimento do especialista
-      conteudo/             # Instagram: conta, posts e produção
-      config/               # Ajustes: pendências, integrações, importação, metas
+      leads/                # leads, ficha, revisão, excluídos, histórico
+      conteudo/             # Instagram: conta, posts, registros manuais e produção
+      configuracoes/        # metas, integrações, marcas, usuários, importar, ferramentas, zona de perigo
         actions.ts          # server actions (import, entradas manuais, reset)
     layout.tsx              # root: tema claro/escuro, fontes, metadados
     globals.css             # design tokens (paleta validada) + tema
@@ -83,7 +83,7 @@ jobs de sync não sabem qual está ativo. A tela **Config** mostra qual é.
 
 ### Importar do Ads Manager (CSV)
 
-Em **Ajustes**, envie o CSV exportado do Gerenciador de Anúncios. As
+Em **Configurações → Importar**, envie o CSV exportado do Gerenciador de Anúncios. As
 linhas são mescladas por `data + anúncio` (reimportar atualiza). O parser
 reconhece cabeçalhos em PT ou EN. Baixe o **modelo** na própria tela para ver o
 formato exato. Colunas usadas:
@@ -256,7 +256,7 @@ duas vezes. Por isso o `event_id` é gerado uma única vez, no cliente.
 
 ### Reunião agendada → sinal de volta
 
-Na página **Pessoas** (ou na **Fila de contato**), mude o status do lead para *Agendado*. Isso dispara `Schedule`
+Na página **Leads** (ou na **Fila de contato**), mude o status do lead para *Agendado*. Isso dispara `Schedule`
 para a CAPI (se configurada) e `qualify_lead` para o GA4 (se configurado), usando os identificadores (`fbc`/`fbp`) que
 guardamos no lead. O `event_id` é estável (`schedule-<leadId>`), então remarcar o
 mesmo lead não conta duas reuniões.

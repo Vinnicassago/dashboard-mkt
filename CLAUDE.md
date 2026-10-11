@@ -71,9 +71,15 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   reunião — nomes diferentes de propósito. Um CPL só: investimento de conversão ÷ leads
   de conversão; o do Pixel aparece rotulado "CPL Meta (Pixel)". O balde do lead vem do
   anúncio em TODO o histórico (`baldeDosLeads`). Junção lead → anúncio só por
-  `lib/atribuicao.ts` (id, nome único; macro `{{…}}` = desconhecida; nome repetido =
-  ambígua — nenhuma é atribuída). "Sem resposta" sem tentativa sai da conta da mídia
-  (`perdasDoPeriodo`).
+  `lib/atribuicao.ts` (o `lead.adId` gravado na entrada vence; depois id ou nome único no
+  `utm_content`; macro `{{…}}` = desconhecida; nome repetido = ambígua — nenhuma é
+  atribuída). **UTM padrão** (D6, `lib/utm.ts`): UM link com as macros da Meta
+  `utm_source=meta&utm_medium=paid_social&utm_campaign={{campaign.id}}&utm_term={{adset.id}}&utm_content={{ad.id}}`
+  (macros nunca codificadas na URL); `/api/track` guarda `adId`/`adsetId`/`campaignId`
+  (migração 0019, `idsDoUtm`: só id numérico) e `origemDoLead` monta "campanha › conjunto ›
+  anúncio". Conjunto se agrupa por `adsetId` (homônimos em campanhas diferentes eram
+  uma linha, S20); criativo, por `creativeId` (o mesmo criativo em vários anúncios).
+  "Sem resposta" sem tentativa sai da conta da mídia (`perdasDoPeriodo`).
 - **Confiança** (`src/lib/trust.ts`): `div()` devolve 0 quando o denominador é 0, então
   "nenhuma reunião" e "reunião de graça" imprimem o mesmo pixel. `assessTrust()` (pura)
   diz o que o número sustenta: `quarentena` (não exiba — vira "—"), `piso` (o real é
