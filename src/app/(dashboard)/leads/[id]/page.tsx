@@ -8,13 +8,17 @@ import { DescricaoEvento } from "@/components/leads/lead-activity";
 import { FichaAcoes } from "@/components/leads/ficha-acoes";
 import { getData, getLead, listLeadEvents } from "@/lib/data/store";
 import { can } from "@/lib/auth/guard";
+import { getCurrentUser } from "@/lib/auth/current-user";
 import { mensagemWhatsapp } from "@/lib/integracoes";
 import { resumoContato, quando } from "@/lib/contato";
 import { etapaDoLead, FILA_ETAPAS } from "@/lib/fila";
 import { gruposDuplicados, pareceTeste, problemasDeContato } from "@/lib/identidade";
+import { ETAPA_MAXIMA_LABEL, etapaMaxima } from "@/lib/lead-status";
+import { mascararEmail, mascararTelefone } from "@/lib/lgpd";
 import { everBooked } from "@/lib/metrics";
-import { rotuladorDeOrigem } from "@/lib/origem";
+import { origemDoLead } from "@/lib/origem";
 import { normalizarTelefone } from "@/lib/phone";
+import { comPeriodo } from "@/lib/range";
 import { formatCurrency, formatDateTime } from "@/lib/format";
 import type { LeadEvent } from "@/lib/types";
 
@@ -31,25 +35,51 @@ function Linha({ rotulo, children }: { rotulo: string; children: React.ReactNode
 
 const data = (iso?: string) => (iso ? formatDateTime(iso) : "—");
 
+/** Contato novo digitado num reenvio vai mascarado para o papel mascarado. */
+function mascararEvento(e: LeadEvent): LeadEvent {
+  if (!e.payload) return e;
+  const { telefoneNovo, emailNovo } = e.payload;
+  if (!telefoneNovo && !emailNovo) return e;
+  return {
+    ...e,
+    payload: {
+      ...e.payload,
+      ...(telefoneNovo ? { telefoneNovo: mascararTelefone(telefoneNovo) } : {}),
+      ...(emailNovo ? { emailNovo: mascararEmail(emailNovo) } : {}),
+    },
+  };
+}
+
 /**
  * Ficha do lead — tudo o que aconteceu com UMA pessoa, numa tela: de onde veio,
  * cada tentativa, cada mudança de status, a reunião, as anotações; e as mesmas
  * ações da Fila. Não é página de menu: abre pelo nome em Leads, na Fila e no
- * histórico (e pelo link do aviso de lead novo).
+ * histórico (e pelo link do aviso de lead novo). O período viaja no link de
+ * volta. Para o papel Marketing, telefone e e-mail aparecem mascarados e sem
+ * link (LGPD).
  */
-export default async function FichaDoLead({ params }: { params: Promise<{ id: string }> }) {
-  const { id: bruto } = await params;
+export default async function FichaDoLead({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ range?: string }>;
+}) {
+  const [{ id: bruto }, { range }] = await Promise.all([params, searchParams]);
   const id = decodeURIComponent(bruto);
   const lead = await getLead(id);
   if (!lead) notFound();
 
-  const [dados, proprios, canEdit, canDelete, mensagem] = await Promise.all([
+  const [dados, proprios, canEdit, canDelete, mensagem, user] = await Promise.all([
     getData(lead.brand),
     listLeadEvents({ leadId: id, limit: 0 }),
     can("leads:write"),
     can("leads:delete"),
     mensagemWhatsapp(),
+    getCurrentUser(),
   ]);
+  const mascarar = user?.role === "marketing";
+  const comRange = (href: string) => comPeriodo(href, range);
 
   // Cadastros mesclados neste: o histórico deles mora no id deles.
   const mesclados = new Map(
@@ -58,12 +88,12 @@ export default async function FichaDoLead({ params }: { params: Promise<{ id: st
       .map((e) => [e.payload!.duplicado, e.payload?.nome ?? "outro cadastro"]),
   );
   const deles = await Promise.all([...mesclados.keys()].map((m) => listLeadEvents({ leadId: m, limit: 0 })));
-  const linhaDoTempo: LeadEvent[] = [...proprios, ...deles.flat()].sort((a, b) =>
-    quando(b).localeCompare(quando(a)),
-  );
+  const linhaDoTempo: LeadEvent[] = [...proprios, ...deles.flat()]
+    .map((e) => (mascarar ? mascararEvento(e) : e))
+    .sort((a, b) => quando(b).localeCompare(quando(a)));
 
   const contato = resumoContato(proprios);
-  const origem = rotuladorDeOrigem(dados)(lead);
+  const origem = origemDoLead(dados)(lead);
   const naFila = lead.deletedAt ? null : etapaDoLead(lead, proprios, new Date().toISOString());
   const teste = pareceTeste(lead);
   const problemas = problemasDeContato(lead);
@@ -71,29 +101,40 @@ export default async function FichaDoLead({ params }: { params: Promise<{ id: st
     [g.principal, ...g.duplicados].some((l) => l.id === lead.id),
   );
   const outros = grupo ? [grupo.principal, ...grupo.duplicados].filter((l) => l.id !== lead.id) : [];
+  const telefone = lead.phone ? (mascarar ? mascararTelefone(lead.phone) : lead.phone) : undefined;
+  const email = lead.email ? (mascarar ? mascararEmail(lead.email) : lead.email) : undefined;
 
   return (
     <div className="space-y-6">
       <Link
-        href="/leads"
+        href={comRange("/leads")}
         className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
       >
         <ArrowLeft className="size-4" />
-        Pessoas
+        Leads
       </Link>
 
       <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-3">
           <h2 className="text-xl font-semibold tracking-tight">{lead.name}</h2>
           <StatusBadge status={lead.status} />
+          <span
+            className="text-xs text-muted-foreground"
+            title="Etapa máxima: até onde chegou, pelos marcos gravados uma vez — o status pode voltar, o fato não"
+          >
+            chegou a: {ETAPA_MAXIMA_LABEL[etapaMaxima(lead)]}
+          </span>
         </div>
         <p className="text-sm text-muted-foreground">
-          Entrou em {formatDateTime(lead.createdAt)} · origem {origem}
+          Entrou em {formatDateTime(lead.createdAt)} · origem {origem.trilha}
           {naFila ? (
             <>
               {" "}
               · na{" "}
-              <Link href={`/fila?etapa=${naFila.nome}`} className="text-primary underline-offset-4 hover:underline">
+              <Link
+                href={comRange(`/fila?etapa=${naFila.nome}`)}
+                className="text-primary underline-offset-4 hover:underline"
+              >
                 Fila de contato
               </Link>{" "}
               como “{FILA_ETAPAS[naFila.nome].label}”
@@ -140,7 +181,10 @@ export default async function FichaDoLead({ params }: { params: Promise<{ id: st
                   {outros.map((o, i) => (
                     <span key={o.id}>
                       {i > 0 ? ", " : ""}
-                      <Link href={`/leads/${encodeURIComponent(o.id)}`} className="underline-offset-4 hover:underline">
+                      <Link
+                        href={comRange(`/leads/${encodeURIComponent(o.id)}`)}
+                        className="underline-offset-4 hover:underline"
+                      >
                         {o.name}
                       </Link>
                     </span>
@@ -158,32 +202,39 @@ export default async function FichaDoLead({ params }: { params: Promise<{ id: st
           <Card>
             <CardHeader>
               <CardTitle>Contato</CardTitle>
+              {mascarar ? (
+                <CardDescription>Mascarado para o papel Marketing (LGPD) — quem liga é o comercial.</CardDescription>
+              ) : null}
             </CardHeader>
             <CardContent>
               <dl className="divide-y">
                 <Linha rotulo="Telefone">
-                  {lead.phone ? (
+                  {!telefone ? (
+                    "—"
+                  ) : mascarar ? (
+                    <span>{telefone}</span>
+                  ) : (
                     <a
-                      href={`https://wa.me/${normalizarTelefone(lead.phone)}`}
+                      href={`https://wa.me/${normalizarTelefone(telefone)}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-flex items-center gap-1.5 hover:underline"
                     >
                       <MessageCircle className="size-3.5 text-[var(--success-text)]" />
-                      {lead.phone}
+                      {telefone}
                     </a>
-                  ) : (
-                    "—"
                   )}
                 </Linha>
                 <Linha rotulo="E-mail">
-                  {lead.email ? (
-                    <a href={`mailto:${lead.email}`} className="inline-flex items-center gap-1.5 hover:underline">
-                      <Mail className="size-3.5" />
-                      {lead.email}
-                    </a>
-                  ) : (
+                  {!email ? (
                     "—"
+                  ) : mascarar ? (
+                    <span>{email}</span>
+                  ) : (
+                    <a href={`mailto:${email}`} className="inline-flex items-center gap-1.5 hover:underline">
+                      <Mail className="size-3.5" />
+                      {email}
+                    </a>
                   )}
                 </Linha>
                 <Linha rotulo="Tentativas">
@@ -230,12 +281,21 @@ export default async function FichaDoLead({ params }: { params: Promise<{ id: st
           <Card>
             <CardHeader>
               <CardTitle>Origem</CardTitle>
+              <CardDescription>
+                Campanha › conjunto › anúncio, pela junção única lead → anúncio (o id gravado na
+                entrada vence; depois o utm_content).
+              </CardDescription>
             </CardHeader>
             <CardContent>
               <dl className="divide-y">
-                <Linha rotulo="Anúncio">{origem}</Linha>
+                <Linha rotulo="Trilha">{origem.trilha}</Linha>
+                <Linha rotulo="Campanha">{origem.campanha ?? "—"}</Linha>
+                <Linha rotulo="Conjunto">{origem.conjunto ?? "—"}</Linha>
+                <Linha rotulo="Anúncio">{origem.anuncio}</Linha>
                 <Linha rotulo="utm_source">{lead.utmSource ?? "—"}</Linha>
                 <Linha rotulo="utm_campaign">{lead.utmCampaign ?? "—"}</Linha>
+                <Linha rotulo="utm_term">{lead.utmTerm ?? "—"}</Linha>
+                <Linha rotulo="utm_content">{lead.utmContent ?? "—"}</Linha>
                 <Linha rotulo="Clique da Meta (fbc)">{lead.fbc ? "sim" : "não"}</Linha>
                 <Linha rotulo="Id">
                   <span className="font-mono text-xs">{lead.id}</span>
@@ -259,7 +319,8 @@ export default async function FichaDoLead({ params }: { params: Promise<{ id: st
                   jaAgendou={everBooked(lead)}
                   tentativas={contato.tentativas}
                   diasComTentativa={contato.diasComTentativa}
-                  telefone={lead.phone}
+                  // Sem telefone para o papel mascarado: o botão do WhatsApp não aparece.
+                  telefone={mascarar ? undefined : lead.phone}
                   mensagemWhatsapp={mensagem}
                   canEdit={canEdit}
                   podeReabrir={canDelete}

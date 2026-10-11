@@ -9,6 +9,8 @@ import { cn } from "@/lib/utils";
 export interface Column<T> {
   key: string;
   header: string;
+  /** Dica do cabeçalho (ⓘ): a definição do dicionário ou a régua da coluna. */
+  headerTitle?: string;
   align?: "left" | "right";
   sortable?: boolean;
   /** Value used for sorting (defaults to render output not usable). */
@@ -79,6 +81,7 @@ export function DataTable<T>({
                     : "none"
                   : undefined
               }
+              title={c.headerTitle}
               className={cn(c.align === "right" && "text-right", c.headerClassName)}
             >
               {c.sortable ? (

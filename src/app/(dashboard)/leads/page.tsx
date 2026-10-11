@@ -1,12 +1,7 @@
 import { mensagemHumana } from "@/lib/erros";
 import Link from "next/link";
 import { AlertTriangle } from "lucide-react";
-import {
-  DeletedLeads,
-  LeadsDirectory,
-  type DeletedLeadRow,
-  type LeadDirectoryRow,
-} from "@/components/leads/leads-directory";
+import { DeletedLeads, LeadsDirectory, type DeletedLeadRow } from "@/components/leads/leads-directory";
 import { LeadActivity } from "@/components/leads/lead-activity";
 import { Revisar, type RevisarDados, type RevisarLead } from "@/components/leads/revisar";
 import { ComercialTable } from "@/components/robo/comercial-table";
@@ -14,19 +9,40 @@ import { RolarParaAncora } from "@/components/ui/rolar-para-ancora";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getData, listDeletedLeads, listLeadEvents } from "@/lib/data/store";
 import { activeBrandSlug } from "@/lib/active-brand";
-import { everBooked } from "@/lib/metrics";
 import { rotuladorDeOrigem } from "@/lib/origem";
 import { getComercial } from "@/lib/robo/client";
 import { can } from "@/lib/auth/guard";
+import { getCurrentUser } from "@/lib/auth/current-user";
 import { formatarEspera } from "@/lib/format";
-import { eventosPorLead, resumoContato } from "@/lib/contato";
 import { paraRevisar } from "@/lib/identidade";
-import type { Lead } from "@/lib/types";
+import { montarLinhasDeLeads } from "@/lib/leads-vista";
+import { mascararContato, mascararEmail, mascararTelefone } from "@/lib/lgpd";
+import { pageRange } from "@/lib/page-range";
+import { comPeriodo, rangeLabel } from "@/lib/range";
+import type { Lead, LeadEvent } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 /** Minutos do robô → a mesma escrita de espera do resto do painel. */
 const duracao = (min: number | null) => formatarEspera(min == null ? null : min / 60);
+
+/**
+ * O histórico de um reenvio pode trazer o contato novo que a pessoa digitou.
+ * Para o papel mascarado, ele vai mascarado também — o resto do evento fica.
+ */
+function mascararEvento(e: LeadEvent): LeadEvent {
+  if (!e.payload) return e;
+  const { telefoneNovo, emailNovo } = e.payload;
+  if (!telefoneNovo && !emailNovo) return e;
+  return {
+    ...e,
+    payload: {
+      ...e.payload,
+      ...(telefoneNovo ? { telefoneNovo: mascararTelefone(telefoneNovo) } : {}),
+      ...(emailNovo ? { emailNovo: mascararEmail(emailNovo) } : {}),
+    },
+  };
+}
 
 /**
  * Leads — quem é essa pessoa e o que já aconteceu com ela.
@@ -36,20 +52,28 @@ const duracao = (min: number | null) => formatarEspera(min == null ? null : min 
  * "leads sem desfecho" e "esperando o primeiro contato" — porque a Fila de
  * contato já as junta, sem duplicata e na ordem de urgência. Duas listas de
  * espera com contagens diferentes era parte dos "dados desconexos".
+ *
+ * A tabela não calcula nada: cada linha sai de `montarLinhasDeLeads` (puro),
+ * que lê as mesmas fontes da Fila e do Funil. O período (`?range=`) filtra
+ * pela ENTRADA do lead — a coorte; sem ele, a campanha inteira.
  */
-export default async function PessoasPage() {
+export default async function LeadsPage({ searchParams }: { searchParams: Promise<{ range?: string }> }) {
+  const { range: rangeParam } = await searchParams;
   const brand = await activeBrandSlug();
   const data = await getData(brand);
-  const canEdit = await can("leads:write");
-  const canDelete = await can("leads:delete");
+  const { range, rangeKey } = pageRange(data, rangeParam);
+  const [canEdit, canDelete, user] = await Promise.all([can("leads:write"), can("leads:delete"), getCurrentUser()]);
+  // Marketing vê telefone e e-mail mascarados (LGPD). Sem login (modo aberto), nada mascara.
+  const mascarar = user?.role === "marketing";
+  const agora = new Date().toISOString();
+
   const [todosEventos, comercial, excluidos] = await Promise.all([
     listLeadEvents({ brand, limit: 0 }),
     getComercial(),
     listDeletedLeads(brand),
   ]);
-  // O histórico na tela mostra os 200 mais recentes; o resumo de contato usa todos.
-  const events = todosEventos.slice(0, 200);
-  const porLead = eventosPorLead(todosEventos);
+  // O histórico na tela mostra os 200 mais recentes; as linhas usam todos.
+  const events = todosEventos.slice(0, 200).map((e) => (mascarar ? mascararEvento(e) : e));
   const deletedRows: DeletedLeadRow[] = excluidos.map((l) => ({
     id: l.id,
     name: l.name,
@@ -59,22 +83,14 @@ export default async function PessoasPage() {
   }));
   const origem = rotuladorDeOrigem(data);
 
-  const rows: LeadDirectoryRow[] = data.leads.map((l) => ({
-    id: l.id,
-    createdAt: l.createdAt,
-    name: l.name,
-    email: l.email,
-    phone: l.phone,
-    creativeName: origem(l.utmContent),
-    status: l.status,
-    jaAgendou: everBooked(l),
-    meetingFor: l.meetingFor,
-    ...(() => {
-      const c = resumoContato(porLead.get(l.id) ?? []);
-      return { tentativas: c.tentativas, diasComTentativa: c.diasComTentativa };
-    })(),
-  }));
+  const linhas = montarLinhasDeLeads(data, todosEventos, agora, { range });
+  const rows = mascarar ? linhas.map(mascararContato) : linhas;
 
+  // Para o papel mascarado, a tabela do especialista (componente compartilhado,
+  // que linka o telefone) vai sem contato: um link com "•••" não leva a nada.
+  const comercialRows = mascarar
+    ? comercial.rows.map((r) => ({ ...r, telefone: null, email: null }))
+    : comercial.rows;
   const { kpis } = comercial;
 
   const revisarLead = (l: Lead): RevisarLead => ({
@@ -84,7 +100,7 @@ export default async function PessoasPage() {
     createdAt: l.createdAt,
     phone: l.phone,
     email: l.email,
-    origem: origem(l.utmContent),
+    origem: origem(l),
   });
   const rev = paraRevisar(data.leads);
   const revisar: RevisarDados = {
@@ -106,14 +122,40 @@ export default async function PessoasPage() {
       <p className="max-w-3xl text-sm text-muted-foreground">
         A ficha de cada pessoa que a campanha trouxe, para consultar e registrar o que
         aconteceu. Quem está esperando contato fica na{" "}
-        <Link href="/fila" className="text-primary underline-offset-4 hover:underline">
+        <Link href={comPeriodo("/fila", rangeKey)} className="text-primary underline-offset-4 hover:underline">
           Fila de contato
         </Link>
         , na ordem de quem ligar primeiro.
       </p>
 
+      <Card id="leads" className="scroll-mt-24">
+        <CardHeader>
+          <CardTitle>Leads ({rows.length})</CardTitle>
+          <CardDescription>
+            {rangeKey === "all"
+              ? "Todos os leads da campanha"
+              : `Leads que entraram em ${rangeLabel(rangeKey)} (o período do cabeçalho)`}
+            , com status, até onde chegaram, tentativas, a próxima ação da Fila e a origem.
+            {mascarar
+              ? " Telefone e e-mail aparecem mascarados para o papel Marketing."
+              : " Clique no telefone para abrir o WhatsApp."}
+            {canEdit ? " A exportação em CSV leva só o que o filtro mostra e fica registrada." : ""}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <LeadsDirectory
+            rows={rows}
+            rangeKey={rangeKey}
+            canEdit={canEdit}
+            canDelete={canDelete}
+            canExport={canEdit}
+            mascararContato={mascarar}
+          />
+        </CardContent>
+      </Card>
+
       {/* Leitura que falhou não vira "0 pessoas com o especialista": some com a
-          lista e diz por quê. Os leads do painel abaixo não dependem do robô. */}
+          lista e diz por quê. Os leads do painel acima não dependem do robô. */}
       {comercial.falha?.tipo === "erro" ? (
         <Card className="border-[var(--warning)]/40">
           <CardContent className="flex items-start gap-3 p-4">
@@ -123,7 +165,7 @@ export default async function PessoasPage() {
                 Não consegui ler o atendimento do especialista.
               </span>{" "}
               A lista dele não aparece para não passar zeros por números reais; os leads do
-              painel abaixo estão completos. {mensagemHumana("robô", comercial.falha.detalhe)}
+              painel acima estão completos. {mensagemHumana("robô", comercial.falha.detalhe)}
             </p>
           </CardContent>
         </Card>
@@ -132,17 +174,18 @@ export default async function PessoasPage() {
       {kpis ? (
         <Card id="especialista" className="scroll-mt-24">
           <CardHeader>
-            <CardTitle>Com o especialista ({comercial.rows.length})</CardTitle>
+            <CardTitle>Com o especialista ({comercialRows.length})</CardTitle>
             <CardDescription>
               Cada pessoa que o robô qualificou e passou ao especialista. É aqui que se
               registram abordagem, reunião e decisão — e o que se marca aqui atualiza também o
               lead no painel. O primeiro contato vem em média{" "}
               {duracao(kpis.minutos_medios_ate_abordagem)} depois da transferência (pior caso:{" "}
               {duracao(kpis.pior_tempo_minutos)}).
+              {mascarar ? " O contato fica oculto para o papel Marketing." : ""}
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <ComercialTable rows={comercial.rows} canEdit={canEdit} />
+            <ComercialTable rows={comercialRows} canEdit={canEdit} />
           </CardContent>
         </Card>
       ) : null}
@@ -164,19 +207,6 @@ export default async function PessoasPage() {
           </details>
         </Card>
       ) : null}
-
-      <Card id="leads" className="scroll-mt-24">
-        <CardHeader>
-          <CardTitle>Todos os leads ({rows.length})</CardTitle>
-          <CardDescription>
-            Todos os contatos gerados, com nome, telefone e e-mail. Clique no telefone para
-            abrir o WhatsApp, ou exporte tudo em CSV para o time comercial.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <LeadsDirectory rows={rows} canEdit={canEdit} canDelete={canDelete} />
-        </CardContent>
-      </Card>
 
       {/* Excluídos: fora das listas e dos números, mas à vista e recuperáveis. */}
       {deletedRows.length ? (
