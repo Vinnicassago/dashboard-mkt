@@ -1,531 +1,306 @@
 import Link from "next/link";
-import { AlertTriangle, Award, Radio, TrendingUp, UserPlus } from "lucide-react";
-import { ObjectiveSplitBar } from "@/components/kpi/objective-split";
-import { TimeSeriesChart } from "@/components/charts/time-series-chart";
+import { AlertTriangle, Award, Radio, TrendingUp } from "lucide-react";
+import { ResumoMidiaCard } from "@/components/midia/resumo-midia";
+import { TendenciaSemanal } from "@/components/midia/tendencia-semanal";
+import { ConjuntosTable } from "@/components/midia/conjuntos-table";
 import { CreativesTable } from "@/components/tables/creatives-table";
+import { BarrasDiarias } from "@/components/charts/barras-diarias";
 import { ChartCard } from "@/components/ui/chart-card";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { EmptyState } from "@/components/ui/empty-state";
-import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
-import { CHART } from "@/components/charts/colors";
 import { getData } from "@/lib/data/store";
 import { activeBrandSlug } from "@/lib/active-brand";
 import { pageRange } from "@/lib/page-range";
-import {
-  adsetPerformance,
-  campaignPacing,
-  creativePerformance,
-  dailySeries,
-  trechosSemDado,
-  trechosSemVeiculacao,
-  rotuloCriativo,
-  OBJECTIVE_LABEL,
-} from "@/lib/metrics";
+import { dailySeries, trechosSemDado, trechosSemVeiculacao } from "@/lib/metrics";
 import { resolveMetaBrands } from "@/lib/meta/config";
-import { MIN_REUNIOES } from "@/lib/trust";
-import { custoExibivel, kpisDoPeriodo, mostrar, reguaDoPeriodo } from "@/lib/kpis";
-import { formatarAlvo, metaVigente } from "@/lib/metas";
-import { StatusMetaBadge, type MetaExibida } from "@/components/kpi/status-meta";
-import type { MetricaComMeta } from "@/lib/types";
-import { hojeEmBrasilia } from "@/lib/range";
+import { custoExibivel, kpisDoPeriodo, reguaDoPeriodo } from "@/lib/kpis";
+import {
+  SEMANAS_DA_TENDENCIA,
+  amostraDoRanking,
+  conjuntosPorId,
+  cplAlvoDaMidia,
+  criativosAgregados,
+  descobertaDaMidia,
+  moedaOuTraco,
+  rankingsDeCriativos,
+  resumoDaMidia,
+  tendenciaSemanalMidia,
+  textoRegraSaude,
+  VOLUME_MINIMO_RANKING,
+  type NaoAtribuidos,
+} from "@/lib/midia";
+import { comPeriodo, hojeEmBrasilia } from "@/lib/range";
 import { dica } from "@/lib/dicionario";
 import { coberturaDeAnuncios } from "@/lib/sincronizacao";
 import { alertasDeAtribuicao, alertasDeConfianca } from "@/lib/alertas";
 import { RegistrarAlertas } from "@/components/layout/alertas";
-import {
-  formatCurrency,
-  formatCurrency0,
-  formatCurrencyOrDash,
-  formatDecimal,
-  formatInt,
-  formatPercent,
-  formatIntComSinal,
-} from "@/lib/format";
-import { cn } from "@/lib/utils";
+import { MIN_REUNIOES } from "@/lib/trust";
+import { formatCurrency0, formatInt, formatIntComSinal, formatPercent } from "@/lib/format";
+
+export const dynamic = "force-dynamic";
 
 /**
- * Mídia — quanto por conjunto na segunda, e qual criativo escalo ou mato.
- *
- * Funde as antigas Tráfego Pago e Criativos. As duas abriam com fileiras de KPIs
- * do mesmo tamanho (investimento, impressões, cliques, CTR, CPL) que repetiam a
- * home e empurravam para baixo as duas tabelas que de fato decidem a verba.
- * Agora a página começa por elas; os números de entrega da Meta viram uma linha
- * no card de orçamento.
+ * Mídia — "onde a verba vira reunião, e o que escalar ou pausar?" (relatório
+ * §7.3). A ordem da página é a da pergunta: o resumo responde no primeiro
+ * viewport; a tendência diz se está melhorando; campanhas → conjuntos dizem
+ * ONDE; criativos dizem O QUÊ escalar ou pausar; descoberta e o gráfico diário
+ * fecham. Toda conta mora em `lib/midia.ts` (puro) e lê `kpisDoPeriodo` — o
+ * CPL daqui é o da Bússola.
  */
-
-/** Uma linha rótulo → valor dentro das colunas por objetivo, com a meta embaixo. */
-function Stat({
-  label,
-  value,
-  highlight,
-  meta,
-}: {
-  label: string;
-  value: string;
-  highlight?: boolean;
-  meta?: MetaExibida;
-}) {
-  return (
-    <div>
-      <div className="flex items-baseline justify-between gap-3">
-        <span className="text-sm text-muted-foreground">{label}</span>
-        <span className={cn("tabular text-sm font-medium", highlight && "text-primary")}>
-          {value}
-        </span>
-      </div>
-      {meta ? (
-        <div className="flex justify-end">
-          <StatusMetaBadge meta={meta} />
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-const BUCKET_DOT: Record<"conversao" | "descoberta", string> = {
-  conversao: CHART.series[0],
-  descoberta: CHART.series[1],
-};
-
-/*
- * Amostra mínima para eleger destaque. Sem ela, 1 lead a R$ 10 "vence" 40 a
- * R$ 35, e um criativo com R$ 0,10 de gasto e 7 impressões vence o CTR com
- * 14,8% — razão com denominador minúsculo é ruído, não desempenho.
- */
-const MIN_LEADS = 5;
-const MIN_IMPRESSOES = 1000;
-
-export default async function MidiaPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ range?: string }>;
-}) {
+export default async function MidiaPage({ searchParams }: { searchParams: Promise<{ range?: string }> }) {
   const brand = await activeBrandSlug();
   const data = await getData(brand);
-  const { range } = pageRange(data, (await searchParams).range);
-  const cobertura = await coberturaDeAnuncios(brand);
-
-  // Os MESMOS números da home e do Funil (kpisDoPeriodo), com a mesma
-  // confiança. Com menos de 3 reuniões o custo por reunião está em quarentena —
-  // e é aqui, onde se decide verba, que ele mais engana: "cj1 · CPR R$ 728" é
-  // uma reunião, não um custo.
-  const kp = kpisDoPeriodo(data, range, { brandRules: await resolveMetaBrands(), cobertura });
-  const k = kp.entrega;
-  const obj = kp.objetivos;
-  const series = dailySeries(data, range, cobertura);
-  const byAdset = adsetPerformance(data, range);
-  const perf = creativePerformance(data, range);
-  const rotulo = (c: (typeof perf)[number]) => rotuloCriativo(c, perf);
-  const cprQuarentena = !custoExibivel(kp.custoPorReuniao);
-
-  // Metas (com vigência) para pintar de vermelho quem passou do teto.
+  const { range, rangeKey } = pageRange(data, (await searchParams).range);
+  const [cobertura, brandRules] = await Promise.all([coberturaDeAnuncios(brand), resolveMetaBrands()]);
   const hoje = hojeEmBrasilia();
-  const goalCpl = metaVigente(data.metas, "cpl", hoje)?.alvo ?? undefined;
-  const goalCpr = metaVigente(data.metas, "custo_por_reuniao", hoje)?.alvo ?? undefined;
-  const regua = new Map(reguaDoPeriodo(kp, data, range, hoje).map((l) => [l.metrica, l]));
-  const metaDe = (m: MetricaComMeta, rotulo: string): MetaExibida | undefined => {
-    const l = regua.get(m);
-    if (!l || l.alvo == null) return undefined;
-    return { alvoTexto: `${rotulo} ${formatarAlvo(m, l.alvo)}`, avaliacao: l.avaliacao, provisoria: l.meta?.provisoria };
-  };
-  const ritmo = regua.get("investimento_conversao");
-  const overCls = (over: boolean) => (over ? "text-[var(--danger-text)] font-medium" : "");
+  const fim = range?.to ?? hoje;
 
-  const spentAllTime = data.adDaily.reduce((s, r) => s + r.spend, 0);
-  const budget = data.campaign.budgetTotal;
-  const pacing = budget > 0 ? Math.min(1, spentAllTime / budget) : 0;
-  const pace = campaignPacing(data, new Date().toISOString());
+  const kp = kpisDoPeriodo(data, range, { brandRules, cobertura, hoje });
+  const regua = reguaDoPeriodo(kp, data, range, hoje);
+  const resumo = resumoDaMidia(kp, regua);
+  const cprExibivel = custoExibivel(kp.custoPorReuniao);
 
-  // Destaques de criativo — só entre quem tem volume para a razão significar algo.
-  // CPL do PAINEL (o mesmo das outras telas), não o do Pixel.
-  const withLeads = perf.filter((c) => c.leadsPainel > 0);
-  const enough = withLeads.filter((c) => c.leadsPainel >= MIN_LEADS);
-  const bestCpl = [...(enough.length ? enough : withLeads)].sort((a, b) => a.cplPainel - b.cplPainel)[0];
-  const bestCplLowSample = bestCpl != null && bestCpl.leadsPainel < MIN_LEADS;
-  const gastoPeriodo = perf.reduce((s, c) => s + c.spend, 0);
-  const comVolume = perf.filter(
-    (c) => c.impressions >= MIN_IMPRESSOES || (gastoPeriodo > 0 && c.spend >= gastoPeriodo * 0.01),
-  );
-  const bestCtr = [...comVolume].sort((a, b) => b.ctr - a.ctr)[0];
-  const ctrDescartados = perf.length - comVolume.length;
-  const fatigued = perf.filter((c) => c.fatigue.level === "fadigado");
+  const tendencia = tendenciaSemanalMidia(data, { fim, hoje, kpis: { brandRules, cobertura } });
+  const conjuntos = conjuntosPorId(data, range, { custoPorReuniaoExibivel: cprExibivel });
+  const cplAlvo = cplAlvoDaMidia(data, kp, fim);
+  const criativos = criativosAgregados(data, range, { fim: range?.to, cplAlvo: cplAlvo.alvo, custoPorReuniaoExibivel: cprExibivel });
+  const regraSaude = textoRegraSaude(cplAlvo);
+  const ranking = rankingsDeCriativos(criativos.conversao);
+  const fadigados = [...criativos.conversao, ...criativos.descoberta].filter((c) => c.saude.level === "fadigado");
+  const semResultado = criativos.conversao.filter((c) => c.saude.level === "sem-resultado");
+  const descoberta = descobertaDaMidia(kp);
+
+  const serie = dailySeries(data, range, cobertura);
+  const faixas = [
+    ...trechosSemVeiculacao(serie).map((t) => ({ ...t, tom: "pausa" as const })),
+    ...trechosSemDado(serie).map((t) => ({ ...t, tom: "falha" as const })),
+  ];
 
   return (
     <div className="space-y-6">
       <RegistrarAlertas alertas={[...alertasDeConfianca(kp.trust.travas), ...alertasDeAtribuicao(data, range)]} />
-      {/* 1. A decisão de verba: por conjunto */}
+
+      {/* 1. RESUMO — a resposta, no primeiro viewport. */}
+      <ResumoMidiaCard resumo={resumo} rangeKey={rangeKey} />
+
+      {/* 2. TENDÊNCIA SEMANAL — gasto, leads e CPL por semana. */}
+      <ChartCard
+        title="Tendência semanal"
+        description={`Gasto (barras), leads do painel (linha) e CPL (tracejado, valor escrito) por semana de segunda a domingo, nas últimas ${SEMANAS_DA_TENDENCIA} semanas até o fim do período. A semana em curso sai vazada; o CPL some quando não se sustenta.`}
+      >
+        <TendenciaSemanal pontos={tendencia} />
+      </ChartCard>
+
+      {/* 3. CAMPANHAS → CONJUNTOS — conversão e descoberta em blocos separados. */}
       <Card id="conjuntos" className="scroll-mt-24">
         <CardHeader>
-          <CardTitle>Por conjunto de anúncios</CardTitle>
+          <CardTitle>Campanhas e conjuntos de conversão</CardTitle>
           <CardDescription>
-            Onde a verba vira reunião. Custo por lead e por reunião só nos conjuntos de
-            conversão — descoberta não gera lead, então fica com &ldquo;—&rdquo;.
-            {cprQuarentena
-              ? ` O custo por reunião também fica em “—” até ${MIN_REUNIOES} reuniões da campanha de conversão (hoje ${kp.reunioesConversao.valor}): com menos, a próxima reunião muda o número pela metade.`
-              : ` Por conjunto, o custo por reunião só aparece com ${MIN_REUNIOES} reuniões ou mais naquele conjunto.`}
+            Onde a verba vira reunião. Agrupado pelo id da Meta — dois conjuntos com o mesmo nome em campanhas diferentes são duas linhas.{" "}
+            {cprExibivel
+              ? `O custo por agendada aparece só com ${MIN_REUNIOES} reuniões ou mais na linha.`
+              : `O custo por agendada fica em “—” até ${MIN_REUNIOES} reuniões de conversão no período (hoje ${formatInt(kp.reunioesConversao.valor)}).`}
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          <Table>
-            <THead>
-              <TR className="hover:bg-transparent">
-                <TH>Conjunto</TH>
-                <TH>Objetivo</TH>
-                <TH className="text-right">Gasto</TH>
-                <TH className="text-right">CTR</TH>
-                <TH className="text-right" title={dica("leads")}>Leads (painel)</TH>
-                <TH className="text-right" title={dica("cpl")}>CPL (painel)</TH>
-                <TH className="text-right" title={dica("conversoes_pixel")}>CPL Meta (Pixel)</TH>
-                <TH className="text-right" title={dica("reunioes_agendadas")}>Reuniões</TH>
-                <TH className="text-right" title={dica("custo_por_reuniao")}>CPR</TH>
-              </TR>
-            </THead>
-            <TBody>
-              {byAdset.map((g) => {
-                const isConv = g.bucket === "conversao";
-                const cplOver = isConv && goalCpl != null && g.leadsPainel > 0 && g.cplPainel > goalCpl;
-                // Quarentena por LINHA: 1 reunião no conjunto não é custo, é sorte.
-                const cprMedido = isConv && !cprQuarentena && g.meetings >= MIN_REUNIOES;
-                const cprOver = cprMedido && goalCpr != null && g.cpr > goalCpr;
-                return (
-                  <TR key={g.adset}>
-                    <TD className="font-medium">{g.adset}</TD>
-                    <TD>
-                      <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
-                        <span
-                          className="size-2 shrink-0 rounded-full"
-                          style={{ background: BUCKET_DOT[g.bucket] }}
-                        />
-                        {OBJECTIVE_LABEL[g.bucket]}
-                      </span>
-                    </TD>
-                    <TD className="text-right tabular">{formatCurrency0(g.spend)}</TD>
-                    <TD className="text-right tabular">{formatPercent(g.ctr)}</TD>
-                    <TD className="text-right tabular">{formatInt(g.leadsPainel)}</TD>
-                    <TD className={`text-right tabular ${overCls(cplOver)}`}>
-                      {isConv && g.leadsPainel > 0 ? formatCurrency(g.cplPainel) : "—"}
-                    </TD>
-                    <TD className="text-right tabular text-muted-foreground">
-                      {isConv && g.leads > 0 ? formatCurrency(g.cpl) : "—"}
-                    </TD>
-                    <TD className="text-right tabular">{isConv ? formatInt(g.meetings) : "—"}</TD>
-                    <TD className={`text-right tabular ${overCls(cprOver)}`}>
-                      {cprMedido ? formatCurrency(g.cpr) : "—"}
-                    </TD>
-                  </TR>
-                );
-              })}
-            </TBody>
-          </Table>
-          {goalCpl != null || goalCpr != null ? (
-            <p className="mt-3 text-xs text-muted-foreground">
-              Em <span className="text-[var(--danger-text)]">vermelho</span>: acima da meta
-              {goalCpl != null ? ` de CPL (${formatCurrency(goalCpl)})` : ""}
-              {goalCpl != null && goalCpr != null ? " ou" : ""}
-              {goalCpr != null ? ` de CPR (${formatCurrency0(goalCpr)})` : ""}.
-            </p>
-          ) : (
-            <p className="mt-3 text-xs text-muted-foreground">
-              Sem meta de CPL e de custo por reunião, nada aqui fica vermelho.{" "}
-              <Link href="/configuracoes#metas" className="text-primary underline-offset-4 hover:underline">
-                Cadastrar metas
-              </Link>
-            </p>
-          )}
+        <CardContent className="space-y-3">
+          <ConjuntosTable linhas={conjuntos.conversao} bucket="conversao" />
+          <NotaNaoAtribuidos n={conjuntos.naoAtribuidos} rangeKey={rangeKey} />
         </CardContent>
       </Card>
 
-      {/* 2. Criativos: escalar ou pausar */}
+      {conjuntos.descoberta.length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Campanhas e conjuntos de descoberta</CardTitle>
+            <CardDescription>
+              Alcance, engajamento e seguidores: não geram lead, então não têm CPL nem custo por reunião. O alcance é somado por anúncio e por dia (conta a mesma pessoa mais de uma vez).
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ConjuntosTable linhas={conjuntos.descoberta} bucket="descoberta" />
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {/* 4. CRIATIVOS — o que escalar e o que pausar. */}
       <section id="criativos" className="scroll-mt-24 space-y-4">
         <div className="space-y-1">
           <h2 className="text-base font-semibold">Criativos: o que escalar e o que pausar</h2>
           <p className="text-sm text-muted-foreground">
-            Escale o que traz reunião barata, pause o que só gasta. A tabela ordena por
-            qualquer coluna.
+            Agregados por criativo (o mesmo criativo roda em vários conjuntos); expanda para ver anúncio a anúncio, CTR, CPC e o número do Pixel.
           </p>
         </div>
 
-        {perf.length === 0 ? (
-          <EmptyState
-            title="Sem dados de criativos no período"
-            hint="Sincronize ou importe o relatório de anúncios em Configurações → Importar para comparar os criativos."
-          />
-        ) : (
-          <>
-            {fatigued.length > 0 ? (
-              <div className="flex items-start gap-2.5 rounded-xl border border-[var(--danger-text)]/30 bg-[var(--danger-text)]/[0.04] px-4 py-3 text-sm">
-                <AlertTriangle className="mt-0.5 size-4 shrink-0 text-[var(--danger-text)]" />
-                <p className="text-muted-foreground">
-                  <span className="font-medium text-foreground">
-                    {fatigued.length === 1
-                      ? "1 criativo fadigando:"
-                      : `${fatigued.length} criativos fadigando:`}
-                  </span>{" "}
-                  {fatigued.map(rotulo).join(", ")}. Renove a arte antes que o custo
-                  dispare — a fadiga infla o CPL e, na cascata, o custo por reunião.
+        {fadigados.length > 0 || semResultado.length > 0 ? (
+          <div className="flex items-start gap-2.5 rounded-xl border border-[var(--status-fora)]/30 bg-[var(--status-fora)]/[0.04] px-4 py-3 text-sm">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-[var(--status-fora-text)]" />
+            <div className="space-y-0.5 text-muted-foreground">
+              {fadigados.length > 0 ? (
+                <p>
+                  <span className="font-medium text-foreground">{fadigados.length === 1 ? "1 criativo fadigando:" : `${fadigados.length} criativos fadigando:`}</span>{" "}
+                  {fadigados.map((c) => c.nome).join(", ")}. Renove a arte antes que o custo dispare.
                 </p>
-              </div>
-            ) : null}
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              {bestCpl ? (
-                <Card>
-                  <CardContent className="flex items-center gap-4 p-5">
-                    <div className="flex size-10 items-center justify-center rounded-lg bg-[var(--good)]/12 text-[var(--success-text)]">
-                      <Award className="size-5" />
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Melhor CPL</p>
-                      <p className="font-semibold">{rotulo(bestCpl)}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {formatCurrency(bestCpl.cplPainel)} por lead · {formatInt(bestCpl.leadsPainel)}{" "}
-                        {bestCpl.leadsPainel === 1 ? "lead" : "leads"} · {formatInt(bestCpl.meetings)}{" "}
-                        {bestCpl.meetings === 1 ? "reunião" : "reuniões"}
-                      </p>
-                      {bestCplLowSample ? (
-                        <p className="mt-0.5 text-xs text-[var(--danger-text)]">
-                          Amostra pequena ({formatInt(bestCpl.leadsPainel)}{" "}
-                          {bestCpl.leadsPainel === 1 ? "lead" : "leads"}) — confirme antes de escalar.
-                        </p>
-                      ) : null}
-                    </div>
-                  </CardContent>
-                </Card>
               ) : null}
-              {bestCtr ? (
-                <Card>
-                  <CardContent className="flex items-center gap-4 p-5">
-                    <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                      <TrendingUp className="size-5" />
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Maior CTR</p>
-                      <p className="font-semibold">{rotulo(bestCtr)}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {formatPercent(bestCtr.ctr)} de cliques · {formatInt(bestCtr.impressions)}{" "}
-                        impressões
-                      </p>
-                      {ctrDescartados > 0 ? (
-                        <p className="pt-0.5 text-xs text-muted-foreground">
-                          {ctrDescartados === 1
-                            ? "1 criativo fora do ranking por volume baixo."
-                            : `${ctrDescartados} criativos fora do ranking por volume baixo.`}
-                        </p>
-                      ) : null}
-                    </div>
-                  </CardContent>
-                </Card>
+              {semResultado.length > 0 ? (
+                <p>
+                  <span className="font-medium text-foreground">{semResultado.length === 1 ? "1 criativo sem resultado:" : `${semResultado.length} criativos sem resultado:`}</span>{" "}
+                  {semResultado.map((c) => `${c.nome} (${formatCurrency0(c.spend)})`).join(", ")} — gasto de pelo menos 2 × o CPL alvo e nenhum lead do painel.
+                </p>
               ) : null}
             </div>
+          </div>
+        ) : null}
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Todos os criativos</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <CreativesTable rows={perf} cprEmQuarentena={cprQuarentena} />
-              </CardContent>
-            </Card>
-          </>
-        )}
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Card>
+            <CardContent className="flex items-center gap-4 p-5">
+              <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-[var(--status-ok)]/12 text-[var(--status-ok-text)]">
+                <Award className="size-5" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs text-muted-foreground" title={dica("cpl")}>
+                  Melhor CPL (painel)
+                </p>
+                {ranking.melhorCpl ? (
+                  <>
+                    <p className="truncate font-semibold">{ranking.melhorCpl.nome}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {moedaOuTraco(ranking.melhorCpl.cplPainel)} por lead · {formatInt(ranking.melhorCpl.agendadas)}{" "}
+                      {ranking.melhorCpl.agendadas === 1 ? "agendada" : "agendadas"}
+                    </p>
+                    <p className="text-xs text-muted-foreground">{amostraDoRanking(ranking.melhorCpl)}</p>
+                  </>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    Nenhum criativo com volume mínimo (≥ {VOLUME_MINIMO_RANKING.leads} leads do painel ou ≥ {formatCurrency0(VOLUME_MINIMO_RANKING.gasto)}) e lead no período.
+                  </p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="flex items-center gap-4 p-5">
+              <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <TrendingUp className="size-5" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs text-muted-foreground">Maior CTR</p>
+                {ranking.maiorCtr ? (
+                  <>
+                    <p className="truncate font-semibold">{ranking.maiorCtr.nome}</p>
+                    <p className="text-sm text-muted-foreground">{formatPercent(ranking.maiorCtr.ctr)} de cliques</p>
+                    <p className="text-xs text-muted-foreground">{amostraDoRanking(ranking.maiorCtr)}</p>
+                  </>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    Nenhum criativo com volume mínimo (≥ {VOLUME_MINIMO_RANKING.leads} leads do painel ou ≥ {formatCurrency0(VOLUME_MINIMO_RANKING.gasto)}).
+                  </p>
+                )}
+                {ranking.descartados > 0 ? (
+                  <p className="pt-0.5 text-xs text-muted-foreground">
+                    {ranking.descartados === 1 ? "1 criativo fora dos rankings por volume baixo." : `${ranking.descartados} criativos fora dos rankings por volume baixo.`}
+                  </p>
+                ) : null}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Criativos de conversão</CardTitle>
+            <CardDescription>
+              Leads e reuniões só pelo id do anúncio (o link padrão traz “{"{{ad.id}}"}”); nome que existe em mais de um anúncio aparece como atribuição ambígua e não entra em ninguém. Passe o mouse em “Saúde” para ver a regra.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <CreativesTable linhas={criativos.conversao} bucket="conversao" regraSaude={regraSaude} />
+          </CardContent>
+        </Card>
+
+        {criativos.descoberta.length > 0 ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Criativos de descoberta</CardTitle>
+              <CardDescription>Julgados por CPM, gancho e retenção — não por leads.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <CreativesTable linhas={criativos.descoberta} bucket="descoberta" regraSaude={regraSaude} />
+            </CardContent>
+          </Card>
+        ) : null}
       </section>
 
-      {/* 3. Orçamento: ritmo e divisão por objetivo */}
+      {/* 5. DESCOBERTA — alcance, CPM, custo por mil alcançados, seguidores estimados. */}
       <Card>
         <CardHeader>
-          <CardTitle>Orçamento da campanha</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            <Radio className="size-4 text-muted-foreground" />
+            Descoberta — alcance e seguidores
+          </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3">
-          {/* O número grande é o GASTO, e diz isso: sem orçamento cadastrado ele
-              era lido como o orçamento (B9). */}
-          <div className="flex flex-wrap items-baseline justify-between gap-2 text-sm">
-            <span>
-              <span className="tabular text-2xl font-semibold">{formatCurrency0(spentAllTime)}</span>{" "}
-              <span className="text-muted-foreground">gastos desde o início da campanha</span>
-            </span>
-            {/*
-              Orçamento zero não é "consumi 0%" — é campo em branco. Mostrar
-              "de R$ 0 · 0% consumido" com a barra vazia dava a entender que o
-              painel mediu alguma coisa.
-            */}
-            {budget > 0 ? (
-              <span className="text-muted-foreground">
-                de {formatCurrency0(budget)} · {formatPercent(pacing, 0)} consumido
-              </span>
-            ) : (
-              <span className="text-xs">
-                <span className="font-medium">Orçamento não cadastrado</span> ·{" "}
-                <Link
-                  href="/configuracoes#orcamento"
-                  className="font-medium text-primary underline-offset-4 hover:underline"
-                >
-                  cadastrar para ver o ritmo →
-                </Link>
-              </span>
-            )}
-          </div>
-          {budget > 0 ? (
-            <div className="h-2.5 w-full overflow-hidden rounded-full bg-foreground/[0.07]">
-              <div
-                className="h-full rounded-full bg-primary"
-                style={{ width: `${pacing * 100}%` }}
-              />
+        <CardContent>
+          {descoberta.temDescoberta ? (
+            <div className="space-y-3">
+              <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3 lg:grid-cols-6">
+                <Stat rotulo="Investimento" valor={formatCurrency0(descoberta.investimento)} dica={dica("investimento_descoberta")} />
+                <Stat rotulo="Alcance somado por anúncio e por dia" valor={formatInt(descoberta.alcanceSomado)} dica="Soma do alcance diário de cada anúncio: conta a mesma pessoa mais de uma vez. Não é o alcance único do período." />
+                <Stat rotulo="CPM" valor={moedaOuTraco(descoberta.cpm)} />
+                <Stat rotulo="Custo / mil alcançados" valor={moedaOuTraco(descoberta.custoPorMilAlcancados)} dica="Gasto em descoberta ÷ alcance somado × 1.000 — como o alcance é somado, é um piso." />
+                <Stat rotulo="Seguidores no período" valor={formatIntComSinal(descoberta.seguidores)} />
+                <Stat rotulo="Custo / seguidor (est.)" valor={moedaOuTraco(descoberta.custoPorSeguidorEst)} destaque />
+              </dl>
+              <p className="text-xs text-muted-foreground">
+                Estimativa: seguidores são da conta (orgânico + pago); a Meta não atribui seguidores por anúncio. O alcance acima é a soma diária por anúncio (conta a mesma pessoa mais de uma vez) — não é alcance único.
+              </p>
             </div>
-          ) : null}
-          {pace.status !== "unknown" && pace.projectedSpend != null ? (
-            <p
-              className={
-                pace.status === "over"
-                  ? "text-xs font-medium text-[var(--danger-text)]"
-                  : "text-xs text-muted-foreground"
-              }
-            >
-              No ritmo atual: gasto projetado {formatCurrency0(pace.projectedSpend)} até o fim —{" "}
-              {pace.status === "over"
-                ? "acima do orçamento, reduza o budget diário."
-                : pace.status === "sub"
-                  ? "abaixo do orçamento, há espaço para escalar."
-                  : "em linha com o orçamento."}
-            </p>
-          ) : pace.exhaustInDays != null ? (
-            <p className="text-xs text-muted-foreground">
-              No ritmo atual, o orçamento dura ~{pace.exhaustInDays} dias.
-            </p>
-          ) : null}
-          {/* O ritmo que importa é o do PERÍODO contra o orçamento de conversão
-              semanal (4.5) — o gasto acumulado da campanha inteira não diz se esta
-              semana está acima ou abaixo do combinado. */}
-          {ritmo?.alvo != null ? (
-            <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-              <span>
-                No período: <span className="tabular font-medium">{mostrar(kp.investimentoConversao, "moeda0")}</span>{" "}
-                em conversão, de <span className="tabular">{formatarAlvo("investimento_conversao", ritmo.alvo)}</span>{" "}
-                previstos{ritmo.parcial ? " (parte do período sem meta)" : ""}
-              </span>
-              {ritmo.avaliacao ? (
-                <StatusMetaBadge meta={{ avaliacao: ritmo.avaliacao }} />
-              ) : null}
-            </p>
           ) : (
-            <p className="text-xs text-muted-foreground">
-              Sem orçamento de conversão semanal, não há ritmo do período.{" "}
-              <Link href="/configuracoes#metas" className="text-primary underline-offset-4 hover:underline">
-                Montar as metas
-              </Link>
-            </p>
+            <p className="text-sm text-muted-foreground">Nenhum anúncio de descoberta no período. Todo o orçamento foi para conversão.</p>
           )}
-          <div className="flex flex-wrap gap-x-6 gap-y-1 border-t pt-3 text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">No período</span>
-            <span>{formatInt(k.impressions)} impressões</span>
-            <span>{formatInt(k.reach)} de alcance</span>
-            <span>CTR {formatPercent(k.ctr)}</span>
-            <span>CPM {formatCurrency(k.cpm)}</span>
-            <span>CPC {formatCurrency(k.cpc)}</span>
-            <span>Frequência {formatDecimal(k.frequency, 2)}</span>
-            {(data.campaign.dailyBudget ?? 0) > 0 ? (
-              <span>Budget diário {formatCurrency0(data.campaign.dailyBudget!)}</span>
-            ) : null}
-          </div>
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Orçamento por objetivo</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-5">
-          <ObjectiveSplitBar
-            conversao={obj.conversao.spend}
-            descoberta={obj.descoberta.spend}
-          />
-
-          {kp.leadsOrganicos.valor > 0 ? (
-            <p className="text-xs text-muted-foreground">
-              + {formatInt(kp.leadsOrganicos.valor)}{" "}
-              {kp.leadsOrganicos.valor === 1 ? "lead orgânico ou direto" : "leads orgânicos ou diretos"}{" "}
-              — sem custo pago, fora do CPL e do custo por reunião.
-            </p>
-          ) : null}
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2 rounded-lg border p-4">
-              <div className="flex items-center gap-2">
-                <UserPlus className="size-4 text-primary" />
-                <p className="font-medium">Conversão — geração de leads</p>
-              </div>
-              <Stat label="Investimento" value={mostrar(kp.investimentoConversao, "moeda0")} />
-              <Stat label="Leads" value={formatInt(kp.leadsConversao.valor)} />
-              {/* Sem denominador o custo é DESCONHECIDO, não zero — e "R$ 0,00"
-                  ao lado de "Reuniões 0" lê-se como custo excelente. */}
-              <Stat label="CPL" value={mostrar(kp.cpl, "moeda")} highlight meta={metaDe("cpl", "alvo")} />
-              <Stat label="Reuniões agendadas" value={formatInt(kp.reunioesConversao.valor)} />
-              <Stat
-                label="Custo por reunião"
-                value={mostrar(kp.custoPorReuniao, "moeda")}
-                highlight={!cprQuarentena}
-                meta={metaDe("custo_por_reuniao", "alvo")}
-              />
-              {cprQuarentena ? (
-                <p className="text-xs text-muted-foreground">
-                  Volta com {MIN_REUNIOES} reuniões da campanha de conversão (hoje{" "}
-                  {kp.reunioesConversao.valor}).
-                </p>
-              ) : null}
-            </div>
-
-            <div className="space-y-2 rounded-lg border p-4">
-              <div className="flex items-center gap-2">
-                <Radio className="size-4 text-muted-foreground" />
-                <p className="font-medium">Descoberta — alcance &amp; seguidores</p>
-              </div>
-              {obj.hasDiscovery ? (
-                <>
-                  <Stat label="Investimento" value={formatCurrency0(obj.descoberta.spend)} />
-                  <Stat label="Alcance" value={formatInt(obj.descoberta.reach)} />
-                  <Stat label="CPM" value={formatCurrency(obj.descoberta.cpm)} />
-                  <Stat
-                    label="Custo / mil alcançados"
-                    value={formatCurrency(obj.descoberta.costPerReach)}
-                  />
-                  <Stat
-                    label="Seguidores no período"
-                    value={formatIntComSinal(obj.netNewFollowers)}
-                  />
-                  <Stat
-                    label="Custo / seguidor (est.)"
-                    value={formatCurrencyOrDash(obj.costPerFollowerEst)}
-                    highlight
-                  />
-                  <p className="pt-1 text-xs text-muted-foreground">
-                    Estimativa: seguidores são da conta (orgânico + pago); a Meta não atribui
-                    seguidores por anúncio.
-                  </p>
-                </>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  Nenhum anúncio de descoberta no período. Todo o orçamento foi para conversão.
-                </p>
-              )}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
+      {/* 6. GRÁFICO DIÁRIO — barras, eixo linear, lacunas e pausas marcadas (B12). */}
       <ChartCard
         title="Investimento por dia"
-        description="Um dia por barra. Faixa cinza = campanha parada (um sync confirmou que não houve veiculação). Faixa âmbar = sem dados: nenhuma sincronização cobriu o dia, pode ter havido gasto que o painel não viu."
+        description="Uma barra por dia, todo dia do período no eixo. Faixa cinza “pausado” = um sync confirmou que não houve veiculação. Hachura âmbar “sem dados” = nenhuma sincronização cobriu o dia: pode ter havido gasto que o painel não viu."
       >
-        <TimeSeriesChart
-          data={series}
-          series={[{ key: "spend", label: "Investimento", color: CHART.series[0], kind: "bar" }]}
-          yFormat="currency0"
+        <BarrasDiarias
+          dados={serie.map((p) => ({ date: p.date, valor: p.spend, semDado: p.semDado, semVeiculacao: p.semVeiculacao }))}
+          faixas={faixas}
           valueFormat="currency"
-          faixas={[
-            ...trechosSemVeiculacao(series).map((t) => ({ ...t, label: "sem veiculação", tom: "pausa" as const })),
-            ...trechosSemDado(series).map((t) => ({ ...t, label: "sem dados", tom: "falha" as const })),
-          ]}
+          yFormat="currency0"
         />
       </ChartCard>
     </div>
+  );
+}
+
+function Stat({ rotulo, valor, dica: titulo, destaque }: { rotulo: string; valor: string; dica?: string; destaque?: boolean }) {
+  return (
+    <div className="min-w-0" title={titulo}>
+      <dt className="text-xs text-muted-foreground">{rotulo}</dt>
+      <dd className={`tabular text-lg font-semibold ${destaque ? "text-primary" : ""}`}>{valor}</dd>
+    </div>
+  );
+}
+
+/** Leads do período que não entraram em nenhuma linha, e por quê. */
+function NotaNaoAtribuidos({ n, rangeKey }: { n: NaoAtribuidos; rangeKey?: string }) {
+  const partes: string[] = [];
+  if (n.ambigua > 0) partes.push(`${formatInt(n.ambigua)} com nome ambíguo`);
+  if (n.macro > 0) partes.push(`${formatInt(n.macro)} com macro {{…}} sem resolver`);
+  if (n.desconhecida > 0) partes.push(`${formatInt(n.desconhecida)} com origem desconhecida`);
+  if (n.semOrigem > 0) partes.push(`${formatInt(n.semOrigem)} sem origem (orgânico ou direto)`);
+  if (n.semLinhaNoPeriodo > 0) partes.push(`${formatInt(n.semLinhaNoPeriodo)} de conjunto sem veiculação no período`);
+  if (partes.length === 0) return null;
+  return (
+    <p className="text-xs text-muted-foreground">
+      Fora das linhas: {partes.join(" · ")}. Esses leads contam no total, mas não no custo por conjunto.{" "}
+      {n.ambigua > 0 || n.macro > 0 ? (
+        <Link href={comPeriodo("/configuracoes/ferramentas#utm", rangeKey)} className="text-primary underline-offset-4 hover:underline">
+          Gerar o link com {"{{ad.id}}"} →
+        </Link>
+      ) : null}
+    </p>
   );
 }

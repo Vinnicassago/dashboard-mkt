@@ -720,54 +720,199 @@ export function followerSeries(rows: IgAccountDaily[], range?: DateRange): Follo
 
 // ---- fadiga de criativo --------------------------------------------
 
-export type FatigueLevel = "novo" | "saudavel" | "atencao" | "fadigado";
+/**
+ * `sem-resultado` (B17): gastou e não trouxe lead — não é fadiga, é criativo que
+ * nunca funcionou. O motor lê só `fadigado`; os outros níveis são da tela.
+ */
+export type FatigueLevel = "novo" | "saudavel" | "atencao" | "fadigado" | "sem-resultado";
+
+/** Uma das duas janelas de 7 dias que a regra compara. */
+export interface JanelaFadiga {
+  from: string;
+  to: string;
+  impressions: number;
+  spend: number;
+  /** Conversões do Pixel na janela (o denominador do CPL 7 d). */
+  leads: number;
+  ctr: number;
+  /** Gasto ÷ conversões do Pixel; `Infinity` = gastou sem conversão; `null` = nem gasto. */
+  cpl: number | null;
+  frequency: number;
+}
 
 export interface Fatigue {
   level: FatigueLevel;
-  frequency: number; // frequência média/dia recente
-  reason: string; // por que está fadigando (ou "amostra insuficiente")
+  /** Frequência dos últimos 7 dias (impressões ÷ alcance somado por dia — um piso). */
+  frequency: number;
+  /** QUAL condição disparou (ou por que não dá para julgar). */
+  reason: string;
+  /** As duas janelas comparadas — para a linha expandida e para o teste. */
+  janelas?: { recente: JanelaFadiga; anterior: JanelaFadiga };
 }
 
 /**
- * Sinal de fadiga por anúncio: compara os ~3 dias mais recentes com os 3 dias
- * anteriores. CTR caindo + CPL subindo + frequência alta = criativo queimando —
- * renove ANTES do CPR subir (o alerta oficial da Meta só vem quando o custo já
- * dobrou). Puro: usa as últimas datas presentes no próprio anúncio.
+ * A régua da saúde do criativo, explícita (relatório §7.3, S13/B17). O texto
+ * da dica (ⓘ) da coluna Saúde é montado a partir destes números — mudar a
+ * regra aqui muda a explicação na tela.
  */
-export function computeFatigue(rows: AdDaily[]): Fatigue {
-  const sorted = [...rows].sort((a, b) => a.date.localeCompare(b.date));
-  const recent = sorted.slice(-3);
-  const prior = sorted.slice(-6, -3);
-  const agg = (rs: AdDaily[]) => {
-    const spend = rs.reduce((s, r) => s + r.spend, 0);
-    const impr = rs.reduce((s, r) => s + r.impressions, 0);
-    const clicks = rs.reduce((s, r) => s + r.clicks, 0);
-    const leadCount = rs.reduce((s, r) => s + r.leads, 0);
-    const freq = rs.length ? rs.reduce((s, r) => s + r.frequency, 0) / rs.length : 0;
-    return { ctr: div(clicks, impr), cpl: div(spend, leadCount), freq, impr };
-  };
-  const r = agg(recent);
-  const p = agg(prior);
-  if (recent.length < 2 || prior.length < 2 || r.impr < 500) {
-    return { level: "novo", frequency: r.freq, reason: "amostra insuficiente" };
-  }
-  const ctrDown = p.ctr > 0 && r.ctr < p.ctr * 0.85;
-  const cplUp = p.cpl > 0 && r.cpl > p.cpl * 1.25;
-  const freqHigh = r.freq >= 1.8;
-  const reasons: string[] = [];
-  if (ctrDown) reasons.push("CTR caindo");
-  if (cplUp) reasons.push("CPL subindo");
-  if (freqHigh) reasons.push(`frequência ${formatFreq(r.freq)}`);
-  const flags = [ctrDown, cplUp, freqHigh].filter(Boolean).length;
-  const level: FatigueLevel = flags >= 2 ? "fadigado" : flags === 1 ? "atencao" : "saudavel";
-  return {
-    level,
-    frequency: r.freq,
-    reason: reasons.length ? reasons.join(" · ") : "estável",
-  };
+export const REGRA_FADIGA = {
+  /** Cada janela tem 7 dias; as duas terminam no fim do período. */
+  janelaDias: 7,
+  /** Abaixo disto em QUALQUER janela não há leitura ("amostra insuficiente"). */
+  impressoesMinimas: 1000,
+  /** Fadigando: CTR recente ≤ 75% do anterior… */
+  quedaCtr: 0.75,
+  /** …E frequência ≥ 2… */
+  frequenciaAlta: 2,
+  /** …OU CPL 7 d ≥ 120% do anterior. */
+  altaCpl: 1.2,
+  /** Sem resultado (só conversão): gasto do período ≥ 2 × CPL alvo com 0 leads do painel. */
+  multiploSemResultado: 2,
+} as const;
+
+export interface OpcoesFadiga {
+  /**
+   * Fim do período (AAAA-MM-DD): as duas janelas de 7 dias terminam aqui, para a
+   * saúde ser a do PERÍODO em tela (S13). Ausente = a última data das linhas.
+   */
+  fim?: string;
+  /**
+   * Liga a regra "sem resultado" (só para criativos de conversão): gasto do
+   * período, leads do PAINEL do período e o CPL alvo (meta vigente ou, sem meta,
+   * o CPL do período da conta). `cplAlvo` nulo desliga a regra.
+   */
+  semResultado?: { gastoPeriodo: number; leadsPainel: number; cplAlvo: number | null };
 }
 
 const formatFreq = (n: number) => n.toFixed(1).replace(".", ",");
+const formatMil = (n: number) => Math.round(n).toLocaleString("pt-BR");
+const formatPct1 = (r: number) =>
+  `${(r * 100).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
+const formatReais = (n: number) =>
+  `R$ ${n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+function janelaFadiga(rows: AdDaily[], from: string, to: string): JanelaFadiga {
+  const rs = rows.filter((r) => r.date >= from && r.date <= to);
+  const spend = rs.reduce((s, r) => s + r.spend, 0);
+  const impressions = rs.reduce((s, r) => s + r.impressions, 0);
+  const reach = rs.reduce((s, r) => s + r.reach, 0);
+  const clicks = rs.reduce((s, r) => s + r.clicks, 0);
+  const leads = rs.reduce((s, r) => s + r.leads, 0);
+  // Frequência da janela: impressões ÷ alcance somado por dia (a mesma pessoa
+  // conta mais de uma vez no denominador, então é um PISO). Linha de CSV sem
+  // alcance cai na média do campo `frequency`.
+  const frequency =
+    reach > 0 ? impressions / reach : rs.length ? rs.reduce((s, r) => s + r.frequency, 0) / rs.length : 0;
+  // Gasto sem conversão não é "CPL 0": é custo sem teto (Infinity) — era o furo
+  // que impedia a regra de CPL de disparar (S13).
+  const cpl = leads > 0 ? spend / leads : spend > 0 ? Number.POSITIVE_INFINITY : null;
+  return { from, to, impressions, spend, leads, ctr: div(clicks, impressions), cpl, frequency };
+}
+
+/**
+ * Saúde do criativo, pela regra explícita do relatório (§7.3), calculada no
+ * PERÍODO:
+ *
+ *   Fadigando  = CTR dos últimos 7 dias ≤ 75% do CTR dos 7 dias anteriores
+ *                E (frequência ≥ 2 OU CPL 7 d ≥ 120% do anterior),
+ *                com ≥ 1.000 impressões em CADA janela — senão "amostra
+ *                insuficiente" (nível `novo`).
+ *   Atenção    = só um dos lados da regra (CTR caiu sem confirmação, ou
+ *                frequência/CPL subiram sem queda de CTR).
+ *   Sem resultado (só conversão, via `opts.semResultado`) = gasto do período
+ *                ≥ 2 × CPL alvo E 0 leads do painel.
+ *
+ * As janelas terminam em `opts.fim` (o fim do período da tela); sem ele, na
+ * última data das linhas. Puro. `reason` diz qual condição disparou.
+ */
+export function computeFatigue(rows: AdDaily[], opts: OpcoesFadiga = {}): Fatigue {
+  const { janelaDias, impressoesMinimas, quedaCtr, frequenciaAlta, altaCpl, multiploSemResultado } = REGRA_FADIGA;
+
+  // 1. Sem resultado: gastou o que dois leads custariam e não trouxe nenhum.
+  const sr = opts.semResultado;
+  if (
+    sr &&
+    sr.cplAlvo != null &&
+    sr.cplAlvo > 0 &&
+    sr.leadsPainel === 0 &&
+    sr.gastoPeriodo >= sr.cplAlvo * multiploSemResultado
+  ) {
+    return {
+      level: "sem-resultado",
+      frequency: 0,
+      reason: `${formatReais(sr.gastoPeriodo)} gastos no período sem nenhum lead do painel (≥ ${multiploSemResultado} × o CPL alvo de ${formatReais(sr.cplAlvo)})`,
+    };
+  }
+
+  const fim = opts.fim ?? [...rows].map((r) => r.date).sort().at(-1);
+  if (!fim) return { level: "novo", frequency: 0, reason: "amostra insuficiente: sem linhas de anúncio" };
+  const dia = (n: number) => {
+    const d = new Date(`${fim}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + n);
+    return d.toISOString().slice(0, 10);
+  };
+  const recente = janelaFadiga(rows, dia(-(janelaDias - 1)), fim);
+  const anterior = janelaFadiga(rows, dia(-(2 * janelaDias - 1)), dia(-janelaDias));
+  const janelas = { recente, anterior };
+
+  // 2. Piso absoluto: sem 1.000 impressões em cada janela não há leitura.
+  if (recente.impressions < impressoesMinimas || anterior.impressions < impressoesMinimas) {
+    return {
+      level: "novo",
+      frequency: recente.frequency,
+      reason: `amostra insuficiente: ${formatMil(recente.impressions)} impressões nos últimos ${janelaDias} dias e ${formatMil(anterior.impressions)} nos ${janelaDias} anteriores (mínimo ${formatMil(impressoesMinimas)} em cada janela)`,
+      janelas,
+    };
+  }
+
+  // 3. A regra.
+  const ctrCaiu = anterior.ctr > 0 && recente.ctr <= anterior.ctr * quedaCtr;
+  const freqAlta = recente.frequency >= frequenciaAlta;
+  const cplSubiu =
+    anterior.cpl != null &&
+    Number.isFinite(anterior.cpl) &&
+    recente.cpl != null &&
+    recente.cpl >= anterior.cpl * altaCpl;
+  const ctrTexto = `CTR ${formatPct1(recente.ctr)} vs ${formatPct1(anterior.ctr)} nos 7 d anteriores`;
+  const freqTexto = `frequência ${formatFreq(recente.frequency)}`;
+  const cplTexto =
+    cplSubiu && anterior.cpl != null && recente.cpl != null
+      ? `CPL 7 d ${Number.isFinite(recente.cpl) ? formatReais(recente.cpl) : "sem conversão"} vs ${formatReais(anterior.cpl)}`
+      : "";
+
+  if (ctrCaiu && (freqAlta || cplSubiu)) {
+    const confirmacao = [
+      freqAlta ? `${freqTexto} (≥ ${frequenciaAlta})` : "",
+      cplSubiu ? `${cplTexto} (≥ ${Math.round(altaCpl * 100)}%)` : "",
+    ]
+      .filter(Boolean)
+      .join(" e ");
+    return {
+      level: "fadigado",
+      frequency: recente.frequency,
+      reason: `${ctrTexto} (≤ ${Math.round(quedaCtr * 100)}%) e ${confirmacao}`,
+      janelas,
+    };
+  }
+  if (ctrCaiu) {
+    return {
+      level: "atencao",
+      frequency: recente.frequency,
+      reason: `${ctrTexto} (≤ ${Math.round(quedaCtr * 100)}%), sem frequência alta nem CPL subindo`,
+      janelas,
+    };
+  }
+  if (freqAlta || cplSubiu) {
+    const sinal = [freqAlta ? `${freqTexto} (≥ ${frequenciaAlta})` : "", cplSubiu ? cplTexto : ""].filter(Boolean).join(" e ");
+    return {
+      level: "atencao",
+      frequency: recente.frequency,
+      reason: `${sinal}, com CTR estável (${formatPct1(recente.ctr)} vs ${formatPct1(anterior.ctr)})`,
+      janelas,
+    };
+  }
+  return { level: "saudavel", frequency: recente.frequency, reason: `${ctrTexto} · ${freqTexto}`, janelas };
+}
 
 // ---- per-creative ---------------------------------------------------
 
@@ -894,7 +1039,7 @@ export function creativePerformance(
       cpl: k.cpl,
       cplPainel: div(k.spend, leadsPainel),
       cpr: div(k.spend, meetings),
-      fatigue: computeFatigue(allByAd.get(creative.adId) ?? []),
+      fatigue: computeFatigue(allByAd.get(creative.adId) ?? [], { fim: range?.to }),
       hookRate: creative.videoPlays ? div(creative.videoPlays, k.impressions) : undefined,
       thruPlayRate: creative.thruPlays ? div(creative.thruPlays, k.impressions) : undefined,
       holdRate: creative.videoPlays ? div(creative.thruPlays ?? 0, creative.videoPlays) : undefined,

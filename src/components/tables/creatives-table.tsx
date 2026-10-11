@@ -2,184 +2,197 @@
 
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { Badge } from "@/components/ui/badge";
-import type { CreativePerf, FatigueLevel } from "@/lib/metrics";
+import { dica } from "@/lib/dicionario";
+import type { FatigueLevel, ObjectiveBucket } from "@/lib/metrics";
 import { MIN_REUNIOES } from "@/lib/trust";
+import { formatCurrency, formatCurrency0, formatDateShort, formatDecimal, formatInt, formatPercent } from "@/lib/format";
 import {
-  formatCurrency,
-  formatInt,
-  formatPercent,
-} from "@/lib/format";
+  COLUNAS_CRIATIVOS_CONVERSAO,
+  COLUNAS_CRIATIVOS_DESCOBERTA,
+  moedaOuTraco,
+  pctOuTraco,
+  type ColunaMidia,
+  type LinhaCriativo,
+} from "@/lib/midia";
 
-const formatBadge: Record<CreativePerf["format"], string> = {
-  video: "Vídeo",
-  carrossel: "Carrossel",
-  imagem: "Imagem",
+/**
+ * Criativos agregados por `creativeId` (um criativo roda em vários anúncios),
+ * com miniatura, e o detalhe por anúncio/conjunto ao expandir. As colunas
+ * primárias cabem no card a 1366 px; CTR, CPC, CPM, Pixel e retenção vão para
+ * a linha expandida (B13). A Saúde segue a regra explícita de `computeFatigue`,
+ * visível no ⓘ do cabeçalho (`regraSaude`) e no título de cada selo (o motivo).
+ */
+
+const FORMATO: Record<LinhaCriativo["formato"], string> = { video: "Vídeo", carrossel: "Carrossel", imagem: "Imagem" };
+
+// Cor SEMPRE com texto (CLAUDE.md): os tokens --status-* e o rótulo ao lado.
+const SAUDE: Record<FatigueLevel, { ponto: string; texto: string; rotulo: string; ordem: number }> = {
+  "sem-resultado": { ponto: "var(--status-fora)", texto: "text-[var(--status-fora-text)]", rotulo: "Sem resultado", ordem: 4 },
+  fadigado: { ponto: "var(--status-fora)", texto: "text-[var(--status-fora-text)]", rotulo: "Fadigando", ordem: 3 },
+  atencao: { ponto: "var(--status-perto)", texto: "text-[var(--status-perto-text)]", rotulo: "Atenção", ordem: 2 },
+  saudavel: { ponto: "var(--status-ok)", texto: "text-[var(--status-ok-text)]", rotulo: "Saudável", ordem: 1 },
+  novo: { ponto: "var(--muted)", texto: "text-muted-foreground", rotulo: "Novo", ordem: 0 },
 };
 
-const FAT_TONE: Record<FatigueLevel, string> = {
-  fadigado: "var(--critical)",
-  atencao: "var(--warning)",
-  saudavel: "var(--good)",
-  novo: "var(--muted)",
-};
-const FAT_LABEL: Record<FatigueLevel, string> = {
-  fadigado: "Fadigando",
-  atencao: "Atenção",
-  saudavel: "Saudável",
-  novo: "Novo",
-};
-const FAT_ORDER: Record<FatigueLevel, number> = { fadigado: 3, atencao: 2, saudavel: 1, novo: 0 };
-
-/** Semáforo: verde = saudável, âmbar = atenção, vermelho = fraco. */
-function tone(v: number | undefined, good: number, ok: number): string {
-  if (v == null) return "var(--muted)";
-  if (v >= good) return "var(--good)";
-  if (v >= ok) return "var(--warning)";
-  return "var(--critical)";
-}
-
-function RateCell({ value, color }: { value?: number; color: string }) {
-  if (value == null) return <span className="text-muted-foreground">—</span>;
+export function SaudeBadge({ saude }: { saude: LinhaCriativo["saude"] }) {
+  const s = SAUDE[saude.level];
   return (
-    <span className="inline-flex items-center justify-end gap-1.5 tabular">
-      <span className="size-2 shrink-0 rounded-full" style={{ background: color }} />
-      {formatPercent(value)}
+    <span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-sm font-medium ${s.texto}`} title={saude.reason}>
+      <span aria-hidden className="size-2 shrink-0 rounded-full" style={{ background: s.ponto }} />
+      {s.rotulo}
+      {saude.level === "novo" ? <span className="text-xs font-normal text-muted-foreground">(amostra insuficiente)</span> : null}
     </span>
   );
 }
 
-const columns: Column<CreativePerf>[] = [
-  {
-    key: "name",
-    header: "Criativo",
-    sortable: true,
-    sortValue: (r) => r.name,
-    render: (r) => (
-      <div className="flex min-w-0 flex-col gap-1">
-        <span className="block truncate font-medium" title={r.name}>
-          {r.name}
+const ouInfinito = (v: number | null | undefined) => (v == null ? Number.POSITIVE_INFINITY : v);
+const ouMenosUm = (v: number | null | undefined) => (v == null ? -1 : v);
+
+function Miniatura({ r }: { r: LinhaCriativo }) {
+  if (r.thumbnailUrl) {
+    // Miniatura da Meta (URL externa, muda a cada sync): <img> simples, sem o
+    // otimizador do Next — remotePatterns moram em next.config.ts.
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={r.thumbnailUrl} alt="" loading="lazy" className="size-10 shrink-0 rounded-md border object-cover" />;
+  }
+  return (
+    <span className="flex size-10 shrink-0 items-center justify-center rounded-md border bg-foreground/[0.03] text-[10px] uppercase text-muted-foreground" aria-hidden>
+      {FORMATO[r.formato].slice(0, 3)}
+    </span>
+  );
+}
+
+function Nome({ r }: { r: LinhaCriativo }) {
+  return (
+    <span className="flex min-w-0 items-center gap-2.5">
+      {r.nivel === "criativo" ? <Miniatura r={r} /> : null}
+      <span className="flex min-w-0 flex-col gap-0.5">
+        <span className="truncate font-medium" title={r.nome}>
+          {r.nome}
         </span>
-        <span className="flex min-w-0 items-center gap-1.5">
-          <Badge variant="muted">{formatBadge[r.format]}</Badge>
-          <span className="truncate text-xs text-muted-foreground" title={r.adset}>
-            {r.adset}
-          </span>
+        <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+          <Badge variant="muted">{FORMATO[r.formato]}</Badge>
+          {r.nivel === "criativo" ? (
+            <span className="truncate">
+              {r.anuncios === 1 ? "1 anúncio" : `${r.anuncios} anúncios`}
+              {r.creativeId ? "" : " · sem id de criativo"}
+            </span>
+          ) : (
+            <span className="truncate" title={`${r.campanha ?? ""} › ${r.conjunto ?? ""}`}>
+              {r.conjunto}
+            </span>
+          )}
+          {r.ambiguos > 0 ? (
+            <span
+              className="whitespace-nowrap text-[var(--warning-text)]"
+              title={`${formatInt(r.ambiguos)} ${r.ambiguos === 1 ? "lead do período chegou" : "leads do período chegaram"} com um NOME que existe em mais de um anúncio — sem o id não dá para saber qual trouxe; não entram em nenhum criativo.`}
+            >
+              atribuição ambígua ({formatInt(r.ambiguos)})
+            </span>
+          ) : null}
         </span>
-      </div>
-    ),
-    className: "max-w-[280px]",
-  },
-  { key: "spend", header: "Gasto", align: "right", sortable: true, sortValue: (r) => r.spend, render: (r) => formatCurrency(r.spend) },
-  { key: "ctr", header: "CTR", align: "right", sortable: true, sortValue: (r) => r.ctr, render: (r) => formatPercent(r.ctr) },
-  { key: "cpc", header: "CPC", align: "right", sortable: true, sortValue: (r) => r.cpc, render: (r) => formatCurrency(r.cpc) },
-  {
-    key: "cplPainel",
-    header: "CPL (painel)",
+      </span>
+    </span>
+  );
+}
+
+const RENDER: Record<string, Pick<Column<LinhaCriativo>, "render" | "sortValue" | "align" | "className">> = {
+  nome: { render: (r) => <Nome r={r} />, sortValue: (r) => r.nome, className: "max-w-[300px]" },
+  spend: { align: "right", sortValue: (r) => r.spend, render: (r) => formatCurrency0(r.spend) },
+  impressions: { align: "right", sortValue: (r) => r.impressions, render: (r) => formatInt(r.impressions) },
+  reach: { align: "right", sortValue: (r) => r.reach, render: (r) => formatInt(r.reach) },
+  cpm: { align: "right", sortValue: (r) => ouInfinito(r.cpm), render: (r) => moedaOuTraco(r.cpm) },
+  cpc: { align: "right", sortValue: (r) => ouInfinito(r.cpc), render: (r) => moedaOuTraco(r.cpc) },
+  ctr: { align: "right", sortValue: (r) => r.ctr, render: (r) => formatPercent(r.ctr) },
+  custoPorMilAlcancados: { align: "right", sortValue: (r) => ouInfinito(r.custoPorMilAlcancados), render: (r) => moedaOuTraco(r.custoPorMilAlcancados) },
+  leadsPainel: { align: "right", sortValue: (r) => r.leadsPainel, render: (r) => formatInt(r.leadsPainel) },
+  conversoesPixel: { align: "right", sortValue: (r) => r.conversoesPixel, render: (r) => <span className="text-muted-foreground">{formatInt(r.conversoesPixel)}</span> },
+  cplPainel: { align: "right", sortValue: (r) => ouInfinito(r.cplPainel), render: (r) => moedaOuTraco(r.cplPainel) },
+  cplPixel: { align: "right", sortValue: (r) => ouInfinito(r.cplPixel), render: (r) => <span className="text-muted-foreground">{moedaOuTraco(r.cplPixel)}</span> },
+  agendadas: { align: "right", sortValue: (r) => r.agendadas, render: (r) => formatInt(r.agendadas) },
+  custoPorAgendada: {
     align: "right",
-    sortable: true,
-    // Sem lead não há CPL. Ordenar por CPL crescente — o gesto natural para achar
-    // o mais barato — colocava no topo justamente os criativos que não geraram
-    // lead nenhum, porque div() devolve 0. Infinity os manda para o fim.
-    sortValue: (r) => (r.leadsPainel > 0 ? r.cplPainel : Number.POSITIVE_INFINITY),
-    render: (r) => (r.leadsPainel > 0 ? formatCurrency(r.cplPainel) : "—"),
-  },
-  {
-    key: "leadsPainel",
-    header: "Leads (painel)",
-    align: "right",
-    sortable: true,
-    sortValue: (r) => r.leadsPainel,
-    render: (r) => formatInt(r.leadsPainel),
-  },
-  {
-    // O número da Meta, rotulado como tal: conta eventos do Pixel, não pessoas.
-    key: "cpl",
-    header: "CPL Meta (Pixel)",
-    align: "right",
-    sortable: true,
-    sortValue: (r) => (r.leads > 0 ? r.cpl : Number.POSITIVE_INFINITY),
-    render: (r) => <span className="text-muted-foreground">{r.leads > 0 ? formatCurrency(r.cpl) : "—"}</span>,
-  },
-  { key: "meetings", header: "Reuniões", align: "right", sortable: true, sortValue: (r) => r.meetings, render: (r) => formatInt(r.meetings) },
-  {
-    key: "cpr",
-    header: "Custo/reunião",
-    align: "right",
-    sortable: true,
-    // Sem reunião o custo é desconhecido, não zero; com menos de MIN_REUNIOES
-    // NESTE criativo, uma reunião é sorte, não custo (quarentena por linha).
-    sortValue: (r) => (r.meetings >= MIN_REUNIOES ? r.cpr : Number.POSITIVE_INFINITY),
+    sortValue: (r) => ouInfinito(r.custoPorAgendada),
     render: (r) =>
-      r.meetings >= MIN_REUNIOES ? (
-        formatCurrency(r.cpr)
-      ) : r.meetings > 0 ? (
-        <span className="text-muted-foreground" title={`${r.meetings} de ${MIN_REUNIOES} reuniões necessárias para ser custo`}>
-          —
-        </span>
+      r.custoPorAgendada != null ? (
+        formatCurrency(r.custoPorAgendada)
       ) : (
-        "—"
+        <span className="text-muted-foreground" title={r.agendadas > 0 ? `${formatInt(r.agendadas)} de ${MIN_REUNIOES} reuniões para virar custo` : "sem reunião agendada"}>
+          — <span className="text-xs">(n = {formatInt(r.agendadas)})</span>
+        </span>
       ),
   },
-  /*
-   * "Gancho (3s)" está OCULTA de propósito, não esquecida.
-   *
-   * hookRate = videoPlays ÷ impressões. O numerador vem da tabela `creatives`,
-   * que NÃO tem coluna de data e é reescrita a cada sync com a soma da janela
-   * inteira (até 30 dias); o denominador vem filtrado pelo período da tela.
-   * Numerador e denominador de janelas diferentes produzem razão sem teto — é
-   * daí que saíam os 104% e 133% em produção, com semáforo verde por cima.
-   *
-   * E o numerador nem é de 3 segundos: `video_play_actions` conta INÍCIOS de
-   * reprodução, incluindo autoplay e replay do Reels.
-   *
-   * Volta quando video_3s/thru_plays forem persistidos por dia em `ad_daily`
-   * (item C17 do plano) — aí os dois lados da divisão passam a ser do mesmo
-   * período e a taxa vira comparável.
-   */
-  {
-    key: "hold",
-    header: "Retenção",
-    align: "right",
-    sortable: true,
-    sortValue: (r) => r.holdRate ?? -1,
-    render: (r) => <RateCell value={r.holdRate} color={tone(r.holdRate, 0.3, 0.15)} />,
-  },
-  {
-    key: "fatigue",
-    header: "Saúde",
-    sortable: true,
-    sortValue: (r) => FAT_ORDER[r.fatigue.level],
-    render: (r) => (
-      <span
-        className="inline-flex items-center gap-1.5 whitespace-nowrap text-sm"
-        title={r.fatigue.reason}
-      >
-        <span className="size-2 shrink-0 rounded-full" style={{ background: FAT_TONE[r.fatigue.level] }} />
-        {FAT_LABEL[r.fatigue.level]}
-      </span>
-    ),
-  },
-];
+  hookRate: { align: "right", sortValue: (r) => ouMenosUm(r.hookRate), render: (r) => pctOuTraco(r.hookRate) },
+  holdRate: { align: "right", sortValue: (r) => ouMenosUm(r.holdRate), render: (r) => pctOuTraco(r.holdRate) },
+  saude: { sortValue: (r) => SAUDE[r.saude.level].ordem, render: (r) => <SaudeBadge saude={r.saude} /> },
+};
+
+function colunas(defs: ColunaMidia[], regraSaude: string): Column<LinhaCriativo>[] {
+  return defs
+    .filter((d) => !d.secundaria)
+    .map((d) => ({
+      key: d.key,
+      header: d.header,
+      sortable: true,
+      ...RENDER[d.key],
+      render: (r: LinhaCriativo) => {
+        const titulo = d.key === "saude" ? regraSaude : d.dica ? dica(d.dica) : undefined;
+        return titulo ? <span title={titulo}>{RENDER[d.key].render(r)}</span> : RENDER[d.key].render(r);
+      },
+    }));
+}
+
+/** As colunas secundárias, na linha expandida, mais as janelas da saúde. */
+function Detalhe({ r, defs }: { r: LinhaCriativo; defs: ColunaMidia[] }) {
+  const secundarias = defs.filter((d) => d.secundaria);
+  const j = r.saude.janelas;
+  return (
+    <div className="space-y-2 text-xs">
+      <dl className="flex flex-wrap gap-x-6 gap-y-1">
+        {secundarias.map((d) => (
+          <div key={d.key} className="flex items-baseline gap-1.5" title={d.dica ? dica(d.dica) : undefined}>
+            <dt className="text-muted-foreground">{d.header}</dt>
+            <dd className="tabular font-medium text-foreground">{RENDER[d.key].render(r)}</dd>
+          </div>
+        ))}
+      </dl>
+      <p className="text-muted-foreground">
+        <span className="font-medium text-foreground">Saúde:</span> {r.saude.reason}
+        {j ? (
+          <>
+            {" "}
+            · janelas {formatDateShort(j.recente.from)}–{formatDateShort(j.recente.to)} ({formatInt(j.recente.impressions)} impr., CTR {formatPercent(j.recente.ctr)}, freq.{" "}
+            {formatDecimal(j.recente.frequency, 1)}) vs {formatDateShort(j.anterior.from)}–{formatDateShort(j.anterior.to)} ({formatInt(j.anterior.impressions)} impr., CTR{" "}
+            {formatPercent(j.anterior.ctr)})
+          </>
+        ) : null}
+      </p>
+    </div>
+  );
+}
 
 export function CreativesTable({
-  rows,
-  cprEmQuarentena = false,
+  linhas,
+  bucket,
+  regraSaude,
 }: {
-  rows: CreativePerf[];
-  /** Com menos de 3 reuniões na campanha, o custo por reunião vira "—" na tabela toda. */
-  cprEmQuarentena?: boolean;
+  linhas: LinhaCriativo[];
+  bucket: ObjectiveBucket;
+  /** A regra da saúde em palavras (`textoRegraSaude`) — vai no ⓘ do cabeçalho. */
+  regraSaude: string;
 }) {
-  // Em quarentena, um criativo com 1 reunião não tem custo por reunião — tem sorte.
-  const cols = cprEmQuarentena
-    ? columns.map((c) => (c.key === "cpr" ? { ...c, sortable: false, render: () => "—" } : c))
-    : columns;
+  const defs = bucket === "conversao" ? COLUNAS_CRIATIVOS_CONVERSAO : COLUNAS_CRIATIVOS_DESCOBERTA;
   return (
     <DataTable
-      columns={cols}
-      rows={rows}
+      columns={colunas(defs, regraSaude)}
+      rows={linhas}
       initialSortKey="spend"
       initialSortDir="desc"
-      rowKey={(r) => r.adId}
+      rowKey={(r) => r.chave}
+      filhas={(r) => (r.nivel === "criativo" && (r.anunciosDetalhe?.length ?? 0) > 1 ? r.anunciosDetalhe : undefined)}
+      detalhe={(r) => <Detalhe r={r} defs={defs} />}
+      emptyTitle="Sem criativos no período"
+      emptyHint="Sincronize ou importe o relatório de anúncios em Configurações → Importar."
     />
   );
 }
