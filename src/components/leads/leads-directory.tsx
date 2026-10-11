@@ -1,68 +1,105 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Download, Mail, MessageCircle, RotateCcw, Search, Trash2 } from "lucide-react";
 import { DataTable, type Column } from "@/components/ui/data-table";
-import { LEAD_STATUSES, LEAD_STATUS_META, statusLabel } from "@/lib/lead-status";
-import { deleteLeadAction, restoreLeadAction } from "@/app/(dashboard)/leads/actions";
+import { Badge } from "@/components/ui/badge";
+import { useComPeriodo } from "@/components/layout/use-periodo";
 import { RegistrarStatus, StatusBadge } from "@/components/tables/lead-status";
+import {
+  deleteLeadAction,
+  registrarExportacaoAction,
+  restoreLeadAction,
+} from "@/app/(dashboard)/leads/actions";
+import { ETAPA_MAXIMA_LABEL, LEAD_STATUSES, LEAD_STATUS_META } from "@/lib/lead-status";
+import { DONO_LABEL, type Dono } from "@/lib/dono";
+import { FILA_ETAPAS } from "@/lib/fila";
+import { dica } from "@/lib/dicionario";
+import { formatDateTime, formatarEspera } from "@/lib/format";
+import { normalizarTelefone } from "@/lib/phone";
+import { rangeLabel } from "@/lib/range";
+import {
+  FILTRO_VAZIO,
+  SINALIZADOR_LABEL,
+  aplicarFiltroSemStatus,
+  contarPorStatus,
+  descreverFiltro,
+  montarCsvDeLeads,
+  profundidadeDaEtapa,
+  type AbaStatus,
+  type FiltroDeLeads,
+  type LinhaDeLead,
+  type SinalizadorChave,
+} from "@/lib/leads-vista";
 import type { LeadStatus } from "@/lib/types";
-import { formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-export interface LeadDirectoryRow {
-  id: string;
-  createdAt: string;
-  name: string;
-  email?: string;
-  phone?: string;
-  creativeName: string;
-  status: LeadStatus;
-  /** Já teve reunião marcada (`everBooked`). */
-  jaAgendou: boolean;
-  /** Tentativas de contato (decide a confirmação de "Sem resposta"). */
-  tentativas: number;
-  diasComTentativa: number;
-  /** Data DA reunião. Lead agendado antes de out/2026 não tem (a coluna diz isso). */
-  meetingFor?: string;
-}
+const DONOS = Object.keys(DONO_LABEL) as Dono[];
+const SINAIS = Object.keys(SINALIZADOR_LABEL) as SinalizadorChave[];
 
-/** Digits only, with Brazilian country code, for a wa.me link. */
-function waLink(phone: string): string {
-  let digits = phone.replace(/\D/g, "").replace(/^0+/, "");
-  if (digits.length >= 10 && digits.length <= 11) digits = `55${digits}`;
-  return `https://wa.me/${digits}`;
-}
+// ---------------------------------------------------------------- células
 
-function ContactCell({ row }: { row: LeadDirectoryRow }) {
+/**
+ * Telefone e e-mail sob o nome. Mascarado (papel Marketing) é só texto: um
+ * `wa.me` com "•••" no meio não leva a lugar nenhum.
+ */
+function Contato({ row, mascarado }: { row: LinhaDeLead; mascarado: boolean }) {
   if (!row.phone && !row.email) {
-    return <span className="text-muted-foreground">—</span>;
+    return <span className="text-xs text-muted-foreground">sem contato</span>;
+  }
+  if (mascarado) {
+    return (
+      <span className="text-xs text-muted-foreground" title="Contato mascarado para o papel Marketing (LGPD)">
+        {[row.phone, row.email].filter(Boolean).join(" · ")}
+      </span>
+    );
   }
   return (
-    <div className="flex flex-col gap-0.5">
+    <span className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
       {row.phone ? (
         <a
-          href={waLink(row.phone)}
+          href={`https://wa.me/${normalizarTelefone(row.phone)}`}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 hover:underline"
+          className="inline-flex items-center gap-1 hover:underline"
         >
-          <MessageCircle className="size-3.5 text-[var(--success-text)]" />
+          <MessageCircle className="size-3 text-[var(--success-text)]" />
           {row.phone}
         </a>
       ) : null}
       {row.email ? (
-        <a
-          href={`mailto:${row.email}`}
-          className="inline-flex items-center gap-1.5 text-muted-foreground hover:underline"
-        >
-          <Mail className="size-3.5" />
+        <a href={`mailto:${row.email}`} className="inline-flex items-center gap-1 text-muted-foreground hover:underline">
+          <Mail className="size-3" />
           {row.email}
         </a>
       ) : null}
-    </div>
+    </span>
+  );
+}
+
+/** Os sinalizadores da pessoa — quem revisa decide; aqui só se mostra. */
+function Sinais({ s }: { s: LinhaDeLead["sinalizadores"] }) {
+  if (!s.teste && !s.duplicado && !s.contatoInvalido) return null;
+  return (
+    <span className="flex flex-wrap gap-1">
+      {s.teste ? (
+        <Badge variant="outline" title={`Parece teste: ${s.teste}`}>
+          {SINALIZADOR_LABEL.teste}
+        </Badge>
+      ) : null}
+      {s.duplicado ? (
+        <Badge variant="outline" title={s.duplicadoDe ? `Mesma pessoa que “${s.duplicadoDe}”` : "Tem outro cadastro com o mesmo contato"}>
+          {s.duplicadoDe ? `Duplicado de ${s.duplicadoDe}` : "Tem duplicado"}
+        </Badge>
+      ) : null}
+      {s.contatoInvalido ? (
+        <Badge variant="outline" title="Telefone ou e-mail com formato inválido, ou já encerrado assim">
+          {SINALIZADOR_LABEL.contato_invalido}
+        </Badge>
+      ) : null}
+    </span>
   );
 }
 
@@ -75,7 +112,7 @@ function DeleteLeadButton({ id, name }: { id: string; name: string }) {
       <button
         type="button"
         aria-label={`Excluir ${name}`}
-        title="Excluir lead"
+        title="Excluir lead (reversível, com motivo)"
         disabled={pending}
         onClick={() => {
           const motivo = window.prompt(
@@ -107,7 +144,19 @@ function DeleteLeadButton({ id, name }: { id: string; name: string }) {
   );
 }
 
-function buildColumns(canEdit: boolean, canDelete: boolean): Column<LeadDirectoryRow>[] {
+const foraDoPrazoCls = "text-[11px] font-medium text-[var(--status-fora-text)]";
+
+/**
+ * As colunas do relatório (7.5): cabeçalho e linha saem do MESMO array (B5).
+ * O contato fica sob o nome — não é coluna, é como se chega à pessoa.
+ */
+function montarColunas(opts: {
+  canEdit: boolean;
+  canDelete: boolean;
+  mascarado: boolean;
+  comPeriodo: (href: string) => string;
+}): Column<LinhaDeLead>[] {
+  const { canEdit, canDelete, mascarado, comPeriodo } = opts;
   return [
     {
       key: "name",
@@ -115,14 +164,19 @@ function buildColumns(canEdit: boolean, canDelete: boolean): Column<LeadDirector
       sortable: true,
       sortValue: (r) => r.name,
       render: (r) => (
-        <Link href={`/leads/${encodeURIComponent(r.id)}`} className="font-medium hover:underline">
-          {r.name}
-        </Link>
+        <div className="flex flex-col gap-0.5">
+          <Link href={comPeriodo(`/leads/${encodeURIComponent(r.id)}`)} className="font-medium hover:underline">
+            {r.name}
+          </Link>
+          <Contato row={r} mascarado={mascarado} />
+          <Sinais s={r.sinalizadores} />
+        </div>
       ),
     },
     {
       key: "status",
       header: "Status",
+      headerTitle: "Onde o lead está AGORA. Muda; os fatos ficam nos marcos (etapa máxima).",
       sortable: true,
       sortValue: (r) => LEAD_STATUS_META[r.status].order,
       render: (r) =>
@@ -141,33 +195,108 @@ function buildColumns(canEdit: boolean, canDelete: boolean): Column<LeadDirector
         ),
     },
     {
-      key: "contact",
-      header: "Contato",
-      render: (r) => <ContactCell row={r} />,
-    },
-    {
-      key: "creativeName",
-      header: "Origem",
+      key: "etapaMaxima",
+      header: "Etapa máxima",
+      headerTitle: "Até onde chegou, pelos marcos gravados uma vez: quem agendou e se perdeu continua tendo agendado.",
       sortable: true,
-      sortValue: (r) => r.creativeName,
-      render: (r) => <span className="text-muted-foreground">{r.creativeName}</span>,
+      sortValue: (r) => profundidadeDaEtapa(r.etapaMaxima),
+      render: (r) => <span>{ETAPA_MAXIMA_LABEL[r.etapaMaxima]}</span>,
     },
     {
       key: "createdAt",
       header: "Entrada",
       sortable: true,
       sortValue: (r) => r.createdAt,
-      render: (r) => <span className="text-muted-foreground">{formatDateTime(r.createdAt)}</span>,
+      render: (r) => <span className="whitespace-nowrap text-muted-foreground">{formatDateTime(r.createdAt)}</span>,
+    },
+    {
+      key: "primeiroContato",
+      header: "Tempo até 1º contato",
+      headerTitle: `${dica("primeiro_contato_no_prazo")} Aqui: horas úteis (seg–sex, 9h–18h) entre a entrada e a 1ª tentativa.`,
+      align: "right",
+      sortable: true,
+      sortValue: (r) => r.horasAte1oContato ?? -1,
+      render: (r) =>
+        r.horasAte1oContato == null ? (
+          <span className="text-muted-foreground" title="Nenhuma tentativa registrada ainda">
+            —
+          </span>
+        ) : (
+          <span className="whitespace-nowrap">
+            {formatarEspera(r.horasAte1oContato)}
+            {r.primeiroContatoNoPrazo === false ? (
+              <span className={cn("ml-1", foraDoPrazoCls)} title={`A régua é ${FILA_ETAPAS.novo.slaHoras} hora útil`}>
+                fora do prazo
+              </span>
+            ) : null}
+          </span>
+        ),
+    },
+    {
+      key: "tentativas",
+      header: "Tentativas",
+      headerTitle: "Tentativas de contato registradas (as desfeitas não contam).",
+      align: "right",
+      sortable: true,
+      sortValue: (r) => r.tentativas,
+      render: (r) => (
+        <span
+          title={
+            r.ultimaTentativa
+              ? `Última ${formatDateTime(r.ultimaTentativa)}${r.falou ? " · já falou com a pessoa" : ""}${
+                  r.proximaTentativa ? ` · próxima ${formatDateTime(r.proximaTentativa)}` : ""
+                }`
+              : "Nenhuma tentativa registrada"
+          }
+        >
+          {r.tentativas}
+        </span>
+      ),
+    },
+    {
+      key: "proximaAcao",
+      header: "Próxima ação",
+      headerTitle: "A mesma régua da Fila de contato — clique para abrir a Fila nessa etapa.",
+      sortable: true,
+      sortValue: (r) => (r.proximaAcao === "—" ? 0 : r.acaoAtrasada ? 2 : 1),
+      render: (r) =>
+        r.etapaDaFila ? (
+          <Link
+            href={comPeriodo(`/fila?etapa=${r.etapaDaFila}`)}
+            title={r.acaoPorque}
+            className="whitespace-nowrap underline-offset-4 hover:underline"
+          >
+            {r.proximaAcao}
+            {r.acaoAtrasada ? <span className={cn("ml-1", foraDoPrazoCls)}>· atrasada</span> : null}
+          </Link>
+        ) : (
+          <span className="text-muted-foreground" title={r.acaoPorque}>
+            —
+          </span>
+        ),
+    },
+    {
+      key: "origem",
+      header: "Origem",
+      headerTitle: "Campanha › conjunto › anúncio, pela junção única lead → anúncio (id gravado na entrada, depois o utm_content).",
+      sortable: true,
+      sortValue: (r) => r.origem.trilha,
+      render: (r) => (
+        <span className="block max-w-[32ch] truncate text-muted-foreground" title={r.origem.trilha}>
+          {r.origem.trilha}
+        </span>
+      ),
     },
     {
       key: "meetingFor",
       header: "Reunião",
+      headerTitle: "Data da reunião marcada (o fato); o status diz o que aconteceu com ela.",
       align: "right",
       sortable: true,
       sortValue: (r) => r.meetingFor ?? "",
       render: (r) =>
         r.meetingFor ? (
-          formatDateTime(r.meetingFor)
+          <span className="whitespace-nowrap">{formatDateTime(r.meetingFor)}</span>
         ) : r.jaAgendou ? (
           <span className="text-muted-foreground" title="Agendado antes de a data da reunião ser registrada">
             data não registrada
@@ -176,121 +305,182 @@ function buildColumns(canEdit: boolean, canDelete: boolean): Column<LeadDirector
           "—"
         ),
     },
+    {
+      key: "dono",
+      header: "Dono",
+      headerTitle: "Quem age em seguida. Sem dono = lead encerrado.",
+      sortable: true,
+      sortValue: (r) => (r.dono ? DONO_LABEL[r.dono] : ""),
+      render: (r) =>
+        r.dono ? (
+          <span>{DONO_LABEL[r.dono]}</span>
+        ) : (
+          <span className="text-muted-foreground" title="Lead encerrado — ninguém age">
+            —
+          </span>
+        ),
+    },
     ...(canDelete
       ? [
           {
             key: "actions",
             header: "",
             align: "right" as const,
-            render: (r: LeadDirectoryRow) => <DeleteLeadButton id={r.id} name={r.name} />,
+            render: (r: LinhaDeLead) => <DeleteLeadButton id={r.id} name={r.name} />,
           },
         ]
       : []),
   ];
 }
 
-function csvCell(v: string): string {
-  return /[;"\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+// ---------------------------------------------------------------- filtro ⇄ URL
+
+const isStatus = (v: string | null): v is LeadStatus => Boolean(v) && (LEAD_STATUSES as string[]).includes(v!);
+const isDono = (v: string | null): v is Dono => Boolean(v) && (DONOS as string[]).includes(v!);
+
+/** O filtro que a URL carrega (o período já é `?range=`, lido pela página). */
+function filtroDaUrl(p: URLSearchParams): FiltroDeLeads {
+  const status = p.get("status");
+  const dono = p.get("dono");
+  const sinais = (p.get("sinal") ?? "")
+    .split(",")
+    .filter((s): s is SinalizadorChave => (SINAIS as string[]).includes(s));
+  return {
+    status: isStatus(status) ? status : "todos",
+    campanha: p.get("campanha") || undefined,
+    conjunto: p.get("conjunto") || undefined,
+    dono: isDono(dono) ? dono : undefined,
+    sinalizadores: sinais,
+    busca: "",
+  };
 }
 
 /**
- * Telefone como TEXTO para o Excel: sem isso ele abre 5511999990000 como número e
- * grava "5,51E+12" — foi assim que telefones viraram notação científica. O
- * importador de leads desfaz o `="…"`.
+ * Grava o filtro na URL sem ida ao servidor (`replaceState` — o Next sincroniza
+ * `useSearchParams`). O link fica compartilhável e o período (`range`) é
+ * preservado; a busca não vai: é digitação, e costuma ser PII.
  */
-function csvTelefone(v?: string): string {
-  return v ? `="${v.replace(/"/g, "")}"` : "";
+function urlComFiltro(f: FiltroDeLeads): string {
+  const url = new URL(window.location.href);
+  const p = url.searchParams;
+  const set = (k: string, v: string | undefined) => (v ? p.set(k, v) : p.delete(k));
+  set("status", f.status === "todos" ? undefined : f.status);
+  set("campanha", f.campanha);
+  set("conjunto", f.conjunto);
+  set("dono", f.dono);
+  set("sinal", f.sinalizadores.length ? f.sinalizadores.join(",") : undefined);
+  return url.pathname + (p.toString() ? `?${p.toString()}` : "") + url.hash;
 }
 
-function buildCsv(rows: LeadDirectoryRow[]): string {
-  const header = ["Nome", "E-mail", "Telefone", "Status", "Origem", "Entrada", "Reunião"];
-  const lines = rows.map((r) =>
-    [
-      csvCell(r.name),
-      csvCell(r.email ?? ""),
-      csvTelefone(r.phone),
-      csvCell(statusLabel(r.status)),
-      csvCell(r.creativeName),
-      csvCell(formatDateTime(r.createdAt)),
-      csvCell(r.meetingFor ? formatDateTime(r.meetingFor) : ""),
-    ].join(";"),
-  );
-  // BOM + CRLF so Excel pt-BR opens accents and columns correctly
-  return "﻿" + [header.join(";"), ...lines].join("\r\n");
-}
+const selectCls =
+  "h-8 rounded-md border bg-background px-2 text-xs text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none";
 
-/**
- * "perdidos" agrupa os quatro motivos num filtro só — quem procura um lead
- * perdido raramente lembra por qual motivo ele saiu. Os motivos individuais
- * continuam disponíveis logo depois.
- */
-type StatusFilter = LeadStatus | "todos" | "perdidos";
-
-const FILTERS: { key: StatusFilter; label: string }[] = [
-  { key: "todos", label: "Todos" },
-  ...LEAD_STATUSES.filter((s) => !LEAD_STATUS_META[s].lost).map((s) => ({
-    key: s as StatusFilter,
-    label: LEAD_STATUS_META[s].label,
-  })),
-  { key: "perdidos", label: "Perdidos" },
-  ...LEAD_STATUSES.filter((s) => LEAD_STATUS_META[s].lost).map((s) => ({
-    key: s as StatusFilter,
-    label: LEAD_STATUS_META[s].label,
-  })),
-];
+// ---------------------------------------------------------------- a tabela
 
 export function LeadsDirectory({
   rows,
+  rangeKey,
   canEdit = false,
   canDelete = false,
+  canExport = false,
+  mascararContato = false,
 }: {
-  rows: LeadDirectoryRow[];
+  rows: LinhaDeLead[];
+  /** O `?range=` da página, para o registro da exportação dizer o período. */
+  rangeKey: string;
   /** Mudar status (leads:write — comercial e administrador). */
   canEdit?: boolean;
   /** Excluir é só do administrador (e reversível — ver `DeletedLeads`). */
   canDelete?: boolean;
+  /** Exportar CSV (leads:write) — o servidor confere de novo e registra. */
+  canExport?: boolean;
+  /** Papel Marketing: telefone e e-mail já chegam mascarados; sem links. */
+  mascararContato?: boolean;
 }) {
-  const [query, setQuery] = useState("");
-  const [status, setStatus] = useState<StatusFilter>("todos");
+  const params = useSearchParams();
+  const comPeriodo = useComPeriodo();
+  const [filtro, setFiltro] = useState<FiltroDeLeads>(() => filtroDaUrl(new URLSearchParams(params.toString())));
+  const [exportando, startExport] = useTransition();
+  const [msgExport, setMsgExport] = useState<string | null>(null);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const qDigits = q.replace(/\D/g, "");
-    return rows.filter((r) => {
-      if (status === "perdidos") {
-        if (!LEAD_STATUS_META[r.status].lost) return false;
-      } else if (status !== "todos" && r.status !== status) {
-        return false;
-      }
-      if (!q) return true;
-      const inText =
-        r.name.toLowerCase().includes(q) ||
-        (r.email ?? "").toLowerCase().includes(q);
-      const inPhone = qDigits.length > 0 && (r.phone ?? "").replace(/\D/g, "").includes(qDigits);
-      return inText || inPhone;
-    });
-  }, [rows, query, status]);
-
-  // Quantos leads em cada aba — as contagens somam o total (exceto "Perdidos",
-  // que agrupa os quatro motivos).
-  const contagem = useMemo(() => {
-    const c: Record<string, number> = { todos: rows.length, perdidos: 0 };
-    for (const r of rows) {
-      c[r.status] = (c[r.status] ?? 0) + 1;
-      if (LEAD_STATUS_META[r.status].lost) c.perdidos++;
+  // Filtro → URL (sem servidor). Só os campos que valem a pena compartilhar.
+  const { status, campanha, conjunto, dono, sinalizadores } = filtro;
+  useEffect(() => {
+    const alvo = urlComFiltro({ status, campanha, conjunto, dono, sinalizadores, busca: "" });
+    if (alvo !== window.location.pathname + window.location.search + window.location.hash) {
+      // `null`, não o estado atual: é assim que o Next copia os internos dele e
+      // sincroniza `useSearchParams` sem ir ao servidor.
+      window.history.replaceState(null, "", alvo);
     }
-    return c;
-  }, [rows]);
+  }, [status, campanha, conjunto, dono, sinalizadores]);
 
-  function exportCsv() {
-    const blob = new Blob([buildCsv(filtered)], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "leads.csv";
-    a.click();
-    URL.revokeObjectURL(url);
+  const mudar = (patch: Partial<FiltroDeLeads>) => setFiltro((f) => ({ ...f, ...patch }));
+
+  // Opções dos filtros saem das linhas: só se oferece o que existe.
+  const campanhas = useMemo(
+    () => [...new Set(rows.map((r) => r.origem.campanha).filter((c): c is string => Boolean(c)))].sort(),
+    [rows],
+  );
+  const conjuntos = useMemo(
+    () =>
+      [
+        ...new Set(
+          rows
+            .filter((r) => !filtro.campanha || r.origem.campanha === filtro.campanha)
+            .map((r) => r.origem.conjunto)
+            .filter((c): c is string => Boolean(c)),
+        ),
+      ].sort(),
+    [rows, filtro.campanha],
+  );
+  const donos = useMemo(() => DONOS.filter((d) => rows.some((r) => r.dono === d)), [rows]);
+
+  // As abas contam sobre TUDO menos o status — assim somam o "Todos" visível.
+  const semStatus = useMemo(() => aplicarFiltroSemStatus(rows, filtro), [rows, filtro]);
+  const contagem = useMemo(() => contarPorStatus(semStatus), [semStatus]);
+  const filtradas = useMemo(
+    () => (filtro.status === "todos" ? semStatus : semStatus.filter((r) => r.status === filtro.status)),
+    [semStatus, filtro.status],
+  );
+
+  const colunas = useMemo(
+    () => montarColunas({ canEdit, canDelete, mascarado: mascararContato, comPeriodo }),
+    [canEdit, canDelete, mascararContato, comPeriodo],
+  );
+
+  const temFiltro =
+    filtro.status !== "todos" ||
+    Boolean(filtro.campanha || filtro.conjunto || filtro.dono) ||
+    filtro.sinalizadores.length > 0 ||
+    filtro.busca.trim().length > 0;
+
+  function exportar() {
+    setMsgExport(null);
+    const linhas = filtradas;
+    const descricao = descreverFiltro(filtro, rangeLabel(rangeKey));
+    startExport(async () => {
+      // Registra ANTES de montar o arquivo: sem registro, sem CSV.
+      const r = await registrarExportacaoAction(descricao, linhas.length);
+      if (!r.ok) {
+        setMsgExport(r.message);
+        return;
+      }
+      const blob = new Blob([montarCsvDeLeads(linhas)], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "leads.csv";
+      a.click();
+      URL.revokeObjectURL(url);
+      setMsgExport(r.message);
+    });
   }
+
+  const abas: { key: AbaStatus; label: string }[] = [
+    { key: "todos", label: "Todos" },
+    ...LEAD_STATUSES.map((s) => ({ key: s as AbaStatus, label: LEAD_STATUS_META[s].label })),
+  ];
+  const primeiraPerda = LEAD_STATUSES.find((s) => LEAD_STATUS_META[s].lost);
 
   return (
     <div className="space-y-4">
@@ -298,60 +488,147 @@ export function LeadsDirectory({
         <div className="relative w-full sm:max-w-xs">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            value={filtro.busca}
+            onChange={(e) => mudar({ busca: e.target.value })}
             placeholder="Buscar por nome, e-mail ou telefone"
             className="h-9 w-full rounded-lg border bg-background pl-8 pr-3 text-sm outline-none focus:ring-2 focus:ring-ring/40"
           />
         </div>
-        <button
-          type="button"
-          onClick={exportCsv}
-          className="inline-flex h-9 shrink-0 items-center gap-2 rounded-lg border px-3 text-sm font-medium text-muted-foreground hover:text-foreground"
-        >
-          <Download className="size-4" />
-          Exportar CSV ({filtered.length})
-        </button>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-1">
-        {FILTERS.map((f) => (
-          <span key={f.key} className="contents">
-            {/* separa visualmente o funil ativo dos motivos de perda */}
-            {f.key === "perdidos" ? <span aria-hidden className="mx-1 h-4 w-px bg-border" /> : null}
+        {canExport ? (
+          <div className="flex flex-col items-end gap-0.5">
             <button
               type="button"
-              onClick={() => setStatus(f.key)}
-              title={f.key !== "todos" && f.key !== "perdidos" ? LEAD_STATUS_META[f.key].hint : undefined}
-              className={cn(
-                "rounded-lg px-3 py-1 text-xs font-medium transition-colors",
-                status === f.key
-                  ? "bg-primary text-primary-foreground"
-                  : "border text-muted-foreground hover:text-foreground",
-              )}
+              onClick={exportar}
+              disabled={exportando || filtradas.length === 0}
+              title="Exporta só o que o filtro mostra; a exportação fica registrada com quem exportou e o filtro"
+              className="inline-flex h-9 shrink-0 items-center gap-2 rounded-lg border px-3 text-sm font-medium text-muted-foreground hover:text-foreground disabled:opacity-50"
             >
-              {f.label} <span className="tabular-nums opacity-70">({contagem[f.key] ?? 0})</span>
+              <Download className="size-4" />
+              Exportar CSV ({filtradas.length})
             </button>
-          </span>
-        ))}
+            {msgExport ? <span className="text-[11px] text-muted-foreground">{msgExport}</span> : null}
+          </div>
+        ) : null}
       </div>
 
-      {filtered.length === 0 ? (
-        <p className="rounded-lg border border-dashed py-10 text-center text-sm text-muted-foreground">
-          Nenhum lead encontrado.
-        </p>
-      ) : (
-        <DataTable
-          columns={buildColumns(canEdit, canDelete)}
-          rows={filtered}
-          initialSortKey="createdAt"
-          initialSortDir="desc"
-          rowKey={(r) => r.id}
-        />
-      )}
+      {/* Abas por status, com contagem: as de status somam o "Todos". */}
+      <div className="flex flex-wrap items-center gap-1" role="tablist" aria-label="Status">
+        {abas.map((a) => {
+          const ativa = filtro.status === a.key;
+          const meta = a.key === "todos" ? null : LEAD_STATUS_META[a.key];
+          return (
+            <span key={a.key} className="contents">
+              {/* separa visualmente o caminho feliz dos motivos de perda */}
+              {a.key === primeiraPerda ? <span aria-hidden className="mx-1 h-4 w-px bg-border" /> : null}
+              <button
+                type="button"
+                role="tab"
+                aria-selected={ativa}
+                onClick={() => mudar({ status: a.key })}
+                title={meta?.hint}
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-xs font-medium transition-colors",
+                  ativa ? "border-primary bg-primary/10 text-foreground" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {meta ? <Badge variant={meta.variant}>{a.label}</Badge> : a.label}
+                <span className="tabular-nums opacity-70">({contagem[a.key] ?? 0})</span>
+              </button>
+            </span>
+          );
+        })}
+      </div>
+
+      {/* Origem, dono e sinalizadores — refletidos na URL (link compartilhável). */}
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          aria-label="Campanha"
+          value={filtro.campanha ?? ""}
+          onChange={(e) => mudar({ campanha: e.target.value || undefined, conjunto: undefined })}
+          className={selectCls}
+        >
+          <option value="">Toda campanha</option>
+          {campanhas.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="Conjunto"
+          value={filtro.conjunto ?? ""}
+          onChange={(e) => mudar({ conjunto: e.target.value || undefined })}
+          className={selectCls}
+        >
+          <option value="">Todo conjunto</option>
+          {conjuntos.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="Dono"
+          value={filtro.dono ?? ""}
+          onChange={(e) => mudar({ dono: isDono(e.target.value) ? e.target.value : undefined })}
+          className={selectCls}
+        >
+          <option value="">Todo dono</option>
+          {donos.map((d) => (
+            <option key={d} value={d}>
+              {DONO_LABEL[d]}
+            </option>
+          ))}
+        </select>
+        <span aria-hidden className="mx-1 h-4 w-px bg-border" />
+        {SINAIS.map((s) => {
+          const marcado = filtro.sinalizadores.includes(s);
+          return (
+            <button
+              key={s}
+              type="button"
+              aria-pressed={marcado}
+              onClick={() =>
+                mudar({
+                  sinalizadores: marcado
+                    ? filtro.sinalizadores.filter((x) => x !== s)
+                    : [...filtro.sinalizadores, s],
+                })
+              }
+              className={cn(
+                "rounded-full border px-2.5 py-1 text-xs",
+                marcado ? "border-primary text-primary" : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {SINALIZADOR_LABEL[s]}
+            </button>
+          );
+        })}
+        {temFiltro ? (
+          <button
+            type="button"
+            onClick={() => setFiltro(FILTRO_VAZIO)}
+            className="text-xs text-muted-foreground underline-offset-4 hover:underline"
+          >
+            Limpar filtros
+          </button>
+        ) : null}
+      </div>
+
+      <DataTable
+        columns={colunas}
+        rows={filtradas}
+        initialSortKey="createdAt"
+        initialSortDir="desc"
+        rowKey={(r) => r.id}
+        emptyTitle={rows.length === 0 ? "Nenhum lead no período" : "Nenhum lead com esses filtros"}
+        emptyHint={rows.length === 0 ? "Troque o período no cabeçalho." : "Limpe um filtro ou troque a aba."}
+      />
     </div>
   );
 }
+
+// ---------------------------------------------------------------- excluídos
 
 export interface DeletedLeadRow {
   id: string;

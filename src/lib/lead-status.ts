@@ -175,6 +175,49 @@ export function isLead(l: Lead): boolean {
   return l.status === "lead";
 }
 
+// ---------------------------------------------------------------- etapa máxima
+
+/**
+ * Até onde o lead CHEGOU no caminho feliz, na ordem em que acontece. É função
+ * PURA dos marcos e do status (ADR-01), nunca um campo gravado: um `max_stage`
+ * seria uma segunda fonte da verdade que um dia discordaria dos marcos.
+ */
+export type EtapaMaxima = "lead" | "em_contato" | "agendado" | "reuniao_realizada" | "cliente";
+
+/** Da entrada ao fechamento — a posição no array é a profundidade. */
+export const ETAPAS_MAXIMAS: EtapaMaxima[] = ["lead", "em_contato", "agendado", "reuniao_realizada", "cliente"];
+
+/**
+ * Rótulo como FATO ("Agendou"), de propósito diferente do status ("Agendado"),
+ * que é estado: quem agendou e depois se perdeu continua tendo agendado.
+ */
+export const ETAPA_MAXIMA_LABEL: Record<EtapaMaxima, string> = {
+  lead: "Entrou",
+  em_contato: "Contato feito",
+  agendado: "Agendou",
+  reuniao_realizada: "Compareceu",
+  cliente: "Fechou",
+};
+
+/**
+ * A etapa máxima lê primeiro os marcos (gravados uma vez) e cai no status só
+ * para as linhas anteriores à migração 0012. Perda por DECISÃO (não quis,
+ * desistiu) implica conversa: conta como contato feito mesmo sem tentativa
+ * registrada (legado de antes da Fase 2); perda por QUALIDADE (contato
+ * inválido, sem resposta) não prova nada além da entrada.
+ */
+export function etapaMaxima(
+  l: Pick<Lead, "status" | "firstContactAt" | "bookedAt" | "attendedAt" | "closedAt">,
+): EtapaMaxima {
+  if (l.closedAt || l.status === "cliente") return "cliente";
+  if (l.attendedAt || l.status === "reuniao_realizada") return "reuniao_realizada";
+  if (l.bookedAt || isBookedStatus(l.status)) return "agendado";
+  if (l.firstContactAt || l.status === "em_contato" || LEAD_STATUS_META[l.status].lossKind === "decisao") {
+    return "em_contato";
+  }
+  return "lead";
+}
+
 // ---------------------------------------------------------------- transições
 
 /**
