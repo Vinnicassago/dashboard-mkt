@@ -1,7 +1,7 @@
 import Papa from "papaparse";
 import type { Lead, LeadStatus } from "./types";
 import { DEFAULT_BRAND } from "./types";
-import { normalizeLeadStatus } from "./lead-status";
+import { normalizeLeadStatus, statusLabel } from "./lead-status";
 import { idLeadLp } from "./lead-id";
 
 /**
@@ -206,3 +206,117 @@ export const LEADS_CSV_TEMPLATE = [
   "2026-07-28T00:02:32-03:00,lead_4d50c064-7d47-4c25,agendado,Beatriz,72727383838,beatriz@gmail.com,ig,,link_in_bio,,",
   "2026-07-28T09:15:07-03:00,lead_8b31af02-1c99-40aa,não atende,Rogério,11988887777,rogerio@gmail.com,metaads,CP - Leads - Brunno quevedo,video brunno 2 diagnostico|12025253786,,",
 ].join("\n");
+
+// ---------------------------------------------------------------- prévia (Fase 6.6)
+
+export type CampoDoCsv = Field;
+
+export interface LinhaDaPrevia {
+  /** Número da linha na planilha (1 é o cabeçalho). */
+  linha: number;
+  nome: string;
+  criadoEm: string;
+  /** Telefone como TEXTO — nunca convertido em número. */
+  telefone?: string;
+  email?: string;
+  status: LeadStatus;
+  /** Como veio escrito, quando não foi reconhecido (entra como "Novo"). */
+  statusOriginal?: string;
+  /** Impedem a linha: ela é ignorada na importação. */
+  erros: string[];
+  /** A linha entra, mas algo ficou em branco ou foi interpretado. */
+  avisos: string[];
+}
+
+export interface PreviaLeads {
+  /** Colunas obrigatórias que não foram encontradas — com alguma aqui nada é importado. */
+  faltam: string[];
+  /** Coluna da planilha reconhecida para cada campo. */
+  colunas: Partial<Record<CampoDoCsv, string>>;
+  linhas: LinhaDaPrevia[];
+  /** Leads que entrariam (linhas sem erro, sem contar as repetidas). */
+  validas: number;
+  comErro: number;
+  comAviso: number;
+  /** Linhas com o mesmo event_id de uma anterior: só a última vale. */
+  repetidas: number;
+}
+
+/** O texto da coluna Status é um status que o importador reconhece? */
+function statusReconhecido(raw: string): boolean {
+  const k = norm(raw);
+  if (k in STATUS_ALIASES) return true;
+  if (normalizeLeadStatus(k) !== "lead") return true;
+  // "lead" e "Novo" também são reconhecidos — só que viram o mesmo "lead".
+  return k === "lead" || k === norm(statusLabel("lead"));
+}
+
+/**
+ * Validação e prévia ANTES de importar (relatório §7.7, item 5): a mesma
+ * leitura de `parseLeadsCsv`, linha a linha, dizendo o que entra, o que é
+ * ignorado e por quê. Pura — roda no navegador para retorno imediato; o
+ * servidor refaz a leitura na importação de verdade. Nunca lança: sem as
+ * colunas obrigatórias devolve `faltam`.
+ */
+export function previaLeadsCsv(text: string): PreviaLeads {
+  const parsed = Papa.parse<Record<string, string>>(text.replace(/^﻿/, ""), {
+    header: true,
+    skipEmptyLines: true,
+  });
+  const map = buildHeaderMap(parsed.meta.fields ?? []);
+  const faltam: string[] = [];
+  if (!map.name) faltam.push("nome");
+  if (!map.createdAt) faltam.push("created_at (data)");
+  if (faltam.length > 0) {
+    return { faltam, colunas: map, linhas: [], validas: 0, comErro: 0, comAviso: 0, repetidas: 0 };
+  }
+
+  const pick = (r: Record<string, string>, f: Field) => (map[f] ? r[map[f]!]?.trim() || undefined : undefined);
+  const idsVistos = new Set<string>();
+  let repetidas = 0;
+  const linhas = parsed.data.map((r, i): LinhaDaPrevia => {
+    const erros: string[] = [];
+    const avisos: string[] = [];
+    const nome = pick(r, "name") ?? "";
+    const criadoEm = pick(r, "createdAt") ?? "";
+    if (!nome) erros.push("Nome em branco.");
+    if (!criadoEm) erros.push("Data em branco.");
+    else if (!/^\d{4}-\d{2}-\d{2}/.test(criadoEm)) erros.push(`Data “${criadoEm}” fora do formato AAAA-MM-DD.`);
+
+    const telefoneRaw = pick(r, "phone");
+    const telefone = lerTelefone(telefoneRaw);
+    if (telefone.ilegivel) {
+      avisos.push(`Telefone “${telefoneRaw}” em notação científica: o Excel cortou os dígitos — fica em branco.`);
+    }
+    const email = pick(r, "email");
+    if (email && !email.includes("@")) avisos.push(`E-mail “${email}” sem @.`);
+    if (!telefone.valor && !email) avisos.push("Sem telefone nem e-mail: não dá para contatar nem reconhecer um reenvio.");
+
+    const statusRaw = pick(r, "status");
+    const status = toStatus(statusRaw);
+    const statusOriginal = statusRaw && !statusReconhecido(statusRaw) ? statusRaw : undefined;
+    if (statusOriginal) avisos.push(`Status “${statusOriginal}” não reconhecido: entra como “Novo”.`);
+
+    const eventId = pick(r, "eventId") ?? "";
+    if (erros.length === 0) {
+      const id = leadIdFrom(eventId, `${criadoEm.slice(0, 10).replace(/-/g, "")}-${i}`);
+      if (idsVistos.has(id)) {
+        repetidas++;
+        avisos.push("Mesmo event_id de uma linha anterior: só esta (a última) vale.");
+      }
+      idsVistos.add(id);
+    }
+
+    return { linha: i + 2, nome, criadoEm, telefone: telefone.valor, email, status, statusOriginal, erros, avisos };
+  });
+
+  return {
+    faltam,
+    colunas: map,
+    linhas,
+    validas: idsVistos.size,
+    comErro: linhas.filter((l) => l.erros.length > 0).length,
+    comAviso: linhas.filter((l) => l.erros.length === 0 && l.avisos.length > 0).length,
+    repetidas,
+  };
+}

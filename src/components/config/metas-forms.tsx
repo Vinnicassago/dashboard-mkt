@@ -2,11 +2,85 @@
 
 import { useActionState, useMemo, useState } from "react";
 import { salvarMetaManualAction, salvarMetasDaCalculadoraAction } from "@/app/(dashboard)/configuracoes/metas-actions";
-import { Field, Message, SubmitButton, inputCls } from "./config-forms";
+import { setBudgetAction, setGoalsAction } from "@/app/(dashboard)/configuracoes/actions";
+import { Field, Message, SubmitButton, inputCls } from "./form-primitives";
 import { META_DEF, METRICAS_COM_META, calcularMetas, errosDaCalculadora, formatarAlvo } from "@/lib/metas";
 import type { EntradasCalculadora, MetricaComMeta } from "@/lib/types";
 import { formatPercent } from "@/lib/format";
 import { cn } from "@/lib/utils";
+
+// ---- orçamento da campanha ---------------------------------------------
+
+export function BudgetForm({
+  current,
+}: {
+  current: { budgetTotal?: number; dailyBudget?: number; endDate?: string };
+}) {
+  const [state, action] = useActionState(setBudgetAction, null);
+  return (
+    <form action={action} className="space-y-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <Field label="Orçamento total (R$)">
+          <input
+            type="number"
+            name="budgetTotal"
+            min="0"
+            step="any"
+            required
+            defaultValue={current.budgetTotal ?? ""}
+            className={inputCls}
+          />
+        </Field>
+        <Field label="Budget diário (R$, opcional)">
+          <input type="number" name="dailyBudget" min="0" step="any" defaultValue={current.dailyBudget ?? ""} className={inputCls} />
+        </Field>
+        <Field label="Fim da campanha (opcional)">
+          <input type="date" name="endDate" defaultValue={current.endDate ?? ""} className={inputCls} />
+        </Field>
+      </div>
+      <SubmitButton>Salvar orçamento</SubmitButton>
+      <Message state={state} />
+    </form>
+  );
+}
+
+// ---- metas de conteúdo (seguidores, plano de 90 dias) ---------------------
+
+export function GoalsForm({ current }: { current: Partial<Record<string, number>> }) {
+  const [state, action] = useActionState(setGoalsAction, null);
+  // As metas do funil (leads, reuniões, CPL, custo por reunião…) moraram aqui
+  // até a Fase 4; agora têm vigência e calculadora — card "Metas", abaixo.
+  const fields: { metric: string; label: string }[] = [
+    { metric: "followers", label: "Seguidores (meta)" },
+    { metric: "retencao_reels", label: "Retenção de reels (%)" },
+    { metric: "alcance_base", label: "Alcance sobre a base (%)" },
+    { metric: "saves_1k", label: "Salvos por 1k views" },
+    { metric: "comentarios_post", label: "Comentários por post" },
+    { metric: "compartilhamentos_post", label: "Compartilhamentos por post" },
+    { metric: "posts_semana", label: "Posts por semana" },
+    { metric: "conversas_dm", label: "Conversas de DM (período)" },
+  ];
+  return (
+    <form action={action} className="space-y-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        {fields.map((f) => (
+          <Field key={f.metric} label={f.label}>
+            <input
+              type="number"
+              name={`target_${f.metric}`}
+              min="0"
+              step="any"
+              defaultValue={current[f.metric] ?? ""}
+              className={inputCls}
+            />
+          </Field>
+        ))}
+      </div>
+      <SubmitButton>Salvar metas</SubmitButton>
+      <Message state={state} />
+    </form>
+  );
+}
 
 /** O que a página já sabe para sugerir (taxas observadas, últimas entradas). */
 export interface SugestaoCalculadora {
