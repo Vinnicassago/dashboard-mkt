@@ -106,7 +106,7 @@ export function buildBriefing(
     : undefined;
   const organicIds = new Set(organicos.map((p) => p.id));
   const organicRaw = data.igPosts.filter((p) => organicIds.has(p.id));
-  const cadencia = postingCadence(data.igPosts, range, opts.nowIso);
+  const cadencia = postingCadence(data.igPosts, range, opts.nowIso, data.creatives);
 
   const melhores = [...organicos]
     .sort((a, b) => b.engagementRate - a.engagementRate)

@@ -2,6 +2,7 @@ import "server-only";
 import { GRAPH_IG } from "./config";
 import { graphUrl, metaGet, MetaApiError } from "./http";
 import { getData, upsertIgAccountDaily, upsertIgPosts } from "../data/store";
+import { reconstruirSeguidores } from "../conteudo";
 import type { IgAccountDaily, IgMediaType, IgPost } from "../types";
 
 /**
@@ -207,53 +208,9 @@ export async function syncInstagram({
   const today = new Date().toISOString().slice(0, 10);
   const dates = lastNDays(days);
 
-  // ---- follower history ----------------------------------------------
-  // /me only gives the follower count for "now". To fill the past days we try
-  // the `follower_count` insight (daily new followers; needs 100+ followers)
-  // and rebuild the cumulative total backwards from today. If it is
-  // unavailable (new/small account) we fall back to the snapshots already
-  // stored, carrying the nearest known value across gaps — never a stray 0,
-  // which is what made the old chart drop to zero on backfilled days.
-  const followerByDate = new Map<string, number>();
-  const gainByDate = new Map<string, number>();
-  try {
-    const fc = await metaGet<InsightsResponse>(
-      graphUrl(GRAPH_IG, `/${userId}/insights`, {
-        metric: "follower_count",
-        period: "day",
-        since: dayBounds(dates[0]).since,
-        until: dayBounds(dates[dates.length - 1]).until,
-        access_token: token,
-      }),
-    );
-    const entry = fc.data?.find((d) => d.name === "follower_count");
-    for (const v of entry?.values ?? []) {
-      if (v.end_time && typeof v.value === "number") {
-        gainByDate.set(v.end_time.slice(0, 10), v.value);
-      }
-    }
-  } catch {
-    // follower_count unavailable — snapshot fallback below.
-  }
-
-  if (gainByDate.size > 0) {
-    let running = followersNow;
-    for (let i = dates.length - 1; i >= 0; i--) {
-      followerByDate.set(dates[i], running);
-      running -= gainByDate.get(dates[i]) ?? 0;
-    }
-  } else {
-    const known = dates.map((d) =>
-      d === today ? followersNow : existing.get(d)?.followers ?? 0,
-    );
-    let carry = known.find((v) => v > 0) ?? followersNow;
-    for (let i = 0; i < dates.length; i++) {
-      if (known[i] > 0) carry = known[i];
-      followerByDate.set(dates[i], carry);
-    }
-  }
-
   // ---- daily account metrics: one request per day (total_value only) ----
+  // O total de seguidores por dia é preenchido DEPOIS do loop (S14): ele sai
+  // dos ganhos e perdas de cada dia, que só se conhecem ao fim das leituras.
   const rows: IgAccountDaily[] = [];
 
   for (const date of dates) {
@@ -329,7 +286,7 @@ export async function syncInstagram({
     rows.push({
       brand,
       date,
-      followers: followerByDate.get(date) ?? followersNow,
+      followers: 0, // preenchido abaixo, com a série reconstruída
       reach: res ? readMetric(res.data, "reach") : (prev?.reach ?? 0),
       views: res ? readMetric(res.data, "views") : (prev?.views ?? 0),
       accountsEngaged: res ? readMetric(res.data, "accounts_engaged") : (prev?.accountsEngaged ?? 0),
@@ -356,6 +313,32 @@ export async function syncInstagram({
         : prev?.linkTapsWhatsApp,
     });
   }
+
+  // ---- follower history (S14) ------------------------------------------
+  // /me só dá o total de seguidores de AGORA. O histórico é reconstruído para
+  // trás com o LÍQUIDO de `follows_and_unfollows` (ganhos − perdas; a Meta só o
+  // fornece com 100+ seguidores) e só até onde os dois lados existem; daí para
+  // trás vale o snapshot já gravado, carregando o valor conhecido mais próximo
+  // — nunca um 0 perdido, que era o que derrubava o gráfico a zero.
+  // `follower_count` saiu da rodada: a Meta devolve ali quem COMEÇOU a seguir
+  // no dia (bruto), e subtraí-lo como se fosse variação líquida inflava o
+  // passado em exatamente as perdas de cada dia (B10).
+  const ganhosPorDia = new Map<string, number>();
+  const perdasPorDia = new Map<string, number>();
+  for (const r of rows) {
+    if (r.followsDay != null) ganhosPorDia.set(r.date, r.followsDay);
+    if (r.unfollowsDay != null) perdasPorDia.set(r.date, r.unfollowsDay);
+  }
+  const seguidoresPorDia = reconstruirSeguidores({
+    dias: dates,
+    seguidoresAgora: followersNow,
+    ganhosPorDia,
+    perdasPorDia,
+    snapshots: new Map(
+      dates.map((d) => [d, d === today ? followersNow : (existing.get(d)?.followers ?? 0)]),
+    ),
+  });
+  for (const r of rows) r.followers = seguidoresPorDia.get(r.date) ?? followersNow;
 
   await upsertIgAccountDaily(rows);
 

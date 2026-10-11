@@ -92,9 +92,10 @@ function buildOrganicContentRecommendations(
   const agg = aggregatePostPerformance(posts);
 
   // 1. Sem publicar há dias (alta com 5+): a base só esquenta com cadência.
-  const cadence = postingCadence(data.igPosts, undefined, nowIso);
+  // Mesma grade dos agregados: sem testes nem impulsionados (Fase 6.5).
+  const cadence = postingCadence(data.igPosts, undefined, nowIso, data.creatives);
   // Canibalização é lida DENTRO do período selecionado (alerta 6).
-  const cadenceInRange = range ? postingCadence(data.igPosts, range, nowIso) : cadence;
+  const cadenceInRange = range ? postingCadence(data.igPosts, range, nowIso, data.creatives) : cadence;
   if (cadence.daysSinceLast >= 3) {
     recs.push({
       id: "no-recent-post",
