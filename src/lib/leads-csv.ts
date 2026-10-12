@@ -215,7 +215,10 @@ export const LEADS_CSV_TEMPLATE = [
 export type CampoDoCsv = Field;
 
 export interface LinhaDaPrevia {
-  /** Número da linha na planilha (1 é o cabeçalho). */
+  /**
+   * Número da linha FÍSICA na planilha (1 é o cabeçalho). Linha em branco conta
+   * no número, mas não aparece — "Linha 7" é a linha 7 do arquivo.
+   */
   linha: number;
   nome: string;
   criadoEm: string;
@@ -255,6 +258,16 @@ function statusReconhecido(raw: string): boolean {
 }
 
 /**
+ * A régua do `skipEmptyLines: true` do Papa, que `parseLeadsCsv` usa: a linha
+ * era só a quebra (um campo, vazio). ",,," NÃO é vazia — aparece na prévia com
+ * "Nome em branco" e o importador a conta como ignorada, igual.
+ */
+function linhaVazia(r: Record<string, string>): boolean {
+  const valores = Object.values(r);
+  return valores.length === 1 && valores[0] === "";
+}
+
+/**
  * Validação e prévia ANTES de importar (relatório §7.7, item 5): a mesma
  * leitura de `parseLeadsCsv`, linha a linha, dizendo o que entra, o que é
  * ignorado e por quê. Pura — roda no navegador para retorno imediato; o
@@ -264,7 +277,11 @@ function statusReconhecido(raw: string): boolean {
 export function previaLeadsCsv(text: string): PreviaLeads {
   const parsed = Papa.parse<Record<string, string>>(text.replace(/^﻿/, ""), {
     header: true,
-    skipEmptyLines: true,
+    // SEM pular as vazias: o índice de cada registro é a linha física do arquivo,
+    // e a coluna "Linha" da prévia é onde a pessoa vai procurar o erro. Pulá-las
+    // aqui fazia a prévia dizer "Linha 6" para a linha 7 de uma planilha com um
+    // registro apagado no Excel. As vazias saem abaixo, pela régua do importador.
+    skipEmptyLines: false,
   });
   const map = buildHeaderMap(parsed.meta.fields ?? []);
   const faltam: string[] = [];
@@ -277,7 +294,13 @@ export function previaLeadsCsv(text: string): PreviaLeads {
   const pick = (r: Record<string, string>, f: Field) => (map[f] ? r[map[f]!]?.trim() || undefined : undefined);
   const idsVistos = new Set<string>();
   let repetidas = 0;
-  const linhas = parsed.data.map((r, i): LinhaDaPrevia => {
+  // Posição entre as linhas NÃO vazias — o mesmo `i` com que `parseLeadsCsv`
+  // monta o id de reserva de quem vem sem event_id.
+  let ordem = -1;
+  const linhas: LinhaDaPrevia[] = [];
+  parsed.data.forEach((r, i) => {
+    if (linhaVazia(r)) return;
+    ordem++;
     const erros: string[] = [];
     const avisos: string[] = [];
     const nome = pick(r, "name") ?? "";
@@ -302,7 +325,7 @@ export function previaLeadsCsv(text: string): PreviaLeads {
 
     const eventId = pick(r, "eventId") ?? "";
     if (erros.length === 0) {
-      const id = leadIdFrom(eventId, `${criadoEm.slice(0, 10).replace(/-/g, "")}-${i}`);
+      const id = leadIdFrom(eventId, `${criadoEm.slice(0, 10).replace(/-/g, "")}-${ordem}`);
       if (idsVistos.has(id)) {
         repetidas++;
         avisos.push("Mesmo event_id de uma linha anterior: só esta (a última) vale.");
@@ -310,7 +333,8 @@ export function previaLeadsCsv(text: string): PreviaLeads {
       idsVistos.add(id);
     }
 
-    return { linha: i + 2, nome, criadoEm, telefone: telefone.valor, email, status, statusOriginal, erros, avisos };
+    // `i` é o índice físico (0 = a linha logo abaixo do cabeçalho, que é a 1).
+    linhas.push({ linha: i + 2, nome, criadoEm, telefone: telefone.valor, email, status, statusOriginal, erros, avisos });
   });
 
   return {

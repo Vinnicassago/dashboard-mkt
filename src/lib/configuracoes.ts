@@ -14,6 +14,7 @@ import { comPeriodo } from "./range";
 import { formatDateTime } from "./format";
 import { mensagemHumana } from "./erros";
 import { ROLES, ROLE_LABELS, hasCapability, type Role } from "./auth/roles";
+import { CONFIRMACAO_PERIGO } from "./perigo";
 import type { Trava } from "./trust";
 
 // ---------------------------------------------------------------- vistas
@@ -207,8 +208,10 @@ export interface VisibilidadeDoPapel {
   /** Exporta a lista de leads (a exportação fica registrada). */
   exportaLeads: boolean;
   alteraLeads: boolean;
-  /** Importa CSV, sincroniza, define metas e regras de marca. */
-  operaDados: boolean;
+  /** Importa o CSV de leads e cadastra lead à mão (`leads:write`, como alterar). */
+  importaLeads: boolean;
+  /** Importa anúncios (CSV), sincroniza, define metas e regras de marca (`data:write`). */
+  importaAnuncios: boolean;
   /** Usuários, diagnóstico e zona de perigo. */
   administra: boolean;
 }
@@ -217,6 +220,10 @@ export interface VisibilidadeDoPapel {
  * Quem vê o quê, derivado de `auth/roles.ts` — a linha da tela nunca diverge da
  * regra que o servidor aplica. Contato e exportação seguem `leads:write`:
  * Administrador e Comercial veem telefone e e-mail; Marketing vê mascarado.
+ * "Importa" são DUAS regras, não uma: leads é `leads:write` (Comercial importa
+ * o CSV de leads e cadastra à mão); anúncios, sincronização e metas são
+ * `data:write` (Marketing). Uma coluna só para as duas dizia a Comercial que
+ * ele não importava — e o servidor deixava.
  */
 export function visibilidadePorPapel(): VisibilidadeDoPapel[] {
   return ROLES.map((papel) => ({
@@ -225,7 +232,20 @@ export function visibilidadePorPapel(): VisibilidadeDoPapel[] {
     veContato: hasCapability(papel, "leads:write"),
     exportaLeads: hasCapability(papel, "leads:write"),
     alteraLeads: hasCapability(papel, "leads:write"),
-    operaDados: hasCapability(papel, "data:write"),
+    importaLeads: hasCapability(papel, "leads:write"),
+    importaAnuncios: hasCapability(papel, "data:write"),
     administra: hasCapability(papel, "users:manage"),
   }));
+}
+
+// ---------------------------------------------------------------- zona de perigo
+
+/**
+ * A palavra digitada confirma uma ação da zona de perigo? Vale para TODAS elas
+ * (restaurar o exemplo, refazer o histórico de anúncios) e é conferida no
+ * servidor — o navegador só pergunta. `null` é o prompt cancelado; "" é o Enter
+ * sem nada; nada disso confirma.
+ */
+export function confirmaPerigo(digitado: string | null | undefined): boolean {
+  return (digitado ?? "").trim().toUpperCase() === CONFIRMACAO_PERIGO;
 }

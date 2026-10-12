@@ -47,6 +47,8 @@ export function ResetButton() {
 /**
  * Conserto de gasto dobrado (CSV somado à API): baixa da Meta todo o histórico
  * guardado e só então troca as linhas. Se a busca falhar, nada é apagado.
+ * Confirma como o reset — a palavra digitada, não um "OK": o Enter num
+ * `confirm` nativo trocava todo o `ad_daily` por engano.
  */
 export function CleanResyncAdsButton() {
   const [pending, startTransition] = useTransition();
@@ -58,15 +60,12 @@ export function CleanResyncAdsButton() {
         type="button"
         disabled={pending}
         onClick={() => {
-          if (
-            !window.confirm(
-              "Isso baixa da Meta todo o histórico de anúncios guardado e, se a busca der certo, troca as linhas atuais pelas novas.\n\nSe a Meta falhar, nada é apagado. Leads e o restante não são afetados. Continuar?",
-            )
-          ) {
-            return;
-          }
+          const digitado = window.prompt(
+            `Isso baixa da Meta todo o histórico de anúncios guardado e, se a busca der certo, troca as linhas atuais pelas novas. Se a Meta falhar, nada é apagado. Leads e o restante não são afetados.\n\nPara confirmar, digite ${CONFIRMACAO_PERIGO}:`,
+          );
+          if (digitado == null) return;
           startTransition(async () => {
-            const result = await resyncAdsCleanAction();
+            const result = await resyncAdsCleanAction(digitado);
             setState(result);
             router.refresh();
           });

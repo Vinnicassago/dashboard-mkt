@@ -32,6 +32,7 @@ import { activeBrandSlug } from "@/lib/active-brand";
 import { normalizeLeadStatus } from "@/lib/lead-status";
 import { candidatosIdLead, resolverIdLead } from "@/lib/lead-id";
 import { CONFIRMACAO_PERIGO } from "@/lib/perigo";
+import { confirmaPerigo } from "@/lib/configuracoes";
 import { diagnosticarLeads, type DiagnosticoLeads } from "@/lib/diagnostico-leads";
 import { registrarAuditoria } from "@/lib/auditoria";
 import { setMensagemWhatsapp, setRoboDesativado } from "@/lib/integracoes";
@@ -46,6 +47,11 @@ import {
 } from "@/lib/types";
 
 const DENIED: ActionState = { ok: false, message: "Você não tem permissão para esta ação." };
+/** Zona de perigo sem a palavra digitada: nada aconteceu, e a resposta diz o que digitar. */
+const SEM_CONFIRMACAO: ActionState = {
+  ok: false,
+  message: `Nada foi apagado: digite ${CONFIRMACAO_PERIGO} para confirmar.`,
+};
 
 export interface ActionState {
   ok: boolean;
@@ -435,9 +441,7 @@ export async function resetSeedAction(confirmacao: string): Promise<ActionState>
   if (!(await can("danger:run"))) {
     return { ok: false, message: "Só um administrador pode restaurar os dados de exemplo." };
   }
-  if (confirmacao.trim().toUpperCase() !== CONFIRMACAO_PERIGO) {
-    return { ok: false, message: `Nada foi apagado: digite ${CONFIRMACAO_PERIGO} para confirmar.` };
-  }
+  if (!confirmaPerigo(confirmacao)) return SEM_CONFIRMACAO;
   await resetToSeed(await currentActor());
   await registrarAuditoria(
     "Restaurar dados de exemplo",
@@ -455,12 +459,15 @@ export async function resetSeedAction(confirmacao: string): Promise<ActionState>
  * Conserta gasto dobrado (linhas de CSV somadas às da API): baixa da Meta TODO o
  * histórico guardado e só então troca, numa operação, as linhas desse período
  * pelas novas. Se a Meta não estiver configurada ou a busca falhar, nada é
- * apagado. Leads e o resto não são tocados.
+ * apagado. Leads e o resto não são tocados. Pede a MESMA palavra digitada do
+ * reset (relatório §7.7 item 7): toda ação da zona de perigo confirma assim, e
+ * é conferida aqui — um Enter num `confirm` nativo não troca o histórico.
  */
-export async function resyncAdsCleanAction(): Promise<ActionState> {
+export async function resyncAdsCleanAction(confirmacao: string): Promise<ActionState> {
   if (!(await can("danger:run"))) {
     return { ok: false, message: "Só um administrador pode ressincronizar o histórico de anúncios." };
   }
+  if (!confirmaPerigo(confirmacao)) return SEM_CONFIRMACAO;
   try {
     const r = await resyncAdsHistory();
     if (!r.ok) return { ok: false, message: `Nada foi apagado. ${r.detail}` };
