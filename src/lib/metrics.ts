@@ -979,7 +979,8 @@ export function creativePerformance(
     byAd.set(r.adId, list);
   }
 
-  // Fadiga usa os dias recentes ABSOLUTOS (independe do range selecionado).
+  // Saúde do criativo: as duas janelas de 7 dias terminam no FIM do período
+  // selecionado (`opts.fim`), sobre o histórico inteiro do anúncio.
   const allByAd = new Map<string, AdDaily[]>();
   for (const r of data.adDaily) {
     const list = allByAd.get(r.adId) ?? [];

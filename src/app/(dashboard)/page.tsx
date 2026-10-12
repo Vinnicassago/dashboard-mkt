@@ -96,7 +96,7 @@ export default async function OverviewPage({
   return (
     <div className="space-y-4">
       <RegistrarAlertas alertas={b.alertas} />
-      {b.data.isSeed ? <ExampleBanner /> : null}
+      {b.data.isSeed ? <ExampleBanner rangeKey={b.rangeKey} /> : null}
 
       {/* 1. PLACAR — o veredito. */}
       <PlacarCard placar={b.placar} serie={b.serie} rangeKey={b.rangeKey} />
@@ -162,7 +162,7 @@ function AwarenessOverview({
   return (
     <div className="space-y-6">
       <RegistrarAlertas alertas={alertas} />
-      {data.isSeed ? <ExampleBanner /> : null}
+      {data.isSeed ? <ExampleBanner rangeKey={rangeKey} /> : null}
 
       {/* Hero KPIs de crescimento */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4 xl:grid-cols-5">

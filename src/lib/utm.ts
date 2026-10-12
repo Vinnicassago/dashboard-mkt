@@ -30,7 +30,11 @@ export function urlComUtm(base: string, params: Record<string, string | undefine
     partes.push(`${encodeURIComponent(k)}=${/^\{\{.*\}\}$/.test(val) ? val : encodeURIComponent(val)}`);
   }
   const existente = url.search.replace(/^\?/, "");
+  // A âncora (#form) precisa ficar DEPOIS da query: o navegador não manda nada
+  // após "#", e a LP ficaria sem UTM nenhum.
+  const hash = url.hash;
   url.search = "";
+  url.hash = "";
   const query = [existente, ...partes].filter(Boolean).join("&");
-  return `${url.toString()}${query ? `?${query}` : ""}`;
+  return `${url.toString()}${query ? `?${query}` : ""}${hash}`;
 }

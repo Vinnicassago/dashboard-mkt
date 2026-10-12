@@ -113,8 +113,8 @@ export interface IgPost {
   mediaUrl?: string;
   thumbnailUrl?: string;
   /** Post de TESTE (validação de formato/gancho) — marcado manualmente; fica
-   *  FORA da análise orgânica de performance (agregados, formatos, rankings).
-   *  Conta para a cadência: é uma publicação real no perfil. */
+   *  FORA da análise orgânica de performance (agregados, formatos, rankings) E
+   *  da regra de cadência (Fase 6: variação de anúncio não é grade). */
   isTest?: boolean;
 }
 

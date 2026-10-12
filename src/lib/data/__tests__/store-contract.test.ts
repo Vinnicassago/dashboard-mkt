@@ -88,7 +88,9 @@ function contrato(nome: string, abrir: () => Promise<{ backend: DataBackend; fec
       expect(l?.name).toBe("Pessoa Teste"); // nome gravado não é trocado
       expect(l?.phone).toBe("11999990000"); // contato gravado não é trocado
       expect(l?.email).toBe("pessoa@teste.invalid"); // contato vazio é preenchido
-      expect(l?.adId).toBe("100001"); // id de atribuição vazio é preenchido (0019)
+      // A origem é fato da 1ª entrada: um reenvio por OUTRO anúncio não muda a
+      // atribuição do lead (o id novo fica no evento `reenvio`, não no lead).
+      expect(l?.adId).toBeUndefined();
     });
 
     it("exclusão é reversível e o histórico do lead fica", async () => {

@@ -3,6 +3,7 @@ import type { Lead, LeadStatus } from "./types";
 import { DEFAULT_BRAND } from "./types";
 import { normalizeLeadStatus, statusLabel } from "./lead-status";
 import { idLeadLp } from "./lead-id";
+import { idsDoUtm } from "./atribuicao";
 
 /**
  * Importador de leads (backfill). Aceita o CSV exportado do rastreamento da
@@ -179,6 +180,8 @@ export function parseLeadsCsv(text: string): LeadsParseResult {
       utmSource: pick("utmSource"),
       utmCampaign: pick("utmCampaign"),
       utmContent: pick("utmContent"),
+      // Os mesmos ids que /api/track grava (D6): conjunto e campanha pelo UTM.
+      ...idsDoUtm({ utm_campaign: pick("utmCampaign"), utm_term: pick("utmTerm"), utm_content: pick("utmContent") }),
       utmMedium: pick("utmMedium"),
       utmTerm: pick("utmTerm"),
       fbclid: pick("fbclid"),

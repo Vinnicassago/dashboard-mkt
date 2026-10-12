@@ -24,7 +24,7 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   vira `reenvio` NESSE lead; se ele estava perdido, volta a "Novo" (evento
   `reaberto`, aviso ao n8n) — o mesmo event_id reenviado nunca reabre nada. Pelo
   CONTATO, nunca pelo nome. Teste, duplicado e desistência sem reunião aparecem em
-  Pessoas → Revisar e só uma pessoa decide: mesclar (`mesclarLeads`) = o principal
+  Leads → Revisar e só uma pessoa decide: mesclar (`mesclarLeads`) = o principal
   recebe contato e marcos vazios, o duplicado é excluído de forma reversível com o
   motivo e o principal ganha evento `mesclado`. Nada é corrigido sozinho.
 - **APIs Meta** (`src/lib/meta/*`): versão **fixada** em `config.ts` — não use o
@@ -39,7 +39,7 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   `generate_lead` e `qualify_lead`. Sem `client_id` real do gtag, **não envie**
   (GA4 aceitaria e criaria usuário fantasma). O endpoint de produção sempre
   responde 2xx, então sucesso HTTP não prova que o evento entrou.
-- **Privacidade:** nome/e-mail/telefone SÃO persistidos no lead (página Pessoas, para o
+- **Privacidade:** nome/e-mail/telefone SÃO persistidos no lead (página Leads, para o
   comercial) e também hasheados para a CAPI. O painel exibe PII — proteja o acesso.
   Tabela `leads` atrás de RLS. Não adicionar PII nova sem necessidade (LGPD).
 - **Auth** (`src/lib/auth/*` + `middleware.ts`): ativa só com `AUTH_SECRET`. Sessão
@@ -88,7 +88,7 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   `quarentena` ao `KpiCard`, que também some com delta e sparkline. NÃO troque `div()`
   para `number | null`: 75 call sites e null vazaria para o Recharts. Trava nova =
   entrada em `assessTrust`, não um `if` na página. `MIN_REUNIOES` (trust.ts) é a régua
-  ÚNICA da quarentena do custo por reunião: motor de ações, IA, Dinheiro e cascata leem
+  ÚNICA da quarentena do custo por reunião: motor de ações, IA, Mídia e cascata leem
   dali — nenhuma tela imprime nem decide por CPR abaixo dela. A quarentena olha o
   denominador de VERDADE (`meetingsConversao`, `leadsConversao`) e vale também linha a
   linha (conjunto, criativo).
@@ -157,7 +157,7 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   (CRON_SECRET, cron-job.org segunda 08:00) gera a leitura da semana fechada anterior
   (`semanaAnteriorFechada`) e grava em `resumos_semanais`; a Bússola mostra a última
   recolhida e as 12 anteriores. Nunca gere no render — custa.
-- **Cascata** (`src/lib/cascata.ts`, em Jornada): o funil ponta a ponta atravessando os
+- **Cascata** (`src/lib/cascata.ts`, no Funil): o funil ponta a ponta atravessando os
   quatro sistemas (Meta → LP → painel → robô → atendimento). Regras: **duas âncoras** (acima
   de Leads mede sobre impressões; de Leads para baixo, Leads = 100%) — com uma só,
   oito linhas imprimem "0,0%", que é mentira por arredondamento; **selo de fonte** em
@@ -165,7 +165,7 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   (`inline_link_clicks || clicks` soma duas definições incompatíveis); quando duas
   fontes discordam do mesmo fato, `valor: null` e a divergência vira nota — nunca
   escolha um lado em silêncio. `maiorVazamento()` (maior perda em pessoas depois do
-  lead, sem contar quem está parado) é a resposta da Jornada e a ÚNICA junta com cor;
+  lead, sem contar quem está parado) é a resposta do Funil e a ÚNICA junta com cor;
   abaixo de `AMOSTRA_MINIMA` a cascata não imprime taxa nem custo unitário. Sem robô,
   cai no funil do painel e diz isso.
 - **Fila de contato** (`src/lib/fila.ts`): funde as três filas que vivem em bancos
@@ -179,9 +179,9 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   comercial) vem de `src/lib/dono.ts`. Etapas do painel saem de `etapaDoLead` (novo,
   retornar, confirmar, sem desfecho); prazos em **horas úteis** (`lib/horario-util.ts`,
   seg–sex 9h–18h Brasília, UTC−3 fixo, sem feriados) — "novo" é 1 hora útil. Lead
-  reaberto recomeça o relógio no `reaberto`. Robô desligado em Ajustes
+  reaberto recomeça o relógio no `reaberto`. Robô desligado em Configurações → Integrações
   (`robo_desativado`, `roboLigado()`) some com as etapas dele — desligado não é erro.
-  A ficha (`/leads/[id]`) não é página de menu: abre pelo nome em Pessoas, Fila,
+  A ficha (`/leads/[id]`) não é página de menu: abre pelo nome em Leads, Fila,
   histórico e no link do aviso. Aviso de lead novo = webhook do n8n (`lib/avisos.ts`,
   `N8N_LEAD_WEBHOOK_URL`); falha no aviso nunca derruba a entrada do lead.
 - **Navegação** (`components/layout/nav-items.ts`): 7 páginas nomeadas pela PERGUNTA
@@ -198,6 +198,36 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   `periodoPadrao` da página — `useComPeriodo`, `periodoPadraoDe`). Rota antiga
   (`/jornada`, `/dinheiro`, `/pessoas`, `/config`…) = redirect em `next.config.ts`, nunca
   404.
+- **Telas de diagnóstico** (Fase 6): cada página extrai sua visão de UMA função pura
+  (`lib/funil.ts`, `lib/midia.ts`, `lib/leads-vista.ts`, `lib/conteudo.ts`,
+  `lib/configuracoes.ts`) — a página só carrega e renderiza. **Funil**: dois funis com
+  escopo próprio (conversão = a cascata, só campanhas de conversão; descoberta = alcance →
+  visitas ao perfil → seguidores), alternância `?vista=coorte` (período = reuniões pela
+  data do agendamento; coorte = pela entrada), coortes com TODA semana (0 lead = "campanha
+  pausada" ou "sem dados" pela cobertura), perdas confiáveis (sem teste, sem duplicado,
+  `everBooked`; "Onde atacar" é regra explícita: "Sem resposta" → comercial com < 3
+  tentativas ou 1ª fora do prazo, → mídia/formulário só com 3+ no prazo), selo de
+  confiança do registro (lote/atraso, constantes do motor), "Notas de medição" recolhidas
+  — "Onde não agir" não existe mais. **Mídia**: resumo primeiro (CPL = o da Bússola),
+  tendência semanal, conjuntos por `adsetId` em blocos conversão × descoberta com colunas
+  "Leads (painel)" e "Conversões Meta (Pixel)" (nunca "Leads" sozinho com Pixel), criativos
+  por `creativeId`, rankings só com volume mínimo e o n à vista, reunião atribuída só com
+  id (nome ambíguo = "atribuição ambígua"); saúde do criativo = `computeFatigue` no
+  PERÍODO com a regra na dica (CTR 7d ≤ 75% do anterior E (freq ≥ 2 OU CPL 7d ≥ 120%),
+  ≥ 1.000 impressões por janela; "sem resultado" = gasto ≥ 2 × CPL alvo e 0 leads);
+  gráfico diário em barras com dias sem dado e pausados marcados; o gasto nunca aparece
+  como orçamento. **Leads**: colunas da ficha (etapa máxima = `etapaMaxima`, função dos
+  marcos — ADR-01), abas com contagem que somam o total, origem campanha › conjunto ›
+  anúncio, exportação só com `leads:write` e SEMPRE registrada em `audit_log`; o papel
+  Marketing vê telefone e e-mail mascarados (`lib/lgpd.ts`) em tabela, ficha e histórico.
+  **Conteúdo**: 1º bloco "Contribuição para o funil"; "Alcance da conta (pago + orgânico)"
+  ≠ "Alcance orgânico dos posts"; variações de anúncio (mesma legenda no mesmo dia) viram
+  sugestão de teste; `postingCadence` ignora testes e impulsionados; seguidores com a série
+  parcial explicada (100+ seguidores); registros manuais na vista Registros. As métricas
+  da conta estão no MESMO dicionário (`lib/dicionario.ts`). **Configurações**: uma rota
+  por vista, loader compartilhado (`_carregar.ts`), `lib/configuracoes.ts` é a fonte de
+  qual vista tem qual âncora (`linkDeConfiguracoes`) e das pendências; guardas de papel no
+  servidor como antes.
 - **Régua editorial** (`src/lib/content/playbook.ts`): o "Guia de Produção" como código
   — grade semanal, ≤25s, gancho de 7 palavras, ciclo de CTA, "Nunca mais", metas de
   90 dias. Fonte ÚNICA: `validator.ts` (pré-publicação) e `recommendations.ts`
@@ -245,7 +275,7 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
 - **Marca da linha de anúncio** (`brandForCampaign`): regra por token do nome ou id de
   campanha (`ad_daily.campaign_id`). Sem casar: conta de uma marca só → ela; `*` → o
   resto declarado; ninguém com regra → a padrão; uma única sem regra → ela; senão
-  `NAO_CLASSIFICADO` — fora de todos os números, com alerta e prévia em Ajustes. A
+  `NAO_CLASSIFICADO` — fora de todos os números, com alerta e prévia em Configurações → Marcas. A
   reclassificação inclui esse balde (`replaceAdData` sem escopo troca TUDO).
 - **Charts (client) recebem props serializáveis.** Server Components não podem
   passar funções para Client Components. Cores vêm de CSS vars (`components/charts/colors.ts`),
@@ -263,6 +293,6 @@ npx tsc --noEmit       # typecheck
 npm run build          # build de produção
 ```
 
-Reset dos dados de exemplo: botão em **Ajustes**, ou `rm -rf .localdata`.
+Reset dos dados de exemplo: botão em **Configurações → Zona de perigo**, ou `rm -rf .localdata`.
 
 Roadmap (Supabase + Meta Marketing API v25 + Instagram Login + GA4/CAPI): ver README.

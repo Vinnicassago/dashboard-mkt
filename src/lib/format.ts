@@ -64,6 +64,8 @@ export function formatPercent(
   digits = 1,
 ): string {
   const v = (ratio ?? 0) * 100;
+  // Regra 7.2: abaixo de 0,1% não se imprime "0,0%" — é o mesmo pixel de zero.
+  if (v > 0 && v < 0.1) return "< 0,1%";
   return `${v.toLocaleString("pt-BR", {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
@@ -100,6 +102,14 @@ export function formatDateMonth(iso: string): string {
 }
 
 /** 23 jul 2026, 14:30 — sempre no horário de Brasília (o servidor roda em UTC). */
+/** "23/07 20:15" — data e hora curtas (Brasília), para tabelas densas. */
+export function formatDateTimeCurta(iso: string): string {
+  const d = toLocalDate(iso);
+  const data = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit" }).format(d);
+  const hora = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" }).format(d);
+  return `${data} ${hora}`;
+}
+
 export function formatDateTime(iso: string): string {
   return new Date(iso)
     .toLocaleString("pt-BR", {

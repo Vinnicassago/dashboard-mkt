@@ -50,7 +50,11 @@ export default async function FilaPage({
   const brand = await activeBrandSlug();
   const data = await getData(brand);
   const canEdit = await can("leads:write");
-  const usuario = (await getCurrentUser())?.username;
+  const user = await getCurrentUser();
+  const usuario = user?.username;
+  // LGPD (Fase 6): o papel Marketing não vê telefone nem e-mail — nem aqui, nem
+  // em Leads. Sem telefone o botão de WhatsApp some sozinho.
+  const mascarar = user?.role === "marketing";
   const agora = new Date().toISOString();
 
   const [comercial, convites, eventos, mensagem] = await Promise.all([
@@ -189,7 +193,7 @@ export default async function FilaPage({
           </div>
 
           <FilaList
-            itens={fila.itens}
+            itens={mascarar ? fila.itens.map((i) => ({ ...i, telefone: undefined, email: undefined })) : fila.itens}
             canEdit={canEdit}
             filtroInicial={filtroDaUrl(etapa)}
             etapasVisiveis={etapasVisiveis}

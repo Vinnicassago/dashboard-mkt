@@ -17,7 +17,7 @@ import { ETAPA_MAXIMA_LABEL, LEAD_STATUSES, LEAD_STATUS_META } from "@/lib/lead-
 import { DONO_LABEL, type Dono } from "@/lib/dono";
 import { FILA_ETAPAS } from "@/lib/fila";
 import { dica } from "@/lib/dicionario";
-import { formatDateTime, formatarEspera } from "@/lib/format";
+import { formatDateTime, formatDateTimeCurta, formatarEspera } from "@/lib/format";
 import { normalizarTelefone } from "@/lib/phone";
 import { rangeLabel } from "@/lib/range";
 import {
@@ -147,6 +147,45 @@ function DeleteLeadButton({ id, name }: { id: string; name: string }) {
 const foraDoPrazoCls = "text-[11px] font-medium text-[var(--status-fora-text)]";
 
 /**
+ * O que saiu das colunas para a tabela caber a 1366 px (regra 7.2: colunas
+ * secundárias vão para a linha expandida): tentativas, reunião, dono e a
+ * origem inteira.
+ */
+function DetalheDoLead({ r }: { r: LinhaDeLead }) {
+  return (
+    <dl className="flex flex-wrap gap-x-6 gap-y-1 text-xs">
+      <div className="flex items-baseline gap-1.5" title="Tentativas de contato registradas (as desfeitas não contam).">
+        <dt className="text-muted-foreground">Tentativas</dt>
+        <dd className="font-medium">
+          {r.tentativas}
+          {r.ultimaTentativa ? (
+            <span className="font-normal text-muted-foreground">
+              {" "}· última {formatDateTime(r.ultimaTentativa)}
+              {r.falou ? " · já falou com a pessoa" : ""}
+              {r.proximaTentativa ? ` · próxima ${formatDateTime(r.proximaTentativa)}` : ""}
+            </span>
+          ) : null}
+        </dd>
+      </div>
+      <div className="flex items-baseline gap-1.5" title="Data da reunião marcada (o fato); o status diz o que aconteceu com ela.">
+        <dt className="text-muted-foreground">Reunião</dt>
+        <dd className="font-medium">
+          {r.meetingFor ? formatDateTime(r.meetingFor) : r.jaAgendou ? "agendada sem data registrada" : "—"}
+        </dd>
+      </div>
+      <div className="flex items-baseline gap-1.5" title="Quem age em seguida. Sem dono = lead encerrado.">
+        <dt className="text-muted-foreground">Dono</dt>
+        <dd className="font-medium">{r.dono ? DONO_LABEL[r.dono] : "— (encerrado)"}</dd>
+      </div>
+      <div className="flex min-w-0 items-baseline gap-1.5">
+        <dt className="text-muted-foreground">Origem</dt>
+        <dd className="font-medium">{r.origem.trilha}</dd>
+      </div>
+    </dl>
+  );
+}
+
+/**
  * As colunas do relatório (7.5): cabeçalho e linha saem do MESMO array (B5).
  * O contato fica sob o nome — não é coluna, é como se chega à pessoa.
  */
@@ -157,14 +196,15 @@ function montarColunas(opts: {
   comPeriodo: (href: string) => string;
 }): Column<LinhaDeLead>[] {
   const { canEdit, canDelete, mascarado, comPeriodo } = opts;
-  return [
+  const cols: Column<LinhaDeLead>[] = [
     {
       key: "name",
       header: "Nome",
       sortable: true,
       sortValue: (r) => r.name,
+      className: "max-w-[210px]",
       render: (r) => (
-        <div className="flex flex-col gap-0.5">
+        <div className="flex min-w-0 flex-col gap-0.5 overflow-hidden">
           <Link href={comPeriodo(`/leads/${encodeURIComponent(r.id)}`)} className="font-medium hover:underline">
             {r.name}
           </Link>
@@ -179,6 +219,7 @@ function montarColunas(opts: {
       headerTitle: "Onde o lead está AGORA. Muda; os fatos ficam nos marcos (etapa máxima).",
       sortable: true,
       sortValue: (r) => LEAD_STATUS_META[r.status].order,
+      className: "max-w-[200px]",
       render: (r) =>
         canEdit ? (
           <RegistrarStatus
@@ -207,7 +248,11 @@ function montarColunas(opts: {
       header: "Entrada",
       sortable: true,
       sortValue: (r) => r.createdAt,
-      render: (r) => <span className="whitespace-nowrap text-muted-foreground">{formatDateTime(r.createdAt)}</span>,
+      render: (r) => (
+        <span className="whitespace-nowrap text-muted-foreground" title={formatDateTime(r.createdAt)}>
+          {formatDateTimeCurta(r.createdAt)}
+        </span>
+      ),
     },
     {
       key: "primeiroContato",
@@ -233,38 +278,18 @@ function montarColunas(opts: {
         ),
     },
     {
-      key: "tentativas",
-      header: "Tentativas",
-      headerTitle: "Tentativas de contato registradas (as desfeitas não contam).",
-      align: "right",
-      sortable: true,
-      sortValue: (r) => r.tentativas,
-      render: (r) => (
-        <span
-          title={
-            r.ultimaTentativa
-              ? `Última ${formatDateTime(r.ultimaTentativa)}${r.falou ? " · já falou com a pessoa" : ""}${
-                  r.proximaTentativa ? ` · próxima ${formatDateTime(r.proximaTentativa)}` : ""
-                }`
-              : "Nenhuma tentativa registrada"
-          }
-        >
-          {r.tentativas}
-        </span>
-      ),
-    },
-    {
       key: "proximaAcao",
       header: "Próxima ação",
       headerTitle: "A mesma régua da Fila de contato — clique para abrir a Fila nessa etapa.",
       sortable: true,
       sortValue: (r) => (r.proximaAcao === "—" ? 0 : r.acaoAtrasada ? 2 : 1),
+      className: "max-w-[130px]",
       render: (r) =>
         r.etapaDaFila ? (
           <Link
             href={comPeriodo(`/fila?etapa=${r.etapaDaFila}`)}
             title={r.acaoPorque}
-            className="whitespace-nowrap underline-offset-4 hover:underline"
+            className="underline-offset-4 hover:underline"
           >
             {r.proximaAcao}
             {r.acaoAtrasada ? <span className={cn("ml-1", foraDoPrazoCls)}>· atrasada</span> : null}
@@ -282,43 +307,10 @@ function montarColunas(opts: {
       sortable: true,
       sortValue: (r) => r.origem.trilha,
       render: (r) => (
-        <span className="block max-w-[32ch] truncate text-muted-foreground" title={r.origem.trilha}>
+        <span className="block max-w-[16ch] truncate text-muted-foreground" title={r.origem.trilha}>
           {r.origem.trilha}
         </span>
       ),
-    },
-    {
-      key: "meetingFor",
-      header: "Reunião",
-      headerTitle: "Data da reunião marcada (o fato); o status diz o que aconteceu com ela.",
-      align: "right",
-      sortable: true,
-      sortValue: (r) => r.meetingFor ?? "",
-      render: (r) =>
-        r.meetingFor ? (
-          <span className="whitespace-nowrap">{formatDateTime(r.meetingFor)}</span>
-        ) : r.jaAgendou ? (
-          <span className="text-muted-foreground" title="Agendado antes de a data da reunião ser registrada">
-            data não registrada
-          </span>
-        ) : (
-          "—"
-        ),
-    },
-    {
-      key: "dono",
-      header: "Dono",
-      headerTitle: "Quem age em seguida. Sem dono = lead encerrado.",
-      sortable: true,
-      sortValue: (r) => (r.dono ? DONO_LABEL[r.dono] : ""),
-      render: (r) =>
-        r.dono ? (
-          <span>{DONO_LABEL[r.dono]}</span>
-        ) : (
-          <span className="text-muted-foreground" title="Lead encerrado — ninguém age">
-            —
-          </span>
-        ),
     },
     ...(canDelete
       ? [
@@ -331,6 +323,13 @@ function montarColunas(opts: {
         ]
       : []),
   ];
+  // Cabeçalho quebra linha e célula mais estreita: dez colunas cabem no card a
+  // 1366 px sem a tabela virar rolagem horizontal.
+  return cols.map((c) => ({
+    ...c,
+    headerClassName: `whitespace-normal leading-tight ${c.headerClassName ?? ""}`.trim(),
+    className: `px-2 ${c.className ?? ""}`.trim(),
+  }));
 }
 
 // ---------------------------------------------------------------- filtro ⇄ URL
@@ -621,6 +620,7 @@ export function LeadsDirectory({
         initialSortKey="createdAt"
         initialSortDir="desc"
         rowKey={(r) => r.id}
+        detalhe={(r) => <DetalheDoLead r={r} />}
         emptyTitle={rows.length === 0 ? "Nenhum lead no período" : "Nenhum lead com esses filtros"}
         emptyHint={rows.length === 0 ? "Troque o período no cabeçalho." : "Limpe um filtro ou troque a aba."}
       />

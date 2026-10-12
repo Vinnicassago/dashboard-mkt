@@ -97,7 +97,7 @@ function Nome({ r }: { r: LinhaCriativo }) {
 }
 
 const RENDER: Record<string, Pick<Column<LinhaCriativo>, "render" | "sortValue" | "align" | "className">> = {
-  nome: { render: (r) => <Nome r={r} />, sortValue: (r) => r.nome, className: "max-w-[300px]" },
+  nome: { render: (r) => <Nome r={r} />, sortValue: (r) => r.nome, className: "max-w-[260px]" },
   spend: { align: "right", sortValue: (r) => r.spend, render: (r) => formatCurrency0(r.spend) },
   impressions: { align: "right", sortValue: (r) => r.impressions, render: (r) => formatInt(r.impressions) },
   reach: { align: "right", sortValue: (r) => r.reach, render: (r) => formatInt(r.reach) },
@@ -134,7 +134,10 @@ function colunas(defs: ColunaMidia[], regraSaude: string): Column<LinhaCriativo>
       key: d.key,
       header: d.header,
       sortable: true,
+      // Cabeçalho quebra linha e célula mais estreita: cabe a 1366 px (B13).
+      headerClassName: "whitespace-normal leading-tight",
       ...RENDER[d.key],
+      className: `px-2 ${RENDER[d.key].className ?? ""}`.trim(),
       render: (r: LinhaCriativo) => {
         const titulo = d.key === "saude" ? regraSaude : d.dica ? dica(d.dica) : undefined;
         return titulo ? <span title={titulo}>{RENDER[d.key].render(r)}</span> : RENDER[d.key].render(r);

@@ -136,6 +136,9 @@ export function buildBriefing(
   const FUNIL_LEGADO = new Set(["leads", "meetings", "cpl", "cpr"]);
   const metas = data.goals
     .filter((g) => !FUNIL_LEGADO.has(g.metric))
+    // A meta de conversas de DM é da CAMPANHA (o card só a julga na campanha
+    // inteira): num recorte, a IA não recebe um veredito que a tela não dá.
+    .filter((g) => !(g.metric === "conversas_dm" && range))
     .map((g) => {
       // `actualForGoal` ancora "agora" em data.updatedAt para permanecer pura;
       // a cadência ancora no agora REAL. Com dataset parado os dois divergem

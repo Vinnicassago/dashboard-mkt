@@ -46,7 +46,7 @@ function Nome({ r }: { r: LinhaMidia }) {
 }
 
 const RENDER: Record<string, Pick<Column<LinhaMidia>, "render" | "sortValue" | "align" | "className">> = {
-  nome: { render: (r) => <Nome r={r} />, sortValue: (r) => r.nome, className: "max-w-[280px]" },
+  nome: { render: (r) => <Nome r={r} />, sortValue: (r) => r.nome, className: "max-w-[240px]" },
   spend: { align: "right", sortValue: (r) => r.spend, render: (r) => formatCurrency0(r.spend) },
   impressions: { align: "right", sortValue: (r) => r.impressions, render: (r) => formatInt(r.impressions) },
   reach: { align: "right", sortValue: (r) => r.reach, render: (r) => formatInt(r.reach) },
@@ -87,7 +87,11 @@ function colunas(defs: ColunaMidia[]): Column<LinhaMidia>[] {
       key: d.key,
       header: d.header,
       sortable: true,
+      // Cabeçalho quebra linha e célula mais estreita: é o que faz a tabela
+      // caber no card a 1366 px sem rolagem horizontal (B13).
+      headerClassName: "whitespace-normal leading-tight",
       ...RENDER[d.key],
+      className: `px-2 ${RENDER[d.key].className ?? ""}`.trim(),
       // O ⓘ do dicionário no cabeçalho, quando a métrica tem definição.
       render: (r: LinhaMidia) => (d.dica ? <span title={dica(d.dica)}>{RENDER[d.key].render(r)}</span> : RENDER[d.key].render(r)),
     }));

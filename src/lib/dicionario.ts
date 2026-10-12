@@ -30,7 +30,16 @@ export type MetricaId =
   | "taxa_lead_agendada"
   | "primeiro_contato_no_prazo"
   | "comparecimento"
-  | "conversoes_pixel";
+  | "conversoes_pixel"
+  // ---- conta do Instagram (Conteúdo, Fase 6) ----
+  | "seguidores"
+  | "cliques_link_bio"
+  | "conversas_dm"
+  | "alcance_conta"
+  | "alcance_organico_posts"
+  | "views"
+  | "interacoes"
+  | "visitas_perfil";
 
 export interface Definicao {
   id: MetricaId;
@@ -179,6 +188,81 @@ export const DICIONARIO: Record<MetricaId, Definicao> = {
     fonte: "Meta Ads",
     inclui: "reenvios e eventos duplicados",
     exclui: "nada — por isso não é o “lead” do painel",
+  },
+  // ---- conta do Instagram (Conteúdo). Não são KPI do funil, mas o ⓘ e o
+  // briefing leem do MESMO dicionário — um fato, um lugar. ----
+  seguidores: {
+    id: "seguidores",
+    nome: "Seguidores",
+    definicao: "Total de seguidores no último dia do período; o líquido é fim − início.",
+    formula: "followers no último dia · líquido = fim − início",
+    fonte: "Instagram (followers_count no sync; follows_and_unfollows para ganhos e perdas)",
+    inclui: "ganhos e perdas do período, quando a API fornece a série (100+ seguidores)",
+    exclui: "nada — é o total da conta",
+  },
+  cliques_link_bio: {
+    id: "cliques_link_bio",
+    nome: "Cliques no link da bio",
+    definicao: "Toques nos links do perfil (site e WhatsApp) somados dia a dia no período.",
+    formula: "Σ profile_links_taps do período",
+    fonte: "Instagram (profile_links_taps)",
+    inclui: "site e botão de WhatsApp",
+    exclui: "cliques em anúncios (ficam na Mídia)",
+  },
+  conversas_dm: {
+    id: "conversas_dm",
+    nome: "Conversas de DM",
+    definicao: "Conversas de DM iniciadas no período — registro manual em Registros; a API não expõe DMs.",
+    formula: "Σ conversas registradas por dia",
+    fonte: "Registro manual (Conteúdo → Registros)",
+    inclui: "só os dias com registro",
+    exclui: "dias sem registro — não viram zero, viram “—”",
+  },
+  alcance_conta: {
+    id: "alcance_conta",
+    nome: "Alcance da conta (pago + orgânico)",
+    definicao:
+      "Soma do alcance diário da conta no período, incluindo o que os anúncios entregaram — a Meta não separa o pago aqui.",
+    formula: "Σ reach diário da conta",
+    fonte: "Instagram (reach da conta, por dia)",
+    inclui: "orgânico e pago; feed, reels e stories",
+    exclui: "nada — e a mesma conta alcançada em dias diferentes conta de novo",
+  },
+  alcance_organico_posts: {
+    id: "alcance_organico_posts",
+    nome: "Alcance orgânico dos posts",
+    definicao: "Soma do alcance dos posts publicados no período que não são teste nem impulsionados.",
+    formula: "Σ reach dos posts orgânicos do período",
+    fonte: "Instagram (reach por mídia)",
+    inclui: "feed, carrossel e reels da grade",
+    exclui: "posts de teste e impulsionados (um criativo de anúncio aponta para a mídia)",
+  },
+  views: {
+    id: "views",
+    nome: "Views",
+    definicao: "Vezes que o conteúdo da conta foi exibido no período (pago + orgânico).",
+    formula: "Σ views diárias da conta",
+    fonte: "Instagram (views da conta, por dia)",
+    inclui: "feed, reels e stories",
+    exclui: "nada",
+  },
+  interacoes: {
+    id: "interacoes",
+    nome: "Interações",
+    definicao: "Curtidas, comentários, salvamentos e compartilhamentos na conta no período.",
+    formula: "Σ total_interactions do período",
+    fonte: "Instagram (total_interactions)",
+    inclui: "todas as superfícies",
+    exclui: "cliques no link e visitas ao perfil",
+  },
+  visitas_perfil: {
+    id: "visitas_perfil",
+    nome: "Visitas ao perfil",
+    definicao: "Vezes que o perfil foi aberto no período.",
+    formula: "Σ profile_views do período",
+    fonte: "Instagram (profile_views)",
+    inclui: "quem veio de post, anúncio ou busca",
+    exclui: "nada",
   },
 };
 

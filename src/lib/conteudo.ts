@@ -11,6 +11,7 @@
 
 import { diaBrt } from "./horario-util";
 import { formatDateShort, formatInt, formatIntComSinal } from "./format";
+import { DICIONARIO, dica, type Definicao } from "./dicionario";
 import { inRange, postPerformance, type DateRange } from "./metrics";
 import { statusContraMeta, type AvaliacaoMeta } from "./metas";
 import type { Creative, Goal, IgAccountDaily, IgMediaType, IgPost } from "./types";
@@ -18,9 +19,9 @@ import type { Creative, Goal, IgAccountDaily, IgMediaType, IgPost } from "./type
 // ---------------------------------------------------------------- definições (ⓘ)
 
 /**
- * As métricas da conta têm definição própria porque não são KPI do funil (o
- * dicionário de `lib/dicionario.ts` é a porta dos números de lead → reunião).
- * Mesmo formato, para migrarem para lá quando a Mídia fechar o alcance real.
+ * As métricas da conta moram no dicionário (`lib/dicionario.ts`) com as do
+ * funil — o ⓘ da tela e o briefing da IA leem de um lugar só. Aqui ficam só os
+ * ids desta tela e o atalho `dicaConteudo`.
  */
 export type MetricaConteudo =
   | "seguidores"
@@ -32,88 +33,22 @@ export type MetricaConteudo =
   | "interacoes"
   | "visitas_perfil";
 
-export interface DefinicaoConteudo {
-  id: MetricaConteudo;
-  nome: string;
-  /** Uma linha, para o ⓘ. */
-  definicao: string;
-  fonte: string;
-  inclui: string;
-  exclui: string;
-}
+export const METRICAS_DE_CONTEUDO: MetricaConteudo[] = [
+  "seguidores",
+  "cliques_link_bio",
+  "conversas_dm",
+  "alcance_conta",
+  "alcance_organico_posts",
+  "views",
+  "interacoes",
+  "visitas_perfil",
+];
 
-export const DEFINICOES_CONTEUDO: Record<MetricaConteudo, DefinicaoConteudo> = {
-  seguidores: {
-    id: "seguidores",
-    nome: "Seguidores",
-    definicao: "Total de seguidores no último dia do período; o líquido é fim − início.",
-    fonte: "Instagram (followers_count no sync; follows_and_unfollows para ganhos e perdas)",
-    inclui: "ganhos e perdas do período, quando a API fornece a série (100+ seguidores)",
-    exclui: "nada — é o total da conta",
-  },
-  cliques_link_bio: {
-    id: "cliques_link_bio",
-    nome: "Cliques no link da bio",
-    definicao: "Toques nos links do perfil (site e WhatsApp) somados dia a dia no período.",
-    fonte: "Instagram (profile_links_taps)",
-    inclui: "site e botão de WhatsApp",
-    exclui: "cliques em anúncios (ficam na Mídia)",
-  },
-  conversas_dm: {
-    id: "conversas_dm",
-    nome: "Conversas de DM",
-    definicao: "Conversas de DM iniciadas no período — registro manual em Registros; a API não expõe DMs.",
-    fonte: "Registro manual (Conteúdo → Registros)",
-    inclui: "só os dias com registro",
-    exclui: "dias sem registro — não viram zero, viram “—”",
-  },
-  alcance_conta: {
-    id: "alcance_conta",
-    nome: "Alcance da conta (pago + orgânico)",
-    definicao:
-      "Soma do alcance diário da conta no período, incluindo o que os anúncios entregaram — a Meta não separa o pago aqui.",
-    fonte: "Instagram (reach da conta, por dia)",
-    inclui: "orgânico e pago; feed, reels e stories",
-    exclui: "nada — e a mesma conta alcançada em dias diferentes conta de novo",
-  },
-  alcance_organico_posts: {
-    id: "alcance_organico_posts",
-    nome: "Alcance orgânico dos posts",
-    definicao: "Soma do alcance dos posts publicados no período que não são teste nem impulsionados.",
-    fonte: "Instagram (reach por mídia)",
-    inclui: "feed, carrossel e reels da grade",
-    exclui: "posts de teste e impulsionados (um criativo de anúncio aponta para a mídia)",
-  },
-  views: {
-    id: "views",
-    nome: "Views",
-    definicao: "Vezes que o conteúdo da conta foi exibido no período (pago + orgânico).",
-    fonte: "Instagram (views da conta, por dia)",
-    inclui: "feed, reels e stories",
-    exclui: "nada",
-  },
-  interacoes: {
-    id: "interacoes",
-    nome: "Interações",
-    definicao: "Curtidas, comentários, salvamentos e compartilhamentos na conta no período.",
-    fonte: "Instagram (total_interactions)",
-    inclui: "todas as superfícies",
-    exclui: "cliques no link e visitas ao perfil",
-  },
-  visitas_perfil: {
-    id: "visitas_perfil",
-    nome: "Visitas ao perfil",
-    definicao: "Vezes que o perfil foi aberto no período.",
-    fonte: "Instagram (profile_views)",
-    inclui: "quem veio de post, anúncio ou busca",
-    exclui: "nada",
-  },
-};
+export const DEFINICOES_CONTEUDO: Record<MetricaConteudo, Definicao> = Object.fromEntries(
+  METRICAS_DE_CONTEUDO.map((id) => [id, DICIONARIO[id]]),
+) as Record<MetricaConteudo, Definicao>;
 
-export function dicaConteudo(id: MetricaConteudo): string {
-  const d = DEFINICOES_CONTEUDO[id];
-  return `${d.nome}: ${d.definicao}`;
-}
+export const dicaConteudo = (id: MetricaConteudo): string => dica(id);
 
 // ---------------------------------------------------------------- variações de anúncio
 

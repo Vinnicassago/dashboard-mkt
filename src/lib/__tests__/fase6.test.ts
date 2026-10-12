@@ -47,6 +47,8 @@ describe("6.7 — UTM com ids (D6)", () => {
       "https://lp.exemplo.com.br/consorcio?x=1&utm_source=meta&utm_medium=paid_social&utm_campaign={{campaign.id}}&utm_term={{adset.id}}&utm_content={{ad.id}}",
     );
     expect(urlComUtm("", UTM_PADRAO)).toBe("");
+    // Âncora na base: a query vem antes do "#".
+    expect(urlComUtm("https://lp.exemplo.com.br/consorcio#form", { utm_source: "meta" })).toBe("https://lp.exemplo.com.br/consorcio?utm_source=meta#form");
     expect(urlComUtm("isto não é url", UTM_PADRAO)).toBe("URL base inválida");
     // Valor comum continua codificado.
     expect(urlComUtm("https://a.b/c", { utm_content: "Anúncio A|100001" })).toBe("https://a.b/c?utm_content=An%C3%BAncio%20A%7C100001");

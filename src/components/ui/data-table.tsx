@@ -28,7 +28,14 @@ function ordenarLinhas<T>(lista: T[], columns: Column<T>[], sortKey: string | un
   return [...lista].sort((a, b) => {
     const va = col.sortValue!(a);
     const vb = col.sortValue!(b);
-    if (typeof va === "number" && typeof vb === "number") return (va - vb) * factor;
+    if (typeof va === "number" && typeof vb === "number") {
+      // Sem valor (null → Infinity, "—") fica por último nas DUAS direções:
+      // ordenar por custo deve começar por quem tem custo.
+      const fa = Number.isFinite(va);
+      const fb = Number.isFinite(vb);
+      if (fa !== fb) return fa ? -1 : 1;
+      return (va - vb) * factor;
+    }
     return String(va).localeCompare(String(vb)) * factor;
   });
 }
