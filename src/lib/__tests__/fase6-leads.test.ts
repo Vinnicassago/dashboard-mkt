@@ -6,15 +6,17 @@ import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mascararContato, mascararEmail, mascararNoTexto, mascararTelefone } from "../lgpd";
-import { ETAPA_MAXIMA_LABEL, etapaMaxima } from "../lead-status";
+import { ETAPA_MAXIMA_LABEL, etapaMaxima, statusLabel } from "../lead-status";
 import {
   CSV_CABECALHO,
   FILTRO_VAZIO,
   aplicarFiltro,
   contarPorStatus,
   descreverFiltro,
+  filtroDoPedido,
   montarCsvDeLeads,
   montarLinhasDeLeads,
+  periodoDoRegistro,
   type LinhaDeLead,
 } from "../leads-vista";
 import { proximaPelaCadencia } from "../contato";
@@ -26,15 +28,23 @@ import { periodoPadraoDe } from "@/components/layout/nav-items";
 import type { AdDaily, Creative, DashboardData, Lead, LeadEvent } from "../types";
 
 // ---------------------------------------------------------------- dublês
-// Só o que a ação de exportar e os componentes da ficha tocam: o store (o
-// insert em audit_log), o papel, quem age, a marca e a URL (`?range=`).
+// Só o que a exportação e os componentes da ficha tocam: o store (a leitura dos
+// leads e o insert em audit_log), o papel, quem age, a marca e a URL (`?range=`).
 const dubles = vi.hoisted(() => ({
   addAuditEntry: vi.fn<(entry: unknown) => Promise<void>>(async () => {}),
+  getData: vi.fn<(brand?: string) => Promise<DashboardData>>(async () => {
+    throw new Error("getData sem dublê neste teste");
+  }),
+  listLeadEvents: vi.fn<(opts?: unknown) => Promise<LeadEvent[]>>(async () => []),
   can: vi.fn<(cap: string) => Promise<boolean>>(async () => true),
   range: "7d" as string | null,
 }));
 
-vi.mock("@/lib/data/store", () => ({ addAuditEntry: dubles.addAuditEntry }));
+vi.mock("@/lib/data/store", () => ({
+  addAuditEntry: dubles.addAuditEntry,
+  getData: dubles.getData,
+  listLeadEvents: dubles.listLeadEvents,
+}));
 vi.mock("@/lib/auth/guard", () => ({ can: dubles.can }));
 vi.mock("@/lib/auth/actor", () => ({ currentActor: async () => "ana", newEventId: () => "EVT-teste" }));
 vi.mock("@/lib/active-brand", () => ({ activeBrandSlug: async () => "consorcio" }));
@@ -406,46 +416,193 @@ describe("CSV: nada que o Excel execute", () => {
   });
 });
 
-describe("exportação: sem registro em audit_log, sem CSV", () => {
+describe("exportação: o servidor monta o CSV, registra o que saiu e só então devolve", () => {
   const silencio = vi.spyOn(console, "error");
+  // Três pessoas no dia 08/10 (duas "Novo", uma agendada) e uma de setembro.
+  const N1 = lead("51");
+  const N2 = lead("52", { name: "Pessoa Busca", createdAt: brt("2026-10-08", "11:00") });
+  const AG = lead("53", {
+    status: "agendado",
+    firstContactAt: brt("2026-10-08", "10:20"),
+    bookedAt: brt("2026-10-08", "10:30"),
+    meetingFor: brt("2026-10-12", "10:00"),
+  });
+  const SET = lead("54", { createdAt: brt("2026-09-01", "10:00") });
+  const dados = base({ leads: [N1, N2, AG, SET] });
+
+  const pedir = (corpo: unknown, headers: Record<string, string> = {}) =>
+    new Request("http://localhost/leads/exportar", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...headers },
+      body: typeof corpo === "string" ? corpo : JSON.stringify(corpo),
+    });
+  const exportar = async (req: Request) => (await import("@/app/(dashboard)/leads/exportar/route")).POST(req);
+  const registro = () => dubles.addAuditEntry.mock.calls[0]?.[0] as { action: string; actor: string; detail: string };
+
   beforeEach(() => {
     dubles.addAuditEntry.mockReset();
     dubles.addAuditEntry.mockImplementation(async () => {});
     dubles.can.mockReset();
     dubles.can.mockImplementation(async () => true);
+    dubles.getData.mockReset();
+    dubles.getData.mockImplementation(async () => dados);
+    dubles.listLeadEvents.mockReset();
+    dubles.listLeadEvents.mockImplementation(async () => []);
     silencio.mockImplementation(() => {});
   });
   afterEach(() => silencio.mockReset());
 
-  it("o insert falhou → ok: false (a tela não monta o arquivo), em vez do registro que engolia o erro", async () => {
-    dubles.addAuditEntry.mockRejectedValueOnce(new Error("connect ECONNREFUSED 127.0.0.1:5432"));
-    const { registrarExportacaoAction } = await import("@/app/(dashboard)/leads/actions");
-    const r = await registrarExportacaoAction("período: 7 dias · status: todos", 3);
-    expect(r.ok).toBe(false);
-    expect(r.message).toContain("não foi gerado");
-    expect(r.message).not.toContain("ECONNREFUSED");
-    expect(dubles.addAuditEntry).toHaveBeenCalledTimes(1);
-  });
-
-  it("o insert entrou → ok: true, com quem, quantos, a marca e o filtro no registro", async () => {
-    const { registrarExportacaoAction } = await import("@/app/(dashboard)/leads/actions");
-    const r = await registrarExportacaoAction("período: 7 dias · status: todos", 3);
-    expect(r.ok).toBe(true);
-    expect(dubles.addAuditEntry).toHaveBeenCalledWith(
-      expect.objectContaining({
-        actor: "ana",
-        action: "exportar_leads",
-        detail: "3 leads · marca: consorcio · período: 7 dias · status: todos",
+  it("a contagem e o filtro do registro são os do que SAIU — o que o navegador diz sobre n e descrição não entra", async () => {
+    const res = await exportar(
+      pedir({
+        range: "2026-10-08..2026-10-08",
+        filtro: { status: "lead" },
+        // Campos que a ação antiga aceitava do navegador: ignorados.
+        n: 0,
+        descricaoDoFiltro: "qualquer",
       }),
     );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/csv");
+    expect(res.headers.get("x-leads-exportados")).toBe("2");
+    const csv = await res.text();
+    expect(csv.split("\r\n")).toHaveLength(3); // cabeçalho + N1 + N2
+    expect(csv).toContain(N1.name);
+    expect(csv).toContain(N2.name);
+    expect(csv).not.toContain(AG.name); // outro status
+    expect(csv).not.toContain(SET.name); // fora do período
+
+    expect(dubles.addAuditEntry).toHaveBeenCalledTimes(1);
+    expect(registro()).toMatchObject({ actor: "ana", action: "exportar_leads" });
+    expect(registro().detail).toBe(
+      `2 leads · marca: consorcio · período: 08/10 a 08/10 (08/10/2026 a 08/10/2026) · status: ${statusLabel("lead")}`,
+    );
+    expect(registro().detail).not.toContain("qualquer");
+    // A marca e os eventos lidos são os da marca ativa, como na página.
+    expect(dubles.getData).toHaveBeenCalledWith("consorcio");
+    expect(dubles.listLeadEvents).toHaveBeenCalledWith({ brand: "consorcio", limit: 0 });
   });
 
-  it("sem leads:write (Marketing) → ok: false e nenhum registro", async () => {
+  it("a busca vale no servidor (vai no corpo, não na URL) e o registro diz só “busca: sim”", async () => {
+    const res = await exportar(pedir({ range: "all", filtro: { busca: N2.phone } }));
+    expect(res.headers.get("x-leads-exportados")).toBe("1");
+    expect(await res.text()).toContain(N2.name);
+    expect(registro().detail).toContain("busca: sim");
+    expect(registro().detail).not.toContain(N2.phone!);
+  });
+
+  it("período inválido exporta a campanha inteira — e o registro diz isso, não o rótulo pedido", async () => {
+    const res = await exportar(pedir({ range: "toString", filtro: {} }));
+    expect(res.headers.get("x-leads-exportados")).toBe("4");
+    expect(registro().detail).toContain("período: Campanha (todo o histórico)");
+  });
+
+  it("o insert em audit_log falhou → 503 com mensagem humana e nenhum byte de CSV", async () => {
+    dubles.addAuditEntry.mockRejectedValueOnce(new Error("connect ECONNREFUSED 127.0.0.1:5432"));
+    const res = await exportar(pedir({ range: "all", filtro: {} }));
+    expect(res.status).toBe(503);
+    expect(res.headers.get("content-type")).toContain("application/json");
+    const corpo = (await res.json()) as { ok: boolean; message: string };
+    expect(corpo.ok).toBe(false);
+    expect(corpo.message).toContain("não foi gerado");
+    expect(corpo.message).not.toContain("ECONNREFUSED");
+    expect(JSON.stringify(corpo)).not.toContain(N1.name);
+  });
+
+  it("sem leads:write (Marketing) → 403, nada lido e nenhum registro", async () => {
     dubles.can.mockImplementation(async () => false);
-    const { registrarExportacaoAction } = await import("@/app/(dashboard)/leads/actions");
-    const r = await registrarExportacaoAction("período: Campanha · status: todos", 10);
-    expect(r.ok).toBe(false);
+    const res = await exportar(pedir({ range: "all", filtro: {} }));
+    expect(res.status).toBe(403);
+    expect(dubles.getData).not.toHaveBeenCalled();
     expect(dubles.addAuditEntry).not.toHaveBeenCalled();
+  });
+
+  it("pedido de outro site → 403 (vale também no modo aberto, sem AUTH_SECRET)", async () => {
+    const res = await exportar(pedir({ range: "all", filtro: {} }, { "sec-fetch-site": "cross-site" }));
+    expect(res.status).toBe(403);
+    expect(dubles.addAuditEntry).not.toHaveBeenCalled();
+  });
+
+  it("filtro sem ninguém → 422 e nenhum registro; corpo que não é JSON → 400", async () => {
+    const vazio = await exportar(pedir({ range: "all", filtro: { status: "cliente" } }));
+    expect(vazio.status).toBe(422);
+    const torto = await exportar(pedir("isto não é json"));
+    expect(torto.status).toBe(400);
+    expect(dubles.addAuditEntry).not.toHaveBeenCalled();
+  });
+
+  it("filtroDoPedido confere campo a campo: o que não é conhecido vira “sem filtro”", () => {
+    expect(
+      filtroDoPedido({
+        status: "hack",
+        dono: "toString",
+        campanha: 42,
+        conjunto: "  Lookalike  ",
+        sinalizadores: ["teste", "x", "teste", "constructor"],
+        busca: "  ana  ",
+      }),
+    ).toEqual({
+      status: "todos",
+      campanha: undefined,
+      conjunto: "Lookalike",
+      dono: undefined,
+      sinalizadores: ["teste"],
+      busca: "ana",
+    });
+    expect(filtroDoPedido(null)).toEqual({ ...FILTRO_VAZIO, campanha: undefined, conjunto: undefined, dono: undefined });
+    expect(filtroDoPedido({ status: "agendado", dono: "COM" })).toMatchObject({ status: "agendado", dono: "COM" });
+  });
+
+  it("periodoDoRegistro: as datas que o servidor aplicou, ou a campanha inteira", () => {
+    expect(periodoDoRegistro("7 dias", { from: "2026-10-07", to: "2026-10-13" })).toBe(
+      "7 dias (07/10/2026 a 13/10/2026)",
+    );
+    expect(periodoDoRegistro("7 dias", undefined)).toBe("Campanha (todo o histórico)");
+  });
+
+  it("a tela pede ao servidor e só recebe arquivo com o registro feito; a contagem do aviso é a do servidor", async () => {
+    const { pedirCsvDeLeads } = await import("@/components/leads/exportar-csv");
+    const enviados: { url: string; corpo: string }[] = [];
+    // O fetch da tela ligado direto no route handler.
+    const buscar = (async (url: string, init?: RequestInit) => {
+      enviados.push({ url, corpo: String(init?.body) });
+      return exportar(
+        new Request(`http://localhost${url}`, { method: init?.method, headers: init?.headers, body: init?.body }),
+      );
+    }) as typeof fetch;
+
+    const ok = await pedirCsvDeLeads(
+      "2026-10-08..2026-10-08",
+      { ...FILTRO_VAZIO, status: "lead", busca: "Busca" },
+      buscar,
+    );
+    expect(ok.ok).toBe(true);
+    if (ok.ok) {
+      expect(ok.n).toBe(1);
+      expect(await ok.arquivo.text()).toContain(N2.name);
+    }
+    // A busca vai no corpo; a URL não leva nada.
+    expect(enviados[0].url).toBe("/leads/exportar");
+    expect(JSON.parse(enviados[0].corpo)).toMatchObject({
+      range: "2026-10-08..2026-10-08",
+      filtro: { busca: "Busca" },
+    });
+
+    dubles.addAuditEntry.mockRejectedValueOnce(new Error("insert falhou"));
+    const falhou = await pedirCsvDeLeads("all", FILTRO_VAZIO, buscar);
+    expect(falhou).toEqual({ ok: false, message: expect.stringContaining("não foi gerado") });
+  });
+
+  it("a tela: resposta que não é CSV (login, rede caída) não vira arquivo", async () => {
+    const { pedirCsvDeLeads } = await import("@/components/leads/exportar-csv");
+    const login = (async () =>
+      new Response("<html>entrar</html>", { status: 200, headers: { "content-type": "text/html" } })) as typeof fetch;
+    expect((await pedirCsvDeLeads("all", FILTRO_VAZIO, login)).ok).toBe(false);
+    const caiu = (async () => {
+      throw new TypeError("Failed to fetch");
+    }) as typeof fetch;
+    const r = await pedirCsvDeLeads("all", FILTRO_VAZIO, caiu);
+    expect(r).toEqual({ ok: false, message: expect.stringContaining("nada foi exportado") });
   });
 });
 

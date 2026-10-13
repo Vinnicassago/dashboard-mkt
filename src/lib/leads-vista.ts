@@ -273,6 +273,64 @@ export function descreverFiltro(f: FiltroDeLeads, periodo: string): string {
   return partes.join(" · ");
 }
 
+const TETO_TEXTO_DO_FILTRO = 200;
+const textoDoPedido = (v: unknown): string | undefined =>
+  typeof v === "string" && v.trim() ? v.trim().slice(0, TETO_TEXTO_DO_FILTRO) : undefined;
+
+/**
+ * O filtro que o navegador PEDE na exportação, conferido campo a campo: o que
+ * não for um status, um dono ou um sinalizador conhecido cai para "sem filtro"
+ * nesse campo. Quem exporta é o servidor (`/leads/exportar`), que recalcula as
+ * linhas e aplica ESTE filtro — o navegador só diz o que quer, não o que levou.
+ */
+export function filtroDoPedido(entrada: unknown): FiltroDeLeads {
+  const e = (entrada && typeof entrada === "object" ? entrada : {}) as Record<string, unknown>;
+  const status =
+    typeof e.status === "string" && (LEAD_STATUSES as string[]).includes(e.status) ? (e.status as LeadStatus) : "todos";
+  const dono = typeof e.dono === "string" && Object.hasOwn(DONO_LABEL, e.dono) ? (e.dono as Dono) : undefined;
+  const sinalizadores = Array.isArray(e.sinalizadores)
+    ? [
+        ...new Set(
+          e.sinalizadores.filter(
+            (s): s is SinalizadorChave => typeof s === "string" && Object.hasOwn(SINALIZADOR_LABEL, s),
+          ),
+        ),
+      ]
+    : [];
+  return {
+    status,
+    campanha: textoDoPedido(e.campanha),
+    conjunto: textoDoPedido(e.conjunto),
+    dono,
+    sinalizadores,
+    busca: textoDoPedido(e.busca) ?? "",
+  };
+}
+
+const dataBr = (iso: string) => iso.split("-").reverse().join("/");
+
+/**
+ * O período no registro da exportação, com as datas que o servidor de fato
+ * aplicou — não só o rótulo da chave: "7 dias" muda de sentido a cada dia, e uma
+ * chave que não resolve (período inteiro no futuro, chave inválida) exporta a
+ * campanha inteira. O registro diz o que saiu.
+ */
+export function periodoDoRegistro(rotulo: string, range: DateRange | undefined): string {
+  if (!range) return "Campanha (todo o histórico)";
+  return `${rotulo} (${dataBr(range.from)} a ${dataBr(range.to)})`;
+}
+
+/** Onde a tela pede o CSV (route handler da página Leads). */
+export const ROTA_EXPORTAR_LEADS = "/leads/exportar";
+
+/** Cabeçalho da resposta com quantos leads SAÍRAM — o aviso da tela lê daqui, não do filtro. */
+export const CABECALHO_QTD_EXPORTADA = "x-leads-exportados";
+
+/** "1 lead" / "3 leads" — a contagem do registro e do aviso da exportação. */
+export function qtdDeLeads(n: number): string {
+  return `${n} lead${n === 1 ? "" : "s"}`;
+}
+
 // ---------------------------------------------------------------- CSV
 
 /**

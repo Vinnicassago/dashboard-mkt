@@ -8,26 +8,21 @@ import { DataTable, type Column } from "@/components/ui/data-table";
 import { Badge } from "@/components/ui/badge";
 import { useComPeriodo } from "@/components/layout/use-periodo";
 import { RegistrarStatus, StatusBadge } from "@/components/tables/lead-status";
-import {
-  deleteLeadAction,
-  registrarExportacaoAction,
-  restoreLeadAction,
-} from "@/app/(dashboard)/leads/actions";
+import { deleteLeadAction, restoreLeadAction } from "@/app/(dashboard)/leads/actions";
+import { pedirCsvDeLeads } from "@/components/leads/exportar-csv";
 import { ETAPA_MAXIMA_LABEL, LEAD_STATUSES, LEAD_STATUS_META } from "@/lib/lead-status";
 import { DONO_LABEL, type Dono } from "@/lib/dono";
 import { FILA_ETAPAS } from "@/lib/fila";
 import { dica } from "@/lib/dicionario";
 import { formatDateTime, formatDateTimeCurta, formatarEspera } from "@/lib/format";
 import { normalizarTelefone } from "@/lib/phone";
-import { rangeLabel } from "@/lib/range";
 import {
   FILTRO_VAZIO,
   SINALIZADOR_LABEL,
   aplicarFiltroSemStatus,
   contarPorStatus,
-  descreverFiltro,
-  montarCsvDeLeads,
   profundidadeDaEtapa,
+  qtdDeLeads,
   type AbaStatus,
   type FiltroDeLeads,
   type LinhaDeLead,
@@ -385,7 +380,7 @@ export function LeadsDirectory({
   mascararContato = false,
 }: {
   rows: LinhaDeLead[];
-  /** O `?range=` da página, para o registro da exportação dizer o período. */
+  /** O `?range=` da página: o servidor exporta o MESMO período que a tabela mostra. */
   rangeKey: string;
   /** Mudar status (leads:write — comercial e administrador). */
   canEdit?: boolean;
@@ -455,24 +450,22 @@ export function LeadsDirectory({
 
   function exportar() {
     setMsgExport(null);
-    const linhas = filtradas;
-    const descricao = descreverFiltro(filtro, rangeLabel(rangeKey));
     startExport(async () => {
-      // Registra ANTES de montar o arquivo: sem registro, sem CSV. `ok: false`
-      // inclui o registro que não entrou em audit_log — o arquivo não nasce.
-      const r = await registrarExportacaoAction(descricao, linhas.length);
+      // Quem monta o arquivo é o servidor: recalcula as linhas com este período e
+      // este filtro, grava em audit_log o que de fato sai e só então devolve o
+      // CSV. A tela não declara contagem nem filtro — sem registro, sem arquivo.
+      const r = await pedirCsvDeLeads(rangeKey, filtro);
       if (!r.ok) {
         setMsgExport({ ok: false, text: r.message });
         return;
       }
-      const blob = new Blob([montarCsvDeLeads(linhas)], { type: "text/csv;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
+      const url = URL.createObjectURL(r.arquivo);
       const a = document.createElement("a");
       a.href = url;
       a.download = "leads.csv";
       a.click();
       URL.revokeObjectURL(url);
-      setMsgExport({ ok: true, text: r.message });
+      setMsgExport({ ok: true, text: `Exportação de ${qtdDeLeads(r.n)} registrada.` });
     });
   }
 

@@ -2,7 +2,6 @@
 
 import { revalidatePath } from "next/cache";
 import {
-  addAuditEntry,
   addLead,
   addLeadEvent,
   getLead,
@@ -17,49 +16,14 @@ import { gruposDuplicados } from "@/lib/identidade";
 import { encerrado, podeTransitar, statusLabel, type DadosDaTransicao } from "@/lib/lead-status";
 import { proximaPelaCadencia, resumoContato, type CanalContato } from "@/lib/contato";
 import { formatDateTime } from "@/lib/format";
-import { mensagemHumana } from "@/lib/erros";
 import { can } from "@/lib/auth/guard";
 import { currentActor, newEventId } from "@/lib/auth/actor";
-import { activeBrandSlug } from "@/lib/active-brand";
 import { aplicarStatus, type StatusResult } from "@/lib/leads/mudar-status";
 import type { LeadStatus } from "@/lib/types";
 
-/**
- * Registra uma exportação de leads ANTES de o navegador montar o arquivo: o
- * CSV leva nome, telefone e e-mail, e saber quem levou o quê é parte da LGPD.
- * Só quem trabalha o lead exporta (`leads:write` — comercial e administrador);
- * Marketing vê o contato mascarado e não tem o botão. A descrição é o filtro em
- * palavras (`descreverFiltro`), sem o texto da busca — PII não vai ao log.
- * Devolve `ok: false` se a linha não entrou em `audit_log` — a tela só gera o
- * CSV com `ok`.
- */
-export async function registrarExportacaoAction(descricaoDoFiltro: string, n: number): Promise<StatusResult> {
-  if (!(await can("leads:write"))) {
-    return { ok: false, message: "Só o comercial e o administrador exportam leads." };
-  }
-  const qtd = Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
-  const brand = await activeBrandSlug();
-  const leads = `${qtd} lead${qtd === 1 ? "" : "s"}`;
-  // Direto no store, sem o `registrarAuditoria` que engole o erro: aqui o
-  // registro É a condição. Se a linha não entrou, a ação diz que não e o
-  // navegador não monta o arquivo — sem registro, sem CSV.
-  try {
-    await addAuditEntry({
-      id: newEventId(),
-      at: new Date().toISOString(),
-      actor: await currentActor(),
-      action: "exportar_leads",
-      detail: `${leads} · marca: ${brand} · ${descricaoDoFiltro.trim().slice(0, 400)}`,
-    });
-  } catch (e) {
-    console.error("[leads] não registrei a exportação em audit_log:", e);
-    return {
-      ok: false,
-      message: `Não consegui registrar a exportação, então o arquivo não foi gerado. ${mensagemHumana("banco de dados", e)}`,
-    };
-  }
-  return { ok: true, message: `Exportação de ${leads} registrada.` };
-}
+// A exportação de leads em CSV mora em `leads/exportar/route.ts`: o servidor
+// recalcula as linhas, grava em audit_log o que de fato sai e só então devolve o
+// arquivo. Não há mais ação que só "registre" uma contagem dita pelo navegador.
 
 /**
  * Exclui um lead (ex.: teste, duplicado, spam) de forma REVERSÍVEL: ele sai de
