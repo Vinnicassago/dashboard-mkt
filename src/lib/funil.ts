@@ -17,7 +17,10 @@
  *   aqui, pela vista, com ou sem robô; as do robô e do atendimento — contagens da
  *   campanha inteira, de outro sistema — vão num BLOCO separado, e com período
  *   definido não dividem a verba nem os leads dele (numerador e denominador de
- *   janelas diferentes). "X% da anterior" só entre populações ANINHADAS: o 1º
+ *   janelas diferentes). Reunião realizada e negócio fechado são o MESMO fato no
+ *   painel e no atendimento: um número só, o do painel (o único com data), e o do
+ *   atendimento vira nota na etapa quando não bate — nunca duas linhas com dois
+ *   números. "X% da anterior" só entre populações ANINHADAS: o 1º
  *   contato é ramo paralelo (quem agenda direto não passa por ele), então a taxa
  *   de reuniões é sobre LEADS — e nunca passa de 100%.
  * - TENDÊNCIA das três taxas, semana a semana, com `kpisDoPeriodo` + `lpKpis`:
@@ -47,6 +50,8 @@ import { META_DEF, type AvaliacaoMeta } from "./metas";
 import {
   bucketOfAd,
   cohortWeekly,
+  countAttended,
+  countClients,
   dayOf,
   everBooked,
   filterAds,
@@ -200,7 +205,6 @@ const ROTULO_CUSTO: Record<string, string> = {
   convite: "por convite",
   transferidos: "por transferido",
   abordados: "por abordado",
-  reuniao: "por reunião realizada",
 };
 
 /** Leads com 1ª tentativa registrada — na coorte (quem entrou) ou no período (quando aconteceu). */
@@ -263,6 +267,48 @@ function taxaAninhada(et: EtapaFunil, base: number | null | undefined, rotulo?: 
 }
 
 /**
+ * O atendimento afirma sobre o MESMO fato que uma etapa do painel (reunião
+ * realizada, negócio fechado). Um número por fato: a etapa é do PAINEL — o único
+ * que tem data, então o único que corta período e coorte —, e o do atendimento só
+ * aparece, como nota na própria etapa, quando os dois não batem na campanha
+ * inteira (o escopo que os dois têm). Atendimento ACIMA do painel é divergência:
+ * o painel não tem registro do que o atendimento diz que aconteceu. Sem período
+ * os dois números falam do mesmo escopo, então a etapa vira "—" e a nota nomeia
+ * os dois — a regra da cascata; com período, o número da etapa é o do painel
+ * (não há outro que leia o período) e a nota diz que as fontes discordam.
+ * Atendimento ABAIXO do painel não contradiz: ele só vê quem passou pelo
+ * especialista — a nota diz isso, sem escolher lado.
+ */
+function cruzarComAtendimento(
+  et: EtapaFunil,
+  atendimento: number,
+  painelNaCampanha: number,
+  comPeriodo: boolean,
+  unidade: [singular: string, plural: string],
+): void {
+  if (atendimento === painelNaCampanha) return;
+  const qtd = `${formatInt(atendimento)} ${atendimento === 1 ? unidade[0] : unidade[1]}`;
+  const juntar = (texto: string) => {
+    et.nota = et.nota ? `${et.nota} · ${texto}` : texto;
+  };
+  if (atendimento < painelNaCampanha) {
+    juntar(`o atendimento registra ${qtd} na campanha inteira — só quem passou pelo especialista`);
+    return;
+  }
+  if (!comPeriodo) {
+    et.valor = null;
+    et.daAnterior = undefined;
+    et.baseDaTaxa = undefined;
+    et.semTaxa = undefined;
+    et.nota = `o atendimento registra ${qtd} e o painel conta ${formatInt(painelNaCampanha)} — as fontes discordam`;
+    return;
+  }
+  juntar(
+    `na campanha inteira, o atendimento registra ${qtd} e o painel, ${formatInt(painelNaCampanha)} — as fontes discordam; o atendimento não guarda data, então o número do período é só o do painel`,
+  );
+}
+
+/**
  * Traduz os degraus da cascata nas etapas do funil, na vista pedida. O funil do
  * PAINEL (Meta → LP → painel) existe nas duas vistas, com ou sem robô: de Leads
  * para baixo as etapas são montadas AQUI, pela vista — não pelo que a cascata
@@ -281,6 +327,11 @@ function etapasDaCascata(degraus: Degrau[], e: EntradaFunil): { etapas: EtapaFun
     if (d.key === "envios") continue;
     // O fundo do painel é montado abaixo, pela vista.
     if (d.key === "reunioes" || d.key === "compareceu" || d.key === "clientes") continue;
+    // Reunião realizada e negócio fechado do atendimento são os MESMOS fatos de
+    // "Reuniões realizadas" e "Vendas" do painel: no bloco, o card imprimia o
+    // mesmo fato duas vezes ("0" no painel, "3" no atendimento) sem nada que os
+    // ligasse. O número fica no painel e o do atendimento vira nota nele.
+    if (d.key === "reuniao" || d.key === "negocio") continue;
     (d.fonte === "robo" || d.fonte === "comercial" ? doRobo : etapas).push(traduzDegrau(d));
   }
 
@@ -362,6 +413,7 @@ function etapasDaCascata(degraus: Degrau[], e: EntradaFunil): { etapas: EtapaFun
   };
   if (periodo) compareceu.semTaxa = SEM_TAXA_PERIODO;
   else taxaAninhada(compareceu, reunioes.valor);
+  if (comercial) cruzarComAtendimento(compareceu, comercial.reunioesRealizadas, countAttended(data.leads), !!range, ["reunião realizada", "reuniões realizadas"]);
   etapas.push(compareceu);
 
   const clientes: EtapaFunil = {
@@ -374,6 +426,7 @@ function etapasDaCascata(degraus: Degrau[], e: EntradaFunil): { etapas: EtapaFun
   };
   if (periodo) clientes.semTaxa = SEM_TAXA_PERIODO;
   else taxaAninhada(clientes, compareceu.valor);
+  if (comercial) cruzarComAtendimento(clientes, comercial.negociosFechados, countClients(data.leads), !!range, ["negócio fechado", "negócios fechados"]);
   etapas.push(clientes);
 
   if (doRobo.length === 0) return { etapas };
@@ -403,9 +456,11 @@ function etapasDaCascata(degraus: Degrau[], e: EntradaFunil): { etapas: EtapaFun
     etapas,
     bloco: {
       titulo: "No robô e no atendimento",
-      nota: range
-        ? "contagens da campanha inteira (o robô não guarda data) — por isso sem custo, sem taxa sobre os leads do período e sem Δ"
-        : "contagens da campanha inteira, sobre os mesmos leads do funil acima",
+      nota:
+        (range
+          ? "contagens da campanha inteira (o robô não guarda data) — por isso sem custo, sem taxa sobre os leads do período e sem Δ"
+          : "contagens da campanha inteira, sobre os mesmos leads do funil acima") +
+        (comercial ? ". Reuniões realizadas e vendas ficam só no painel, acima — o número do atendimento entra como nota lá quando não bate" : ""),
       etapas: doRobo,
     },
   };

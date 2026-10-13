@@ -289,7 +289,8 @@ describe("com robô/atendimento ligados, as vistas ainda diferem e a north star 
     expect(r.valor).toBe(4);
     expect(r.custo).toMatchObject({ valor: 225, rotulo: "por reunião", dica: "custo_por_reuniao" });
     expect(r.meta).toMatchObject({ metrica: "reunioes_agendadas", alvo: 7 });
-    expect(f.bloco?.etapas.map((e) => e.key)).toEqual(["conversas", "responderam", "convite", "transferidos", "abordados", "reuniao", "negocio"]);
+    // Reunião realizada e negócio fechado ficam no painel — o bloco termina no especialista.
+    expect(f.bloco?.etapas.map((e) => e.key)).toEqual(["conversas", "responderam", "convite", "transferidos", "abordados"]);
     expect(f.bloco?.etapas.every((e) => e.fonte === "robo" || e.fonte === "comercial")).toBe(true);
   });
 
@@ -408,8 +409,83 @@ describe("robô/atendimento com período: nada divide a verba do período pela c
     const e = porKey(f.bloco?.etapas ?? []);
     expect(f.investimentoConversao).toBe(900);
     expect(e.conversas.custo).toMatchObject({ valor: 900 / 40, rotulo: "por conversa" });
-    expect(e.reuniao.custo).toMatchObject({ valor: 900 / 3, rotulo: "por reunião realizada" });
+    expect(e.transferidos.custo).toMatchObject({ valor: 900 / 6, rotulo: "por transferido" });
     expect(f.bloco?.nota).not.toContain("sem custo");
+  });
+});
+
+// ---------------------------------------------------------------- verificação (6.2): um número por fato
+
+describe("reunião realizada e venda: um número por fato no card, com o atendimento ligado", () => {
+  // Painel na campanha inteira: 2 realizadas (ambas em 06/10) e 1 venda (07/10).
+  // O atendimento registra 3 realizadas e 1 negócio fechado (COMERCIAL).
+  const data = agendamentos();
+  const fatoRealizada = (e: { key: string }) => e.key === "compareceu" || e.key === "reuniao";
+  const fatoVenda = (e: { key: string }) => e.key === "clientes" || e.key === "negocio";
+
+  it("nas duas vistas, com e sem período, o card imprime cada fato UMA vez — e o bloco não repete o painel", () => {
+    for (const vista of ["periodo", "coorte"] as const) {
+      for (const periodo of [SEMANA, null]) {
+        const f = funilCom(data, vista, ROBO, COMERCIAL, periodo);
+        expect(todas(f).filter(fatoRealizada).map((e) => e.key)).toEqual(["compareceu"]);
+        expect(todas(f).filter(fatoVenda).map((e) => e.key)).toEqual(["clientes"]);
+        expect(f.bloco?.etapas.some((e) => e.label === "Reunião realizada" || e.label === "Negócio fechado")).toBe(false);
+        expect(f.bloco?.nota).toContain("Reuniões realizadas e vendas ficam só no painel");
+      }
+    }
+  });
+
+  it("com período: o número é o do painel e a nota liga o do atendimento, dizendo que as fontes discordam", () => {
+    const periodo = porKey(funilCom(data, "periodo", ROBO, COMERCIAL).etapas);
+    expect(periodo.compareceu.valor).toBe(2);
+    expect(periodo.compareceu.nota).toContain("pela data em que a reunião aconteceu");
+    expect(periodo.compareceu.nota).toContain("o atendimento registra 3 reuniões realizadas e o painel, 2 — as fontes discordam");
+    // A venda bate (1 × 1): nenhuma nota a mais, e nenhum outro número para ela no card.
+    expect(periodo.clientes.valor).toBe(1);
+    expect(periodo.clientes.nota).not.toContain("atendimento");
+
+    // O cenário da revisão: a coorte da semana não tem realizada — "0" no painel e
+    // o "3" do atendimento só existe ligado a ele, na nota.
+    const coorte = porKey(funilCom(data, "coorte", ROBO, COMERCIAL).etapas);
+    expect(coorte.compareceu.valor).toBe(0);
+    expect(coorte.compareceu.nota).toContain("o atendimento registra 3 reuniões realizadas e o painel, 2 — as fontes discordam");
+    expect(coorte.clientes.valor).toBe(0);
+    expect(coorte.clientes.nota).not.toContain("atendimento");
+  });
+
+  it("sem período (mesmo escopo nos dois): atendimento acima do painel vira '—' com a divergência nomeada, nunca um lado em silêncio", () => {
+    for (const vista of ["periodo", "coorte"] as const) {
+      const e = porKey(funilCom(data, vista, ROBO, COMERCIAL, null).etapas);
+      expect(e.compareceu.valor).toBeNull();
+      expect(e.compareceu.daAnterior).toBeUndefined();
+      expect(e.compareceu.nota).toBe("o atendimento registra 3 reuniões realizadas e o painel conta 2 — as fontes discordam");
+      // Sem base, a venda não vira fração de um número que ninguém afirma.
+      expect(e.clientes.valor).toBe(1);
+      expect(e.clientes.daAnterior).toBeUndefined();
+    }
+    // Vendas divergindo também: 2 negócios no atendimento contra 1 no painel.
+    const vendas = porKey(funilCom(data, "coorte", ROBO, { ...COMERCIAL, negociosFechados: 2 }, null).etapas);
+    expect(vendas.clientes.valor).toBeNull();
+    expect(vendas.clientes.nota).toBe("o atendimento registra 2 negócios fechados e o painel conta 1 — as fontes discordam");
+  });
+
+  it("atendimento abaixo do painel não contradiz (só vê quem passou pelo especialista): o número fica, com nota neutra", () => {
+    const menos = { ...COMERCIAL, reunioesRealizadas: 1 };
+    for (const periodo of [SEMANA, null]) {
+      const e = porKey(funilCom(data, "periodo", ROBO, menos, periodo).etapas);
+      expect(e.compareceu.valor).toBe(2);
+      expect(e.compareceu.nota).toContain("o atendimento registra 1 reunião realizada na campanha inteira — só quem passou pelo especialista");
+      expect(e.compareceu.nota).not.toContain("discordam");
+    }
+    // Batendo, nenhuma nota do atendimento.
+    const iguais = porKey(funilCom(data, "periodo", ROBO, { ...COMERCIAL, reunioesRealizadas: 2 }).etapas);
+    expect(iguais.compareceu.nota).toBe("pela data em que a reunião aconteceu");
+  });
+
+  it("sem o atendimento (só o robô), as etapas do painel não ganham nota de outra fonte", () => {
+    const e = porKey(funilCom(data, "periodo", ROBO, null).etapas);
+    expect(e.compareceu.nota).toBe("pela data em que a reunião aconteceu");
+    expect(e.clientes.nota).toBe("fechadas no período, pela data do fechamento");
   });
 });
 
