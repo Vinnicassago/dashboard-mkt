@@ -37,6 +37,7 @@ import {
   SEM_META,
   alcanceOrganicoDosPosts,
   dicaConteudo,
+  funilDoPerfil,
   metaDeConversasDm,
   metaDeSeguidores,
   resumoSeguidores,
@@ -44,7 +45,6 @@ import {
 } from "@/lib/conteudo";
 import {
   awarenessKpis,
-  buildOrganicFunnel,
   buildProfileClickFunnel,
   followerSeries,
   goalProgress,
@@ -138,6 +138,16 @@ export default async function ConteudoPage({
     .filter(Boolean)
     .join(" e ");
 
+  // O que falta registrar para os cards acima terem número — tudo o que falta, não só o 1º.
+  const faltasDeRegistro = !temIg
+    ? [
+        "Sem snapshot do Instagram no período — a sincronização ainda não cobriu estes dias ou o registro manual falta.",
+      ]
+    : [
+        seg.temTotal ? null : "O total de seguidores não veio nos snapshots do período (campo em branco).",
+        cur.hasDmData ? null : "Conversas de DM sem registro no período.",
+      ].filter((t): t is string => t !== null);
+
   // Variações de anúncio: a sugestão; quem confirma é uma pessoa (card abaixo).
   const variacoes: VariacaoExibida[] = variacoesDeAnuncio(data.igPosts, range).map((g) => ({
     dia: g.dia,
@@ -158,18 +168,21 @@ export default async function ConteudoPage({
   const acoesDeConteudo =
     brand.type === "awareness" ? [] : buildRecommendations(data, range, new Date().toISOString());
 
-  const orgFunnel = buildOrganicFunnel(data.igAccountDaily, range);
+  // Funil do perfil: alcance da CONTA (pago + orgânico) — o rótulo diz (B11).
+  const perfilFunnel = funilDoPerfil(data.igAccountDaily, range);
   const clickFunnel = buildProfileClickFunnel(data.igAccountDaily, range);
   const engagementDaily = igEngagementSeries(data.igAccountDaily, range);
   const dmWeeks = weeklyDmSeries(data.igAccountDaily, range);
   const series = followerSeries(data.igAccountDaily, range);
 
-  // Meta de seguidores: progresso + projeção linear pelo ritmo do período.
+  // Meta de seguidores: progresso + projeção linear pelo ritmo do período. O
+  // total é o último CONHECIDO (`seg.fim`: 0 = snapshot sem o campo) e o ritmo
+  // é o líquido alinhado aos dias do período — o mesmo número do card.
   const followersGoal = data.goals.find((g) => g.metric === "followers");
-  const gp = followersGoal ? goalProgress(followersGoal, cur.followersEnd) : undefined;
+  const gp = followersGoal && seg.temTotal ? goalProgress(followersGoal, seg.fim) : undefined;
   const windowDays = rows.length;
-  const avgGain = windowDays > 1 ? cur.netNew / (windowDays - 1) : cur.netNew;
-  const remaining = followersGoal ? Math.max(0, followersGoal.target - cur.followersEnd) : 0;
+  const avgGain = windowDays > 0 ? seg.liquido / windowDays : 0;
+  const remaining = followersGoal ? Math.max(0, followersGoal.target - seg.fim) : 0;
   const daysAtRate = avgGain > 0 ? Math.ceil(remaining / avgGain) : null;
   const goalOutlook = !followersGoal
     ? ""
@@ -239,21 +252,30 @@ export default async function ConteudoPage({
             hint={cur.hasDmData ? "registro manual" : "registro manual em Registros"}
             meta={metaDeConversasDm(data.goals, cur.dmConversations, cur.hasDmData, range === undefined)}
           />
+          {/* Total 0 é desconhecido (snapshot manual sem o campo): sem valor, sem Δ e
+              sem status contra a meta — "Abaixo da meta (0%)" por um campo em branco
+              seria cor sobre nada. */}
           <KpiComDica
             dica={dicaConteudo("seguidores")}
             label="Seguidores"
-            value={temIg ? formatInt(cur.followersEnd) : "—"}
+            value={temIg && seg.temTotal ? formatInt(seg.fim) : "—"}
             Icon={Users}
-            delta={temIg ? deltaDeContagem(seg.liquido, "no período") : undefined}
-            hint={temIg ? seg.nota : SEM_IG}
-            meta={metaDeSeguidores(data.goals, cur.followersEnd, temIg)}
+            delta={temIg && seg.temTotal ? deltaDeContagem(seg.liquido, "no período") : undefined}
+            hint={
+              !temIg
+                ? SEM_IG
+                : !seg.temTotal
+                  ? "sem total de seguidores no período — o snapshot veio sem o campo"
+                  : seg.fimNoUltimoDia || !seg.fimEm
+                    ? seg.nota
+                    : `total de ${formatDateShort(seg.fimEm)} (o último snapshot veio sem o campo) · ${seg.nota}`
+            }
+            meta={metaDeSeguidores(data.goals, seg.fim, temIg && seg.temTotal)}
           />
         </div>
-        {!cur.hasDmData || !temIg ? (
+        {faltasDeRegistro.length > 0 ? (
           <p className="text-xs text-muted-foreground">
-            {!temIg
-              ? "Sem snapshot do Instagram no período — a sincronização ainda não cobriu estes dias ou o registro manual falta. "
-              : "Conversas de DM sem registro no período. "}
+            {faltasDeRegistro.join(" ")}{" "}
             <Link href={registrosHref} className="underline underline-offset-2">
               Registrar em Registros
             </Link>
@@ -418,10 +440,10 @@ export default async function ConteudoPage({
 
             <div className="grid gap-4 lg:grid-cols-2">
               <ChartCard
-                title="Funil orgânico do perfil"
-                description="Alcance → visita ao perfil → novo seguidor. Onde perde: muito alcance e pouca visita = gancho fraco; muita visita e poucos seguidores = feed/prova social."
+                title="Funil do perfil (alcance da conta, pago + orgânico)"
+                description="Alcance da conta → visita ao perfil → novo seguidor. O alcance aqui inclui os anúncios (a Meta não separa) — o orgânico dos posts está no card acima. Onde perde: muito alcance e pouca visita = gancho fraco (ou anúncio que não leva ao perfil); muita visita e poucos seguidores = feed/prova social."
               >
-                <FunnelChart stages={orgFunnel} />
+                <FunnelChart stages={perfilFunnel} />
               </ChartCard>
               <ChartCard
                 title="Funil do link da bio"
@@ -442,7 +464,7 @@ export default async function ConteudoPage({
                 <ChartCard title="Meta de seguidores" description={goalOutlook}>
                   <GoalBar
                     label="Seguidores"
-                    valueText={formatInt(cur.followersEnd)}
+                    valueText={formatInt(seg.fim)}
                     targetText={formatInt(followersGoal.target)}
                     pct={gp.pct}
                     onTrack={gp.onTrack}
@@ -498,7 +520,7 @@ export default async function ConteudoPage({
               </ChartCard>
               <ChartCard
                 title="Variação de seguidores por dia"
-                description={`Líquido diário (fim do dia − dia anterior). ${seg.nota}.`}
+                description={`Líquido diário: ganhos − perdas quando a série cobre o período; senão, o total do dia contra o último conhecido (o 1º dia, contra a véspera; dia sem total conta 0). A soma é o líquido do card Seguidores. ${seg.nota}.`}
               >
                 <TimeSeriesChart
                   data={series}

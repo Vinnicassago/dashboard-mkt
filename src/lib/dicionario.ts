@@ -194,8 +194,9 @@ export const DICIONARIO: Record<MetricaId, Definicao> = {
   seguidores: {
     id: "seguidores",
     nome: "Seguidores",
-    definicao: "Total de seguidores no último dia do período; o líquido é fim − início.",
-    formula: "followers no último dia · líquido = fim − início",
+    definicao:
+      "Último total de seguidores conhecido no período; o líquido é a variação desde o fim do dia anterior ao período — com a série completa, ganhos − perdas.",
+    formula: "followers no último dia com total · líquido = ganhos − perdas (série completa) ou fim − total da véspera",
     fonte: "Instagram (followers_count no sync; follows_and_unfollows para ganhos e perdas)",
     inclui: "ganhos e perdas do período, quando a API fornece a série (100+ seguidores)",
     exclui: "nada — é o total da conta",
