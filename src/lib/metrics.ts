@@ -705,32 +705,105 @@ export interface FollowerPoint {
   views: number;
 }
 
+/** 0 (ou menos) = total desconhecido: snapshot manual sem o campo — a regra de `reconstruirSeguidores`. */
+const temTotalDeSeguidores = (r: IgAccountDaily) => r.followers > 0;
+/** Ganhos E perdas do dia (`follows_and_unfollows`; a Meta omite um lado às vezes). */
+const temGanhosEPerdas = (r: IgAccountDaily) => r.followsDay != null && r.unfollowsDay != null;
+
+export interface SeguidoresDoPeriodo {
+  /** Último total CONHECIDO do período (0 = nenhum: os snapshots vieram sem o campo). */
+  fim: number;
+  /** Dia de `fim` — antes do último dia do período quando o último snapshot veio sem o total. */
+  fimEm?: string;
+  /** De onde o líquido parte: fim − líquido — o total no fim da véspera do período. */
+  inicio: number;
+  /** A variação no período: o número de TODAS as telas (cards, funis, gráficos, IA). */
+  liquido: number;
+  /** Variação de cada dia do período, em ordem de data; a soma é `liquido`. */
+  variacaoPorDia: number[];
+  /** Algum dia do período tem o total. Sem ele, o total é "—" e não há status contra a meta. */
+  temTotal: boolean;
+  /** Todo dia do período tem ganhos E perdas: o líquido é ganhos − perdas. */
+  serieCompleta: boolean;
+}
+
 /**
- * Série diária do total e da variação. `followers` é o total no FIM do dia e
- * 0 é desconhecido (snapshot manual sem o campo): a variação de um dia é contra
- * o último total CONHECIDO, e o dia sem total varia 0 — senão um campo em branco
- * virava "−1.240" num dia e "+1.250" no seguinte. O 1º ponto do período varia
- * contra a véspera (a última linha antes dele com total); sem ela, contra o
- * próprio líquido do dia quando há os dois lados (ganhos − perdas); sem nada,
- * 0. É a regra de `resumoSeguidores` (lib/conteudo.ts): a soma da variação é o
- * líquido do card — zerar o 1º dia tirava da soma um dia que a nota "ganhos e
- * perdas" inclui.
+ * Seguidores do período — a regra ÚNICA da variação. `igAccountTotals` (Bússola,
+ * Funil, IA, Conteúdo) e `followerSeries` (os gráficos) leem daqui: um fato, um
+ * número. `followers` é o total no FIM do dia, e 0 é desconhecido.
+ *
+ * - Série completa (todo dia do período com ganhos e perdas): cada dia varia
+ *   ganhos − perdas e o líquido É ganhos − perdas — a série é a medição (o sync
+ *   reconstrói os totais a partir dela, `reconstruirSeguidores`), então o card
+ *   nunca diz "0 no período · ganhos e perdas: +10 / −2".
+ * - Senão, cada dia varia contra o último total CONHECIDO: o 1º, contra a
+ *   véspera (a última linha antes do período com total); sem véspera, o 1º total
+ *   varia o próprio ganhos − perdas quando há os dois lados, ou 0. Dia sem total
+ *   varia 0 — um campo em branco não é "−1.240" num dia e "+1.250" no seguinte.
+ *
+ * Antes era "total do último dia − total do 1º dia": deixava a variação do 1º
+ * dia de fora (que a nota "ganhos e perdas" incluía) e um snapshot sem o campo
+ * virava "0 seguidores · −1.240 no período". `inicio` é fim − líquido, então
+ * fim − início é SEMPRE o líquido (com a série completa e sem total nenhum, não
+ * é um total — só o que fecha a conta; a tela mostra "—").
+ */
+export function seguidoresDoPeriodo(rows: IgAccountDaily[], range?: DateRange): SeguidoresDoPeriodo {
+  const todas = [...rows].sort((a, b) => a.date.localeCompare(b.date));
+  const noPeriodo = todas.filter((r) => inRange(r.date, range));
+  const comTotal = noPeriodo.filter(temTotalDeSeguidores);
+  const fim = comTotal.at(-1)?.followers ?? 0;
+  const serieCompleta = noPeriodo.length > 0 && noPeriodo.every(temGanhosEPerdas);
+
+  let variacaoPorDia: number[];
+  if (serieCompleta) {
+    variacaoPorDia = noPeriodo.map((r) => (r.followsDay ?? 0) - (r.unfollowsDay ?? 0));
+  } else {
+    let ultimo: number | undefined = range
+      ? todas.filter((r) => r.date < range.from && temTotalDeSeguidores(r)).at(-1)?.followers
+      : undefined;
+    variacaoPorDia = noPeriodo.map((r) => {
+      if (!temTotalDeSeguidores(r)) return 0;
+      const variacao =
+        ultimo !== undefined
+          ? r.followers - ultimo
+          : temGanhosEPerdas(r)
+            ? (r.followsDay ?? 0) - (r.unfollowsDay ?? 0)
+            : 0;
+      ultimo = r.followers;
+      return variacao;
+    });
+  }
+  const liquido = variacaoPorDia.reduce((s, v) => s + v, 0);
+  return {
+    fim,
+    fimEm: comTotal.at(-1)?.date,
+    inicio: fim - liquido,
+    liquido,
+    variacaoPorDia,
+    temTotal: comTotal.length > 0,
+    serieCompleta,
+  };
+}
+
+/**
+ * Série diária do total e da variação. A variação (`gain`) é a de
+ * `seguidoresDoPeriodo`: a soma do gráfico é o líquido dos cards — o 1º dia
+ * varia contra a véspera (zerá-lo tirava da soma um dia que a nota "ganhos e
+ * perdas" inclui) e o dia sem total varia 0.
  */
 export function followerSeries(rows: IgAccountDaily[], range?: DateRange): FollowerPoint[] {
-  const todas = [...rows].sort((a, b) => a.date.localeCompare(b.date));
-  const sorted = todas.filter((r) => inRange(r.date, range));
-  let ultimo: number | undefined = range
-    ? todas.filter((r) => r.date < range.from && r.followers > 0).at(-1)?.followers
-    : undefined;
-  return sorted.map((r) => {
-    let gain = 0;
-    if (r.followers > 0) {
-      if (ultimo !== undefined) gain = r.followers - ultimo;
-      else if (r.followsDay != null && r.unfollowsDay != null) gain = r.followsDay - r.unfollowsDay;
-      ultimo = r.followers;
-    }
-    return { date: r.date, followers: r.followers, gain, reach: r.reach, views: r.views };
-  });
+  // Mesma ordenação e mesmo recorte de `seguidoresDoPeriodo`: o índice casa.
+  const sorted = [...rows]
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .filter((r) => inRange(r.date, range));
+  const { variacaoPorDia } = seguidoresDoPeriodo(rows, range);
+  return sorted.map((r, i) => ({
+    date: r.date,
+    followers: r.followers,
+    gain: variacaoPorDia[i] ?? 0,
+    reach: r.reach,
+    views: r.views,
+  }));
 }
 
 // ---- fadiga de criativo --------------------------------------------
@@ -1702,8 +1775,11 @@ export function postingCadence(
 // ---- instagram: account totals (period-over-period ready) ----------
 
 export interface IgAccountTotals {
+  /** Último total CONHECIDO do período (`seguidoresDoPeriodo`; 0 = nenhum). */
   followersEnd: number;
+  /** fim − líquido: o total no fim da véspera do período. */
   followersStart: number;
+  /** O líquido de `seguidoresDoPeriodo` — o mesmo número em todas as telas. */
   netNew: number;
   reach: number;
   views: number;
@@ -1768,13 +1844,17 @@ export function igAccountTotals(rows: IgAccountDaily[], range?: DateRange): IgAc
   const diasComLinkSplit = sorted.filter(
     (r) => r.linkTapsWebsite != null && r.linkTapsWhatsApp != null,
   );
-  const followersEnd = sorted.at(-1)?.followers ?? 0;
-  const followersStart = sorted[0]?.followers ?? 0;
+  // Seguidores: a regra ÚNICA (`seguidoresDoPeriodo`) — o último total conhecido
+  // e o líquido desde a véspera. "Último − 1º dia" deixava o 1º dia de fora e
+  // fazia a Bússola, o Funil e a IA dizerem 0 onde o Conteúdo dizia +8.
+  const seg = seguidoresDoPeriodo(rows, range);
+  const followersEnd = seg.fim;
+  const followersStart = seg.inicio;
   const days = sorted.length;
   return {
     followersEnd,
     followersStart,
-    netNew: followersEnd - followersStart,
+    netNew: seg.liquido,
     reach,
     views: sum((r) => r.views),
     interactions,
@@ -2161,10 +2241,9 @@ export function actualForGoal(goal: Goal, data: DashboardData, range?: DateRange
  * fraco; muita visita e poucos seguidores = feed/prova social fraca. (A perda
  * visita→clique no link já aparece como "Taxa de clique no link".)
  *
- * O alcance é o da CONTA, pago + orgânico — o rótulo diz isso (B11). A tela de
- * Conteúdo usa `funilDoPerfil` (lib/conteudo.ts), cujo 3º degrau é o líquido
- * de `resumoSeguidores` (os mesmos dias da nota do card); `netNew` deixa o 1º
- * dia do período de fora.
+ * O alcance é o da CONTA, pago + orgânico — o rótulo diz isso (B11). O 3º
+ * degrau é o líquido de `seguidoresDoPeriodo` (via `netNew`), o mesmo do card
+ * Seguidores. A tela de Conteúdo usa `funilDoPerfil` (lib/conteudo.ts).
  */
 export function buildOrganicFunnel(rows: IgAccountDaily[], range?: DateRange): FunnelStage[] {
   const t = igAccountTotals(rows, range);

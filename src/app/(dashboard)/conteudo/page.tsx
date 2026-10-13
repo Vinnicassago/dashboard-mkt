@@ -520,7 +520,7 @@ export default async function ConteudoPage({
               </ChartCard>
               <ChartCard
                 title="Variação de seguidores por dia"
-                description={`Líquido diário: total no fim do dia − o último total conhecido; o 1º dia, contra a véspera (dia sem total conta 0). ${seg.nota}.`}
+                description={`Líquido diário: ganhos − perdas quando a série cobre o período; senão, o total do dia contra o último conhecido (o 1º dia, contra a véspera; dia sem total conta 0). A soma é o líquido do card Seguidores. ${seg.nota}.`}
               >
                 <TimeSeriesChart
                   data={series}
