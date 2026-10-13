@@ -9,6 +9,7 @@ import {
   deleteLeadAction,
   mesclarLeads,
 } from "@/app/(dashboard)/leads/actions";
+import { useComPeriodo } from "@/components/layout/use-periodo";
 import { StatusBadge } from "@/components/tables/lead-status";
 import { statusLabel } from "@/lib/lead-status";
 import { formatDateTime } from "@/lib/format";
@@ -32,9 +33,11 @@ export interface RevisarDados {
   contatos: (RevisarLead & { problemas: string[] })[];
 }
 
+/** O nome abre a ficha com o período da página — e ela volta para a mesma coorte. */
 function Nome({ l }: { l: RevisarLead }) {
+  const comPeriodo = useComPeriodo();
   return (
-    <Link href={`/leads/${encodeURIComponent(l.id)}`} className="font-medium hover:underline">
+    <Link href={comPeriodo(`/leads/${encodeURIComponent(l.id)}`)} className="font-medium hover:underline">
       {l.name}
     </Link>
   );
@@ -150,6 +153,10 @@ export function Revisar({ dados, podeAgir }: { dados: RevisarDados; podeAgir: bo
                   <Nome l={t} />
                   <StatusBadge status={t.status} />
                   <span className="text-xs text-muted-foreground">por causa do {t.porque}</span>
+                  {/* O motivo não traz o contato (LGPD); quem confirma vê aqui o que o disparou. */}
+                  <span className="text-xs">
+                    <Contato l={t} />
+                  </span>
                 </span>
                 {podeAgir ? (
                   <button

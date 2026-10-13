@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowRight, Search } from "lucide-react";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { Badge } from "@/components/ui/badge";
+import { useComPeriodo } from "@/components/layout/use-periodo";
 import { statusMeta } from "@/components/tables/lead-status";
 import type { LeadEvent } from "@/lib/types";
 import { formatDateTime } from "@/lib/format";
@@ -98,6 +99,20 @@ export function DescricaoEvento({ e }: { e: LeadEvent }) {
   );
 }
 
+/**
+ * O nome abre a ficha COM o período da página (`?range=`): a ficha volta para
+ * Leads no mesmo período, e a coorte que a pessoa estava olhando não some no
+ * caminho. As colunas são um array de módulo, então o hook mora aqui.
+ */
+function NomeDoLead({ id, name }: { id: string; name: string }) {
+  const comPeriodo = useComPeriodo();
+  return (
+    <Link href={comPeriodo(`/leads/${encodeURIComponent(id)}`)} className="hover:underline">
+      {name}
+    </Link>
+  );
+}
+
 const columns: Column<LeadEvent>[] = [
   {
     key: "createdAt",
@@ -118,11 +133,7 @@ const columns: Column<LeadEvent>[] = [
     header: "Lead",
     sortable: true,
     sortValue: (r) => r.leadName,
-    render: (r) => (
-      <Link href={`/leads/${encodeURIComponent(r.leadId)}`} className="hover:underline">
-        {r.leadName}
-      </Link>
-    ),
+    render: (r) => <NomeDoLead id={r.leadId} name={r.leadName} />,
   },
   {
     key: "change",

@@ -2,21 +2,64 @@
  * Fase 6.4 — a página Leads. Fixture sintética (nenhum dado real).
  * Datas em Brasília (UTC−3, sem horário de verão). 2026-10-08 é quinta.
  */
-import { describe, expect, it } from "vitest";
-import { mascararContato, mascararEmail, mascararTelefone } from "../lgpd";
-import { ETAPA_MAXIMA_LABEL, etapaMaxima } from "../lead-status";
+import { createElement, type ReactNode } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { mascararContato, mascararEmail, mascararNoTexto, mascararTelefone } from "../lgpd";
+import { ETAPA_MAXIMA_LABEL, etapaMaxima, statusLabel } from "../lead-status";
 import {
   CSV_CABECALHO,
   FILTRO_VAZIO,
   aplicarFiltro,
   contarPorStatus,
   descreverFiltro,
+  filtroDoPedido,
   montarCsvDeLeads,
   montarLinhasDeLeads,
+  periodoDoRegistro,
   type LinhaDeLead,
 } from "../leads-vista";
 import { proximaPelaCadencia } from "../contato";
+import { HORAS_APOS_CONVERSA } from "../fila";
+import { formatDateTime } from "../format";
+import { pareceTeste } from "../identidade";
+import { comPeriodo } from "../range";
+import { periodoPadraoDe } from "@/components/layout/nav-items";
 import type { AdDaily, Creative, DashboardData, Lead, LeadEvent } from "../types";
+
+// ---------------------------------------------------------------- dublês
+// Só o que a exportação e os componentes da ficha tocam: o store (a leitura dos
+// leads e o insert em audit_log), o papel, quem age, a marca e a URL (`?range=`).
+const dubles = vi.hoisted(() => ({
+  addAuditEntry: vi.fn<(entry: unknown) => Promise<void>>(async () => {}),
+  getData: vi.fn<(brand?: string) => Promise<DashboardData>>(async () => {
+    throw new Error("getData sem dublê neste teste");
+  }),
+  listLeadEvents: vi.fn<(opts?: unknown) => Promise<LeadEvent[]>>(async () => []),
+  can: vi.fn<(cap: string) => Promise<boolean>>(async () => true),
+  range: "7d" as string | null,
+}));
+
+vi.mock("@/lib/data/store", () => ({
+  addAuditEntry: dubles.addAuditEntry,
+  getData: dubles.getData,
+  listLeadEvents: dubles.listLeadEvents,
+}));
+vi.mock("@/lib/auth/guard", () => ({ can: dubles.can }));
+vi.mock("@/lib/auth/actor", () => ({ currentActor: async () => "ana", newEventId: () => "EVT-teste" }));
+vi.mock("@/lib/active-brand", () => ({ activeBrandSlug: async () => "consorcio" }));
+vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/leads",
+  useSearchParams: () => new URLSearchParams(dubles.range ? `range=${dubles.range}` : ""),
+  useRouter: () => ({ refresh: () => {}, push: () => {}, replace: () => {} }),
+}));
+vi.mock("next/link", async () => {
+  const { createElement: h } = await import("react");
+  return {
+    default: ({ href, children, ...resto }: { href: string; children?: ReactNode }) => h("a", { href, ...resto }, children),
+  };
+});
 
 const brt = (dia: string, hhmm: string) => new Date(`${dia}T${hhmm}:00-03:00`).toISOString();
 
@@ -301,5 +344,342 @@ describe("abas, filtros e CSV", () => {
     expect(d).toBe("período: 30 dias · status: Agendado · campanha: Consórcio Leads · dono: comercial · sinalizadores: Duplicado · busca: sim");
     expect(d).not.toContain("11999990003");
     expect(descreverFiltro(FILTRO_VAZIO, "Campanha")).toBe("período: Campanha · status: todos");
+  });
+});
+
+// ---------------------------------------------------------------- revisão (Fase 6.4)
+
+describe("“Parece teste” não fura a máscara (LGPD)", () => {
+  const porEmail = lead("21", { name: "Pessoa Vinte e Um", email: "teste7@exemplo.com", phone: "11987654321" });
+  const porFone = lead("22", { name: "Pessoa Vinte e Dois", email: "p22@exemplo.com", phone: "(11) 99999-9999" });
+  const linhas = montarLinhasDeLeads(base({ leads: [porEmail, porFone] }), [], AGORA);
+  const l = porId(linhas);
+
+  it("o motivo diz o porquê sem o contato — é o que vai para a dica do selo e para o aviso da ficha", () => {
+    expect(l.get("21")!.sinalizadores.teste).toBe("e-mail de teste");
+    expect(l.get("22")!.sinalizadores.teste).toBe("telefone com dígitos repetidos");
+    // A ficha chama `pareceTeste(lead)` com o lead cru: o texto já sai sem PII.
+    for (const x of [porEmail, porFone]) {
+      const motivo = pareceTeste(x)!;
+      expect(motivo).not.toContain("@");
+      expect(motivo).not.toMatch(/\d/);
+    }
+  });
+
+  it("a linha mascarada (papel Marketing) não carrega o contato cru em campo nenhum", () => {
+    for (const crua of linhas) {
+      const json = JSON.stringify(mascararContato(crua));
+      expect(json).not.toContain(crua.email!);
+      expect(json).not.toContain(crua.phone!);
+      expect(json).not.toMatch(/9{5}|987654321/);
+    }
+  });
+
+  it("motivo antigo gravado com o contato cru sai mascarado; datas e ids de lead passam intactos", () => {
+    expect(mascararNoTexto("teste (e-mail “teste7@exemplo.com”)")).toBe("teste (e-mail “t•••@exemplo.com”)");
+    expect(mascararNoTexto("teste (telefone “(11) 99999-9999”)")).toBe("teste (telefone “(11) •••••-9999”)");
+    expect(mascararNoTexto("teste (telefone “+55 11 99999-9999”)")).not.toContain("99999");
+    expect(mascararNoTexto("spam — 08/10/2026 10:00")).toBe("spam — 08/10/2026 10:00");
+    expect(mascararNoTexto("duplicado de Pessoa 2 (LEAD-LP-17283912345678)")).toBe(
+      "duplicado de Pessoa 2 (LEAD-LP-17283912345678)",
+    );
+    expect(mascararNoTexto(undefined)).toBe("");
+  });
+});
+
+describe("CSV: nada que o Excel execute", () => {
+  const [modelo] = montarLinhasDeLeads(base({ leads: [lead("41")] }), [], AGORA);
+  const linhaDoCsv = (r: LinhaDeLead) => montarCsvDeLeads([r]).split("\r\n")[1];
+
+  it("nome, e-mail e origem que começam com = + - @ (ou tab/CR) saem como texto, com apóstrofo e entre aspas", () => {
+    const maliciosa: LinhaDeLead = {
+      ...modelo,
+      name: '=HYPERLINK("https://phish.example";"Abrir ficha")',
+      email: "+5@exemplo.com",
+      origem: { ...modelo.origem, campanha: "@SOMA(1;2)", conjunto: "\t=1+1", anuncio: "-2+3+cmd|x" },
+    };
+    const linha = linhaDoCsv(maliciosa);
+    expect(linha.startsWith(`"'=HYPERLINK(""https://phish.example"";""Abrir ficha"")";`)).toBe(true);
+    expect(linha).toContain(`;"'+5@exemplo.com";`);
+    expect(linha).toContain(`;"'@SOMA(1;2)";"'\t=1+1";"'-2+3+cmd|x";`);
+    // Fora das aspas, a única célula que começa com caractere perigoso é o telefone.
+    const foraDasAspas = linha.replace(/"'[^"]*(?:""[^"]*)*"/g, "TEXTO");
+    expect(foraDasAspas.split(";").filter((c) => /^[=+\-@\t\r]/.test(c))).toEqual([`="${modelo.phone}"`]);
+  });
+
+  it("o único = de propósito continua: o telefone como texto; texto comum não ganha apóstrofo", () => {
+    const comum: LinhaDeLead = { ...modelo, name: "Ana-Maria Souza", email: "ana@exemplo.com" };
+    const colunas = linhaDoCsv(comum).split(";");
+    expect(colunas[0]).toBe("Ana-Maria Souza");
+    expect(colunas[1]).toBe("ana@exemplo.com");
+    expect(colunas[2]).toBe(`="${modelo.phone}"`);
+  });
+});
+
+describe("exportação: o servidor monta o CSV, registra o que saiu e só então devolve", () => {
+  const silencio = vi.spyOn(console, "error");
+  // Três pessoas no dia 08/10 (duas "Novo", uma agendada) e uma de setembro.
+  const N1 = lead("51");
+  const N2 = lead("52", { name: "Pessoa Busca", createdAt: brt("2026-10-08", "11:00") });
+  const AG = lead("53", {
+    status: "agendado",
+    firstContactAt: brt("2026-10-08", "10:20"),
+    bookedAt: brt("2026-10-08", "10:30"),
+    meetingFor: brt("2026-10-12", "10:00"),
+  });
+  const SET = lead("54", { createdAt: brt("2026-09-01", "10:00") });
+  const dados = base({ leads: [N1, N2, AG, SET] });
+
+  const pedir = (corpo: unknown, headers: Record<string, string> = {}) =>
+    new Request("http://localhost/leads/exportar", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...headers },
+      body: typeof corpo === "string" ? corpo : JSON.stringify(corpo),
+    });
+  const exportar = async (req: Request) => (await import("@/app/(dashboard)/leads/exportar/route")).POST(req);
+  const registro = () => dubles.addAuditEntry.mock.calls[0]?.[0] as { action: string; actor: string; detail: string };
+
+  beforeEach(() => {
+    dubles.addAuditEntry.mockReset();
+    dubles.addAuditEntry.mockImplementation(async () => {});
+    dubles.can.mockReset();
+    dubles.can.mockImplementation(async () => true);
+    dubles.getData.mockReset();
+    dubles.getData.mockImplementation(async () => dados);
+    dubles.listLeadEvents.mockReset();
+    dubles.listLeadEvents.mockImplementation(async () => []);
+    silencio.mockImplementation(() => {});
+  });
+  afterEach(() => silencio.mockReset());
+
+  it("a contagem e o filtro do registro são os do que SAIU — o que o navegador diz sobre n e descrição não entra", async () => {
+    const res = await exportar(
+      pedir({
+        range: "2026-10-08..2026-10-08",
+        filtro: { status: "lead" },
+        // Campos que a ação antiga aceitava do navegador: ignorados.
+        n: 0,
+        descricaoDoFiltro: "qualquer",
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/csv");
+    expect(res.headers.get("x-leads-exportados")).toBe("2");
+    const csv = await res.text();
+    expect(csv.split("\r\n")).toHaveLength(3); // cabeçalho + N1 + N2
+    expect(csv).toContain(N1.name);
+    expect(csv).toContain(N2.name);
+    expect(csv).not.toContain(AG.name); // outro status
+    expect(csv).not.toContain(SET.name); // fora do período
+
+    expect(dubles.addAuditEntry).toHaveBeenCalledTimes(1);
+    expect(registro()).toMatchObject({ actor: "ana", action: "exportar_leads" });
+    expect(registro().detail).toBe(
+      `2 leads · marca: consorcio · período: 08/10 a 08/10 (08/10/2026 a 08/10/2026) · status: ${statusLabel("lead")}`,
+    );
+    expect(registro().detail).not.toContain("qualquer");
+    // A marca e os eventos lidos são os da marca ativa, como na página.
+    expect(dubles.getData).toHaveBeenCalledWith("consorcio");
+    expect(dubles.listLeadEvents).toHaveBeenCalledWith({ brand: "consorcio", limit: 0 });
+  });
+
+  it("a busca vale no servidor (vai no corpo, não na URL) e o registro diz só “busca: sim”", async () => {
+    const res = await exportar(pedir({ range: "all", filtro: { busca: N2.phone } }));
+    expect(res.headers.get("x-leads-exportados")).toBe("1");
+    expect(await res.text()).toContain(N2.name);
+    expect(registro().detail).toContain("busca: sim");
+    expect(registro().detail).not.toContain(N2.phone!);
+  });
+
+  it("período inválido exporta a campanha inteira — e o registro diz isso, não o rótulo pedido", async () => {
+    const res = await exportar(pedir({ range: "toString", filtro: {} }));
+    expect(res.headers.get("x-leads-exportados")).toBe("4");
+    expect(registro().detail).toContain("período: Campanha (todo o histórico)");
+  });
+
+  it("o insert em audit_log falhou → 503 com mensagem humana e nenhum byte de CSV", async () => {
+    dubles.addAuditEntry.mockRejectedValueOnce(new Error("connect ECONNREFUSED 127.0.0.1:5432"));
+    const res = await exportar(pedir({ range: "all", filtro: {} }));
+    expect(res.status).toBe(503);
+    expect(res.headers.get("content-type")).toContain("application/json");
+    const corpo = (await res.json()) as { ok: boolean; message: string };
+    expect(corpo.ok).toBe(false);
+    expect(corpo.message).toContain("não foi gerado");
+    expect(corpo.message).not.toContain("ECONNREFUSED");
+    expect(JSON.stringify(corpo)).not.toContain(N1.name);
+  });
+
+  it("sem leads:write (Marketing) → 403, nada lido e nenhum registro", async () => {
+    dubles.can.mockImplementation(async () => false);
+    const res = await exportar(pedir({ range: "all", filtro: {} }));
+    expect(res.status).toBe(403);
+    expect(dubles.getData).not.toHaveBeenCalled();
+    expect(dubles.addAuditEntry).not.toHaveBeenCalled();
+  });
+
+  it("pedido de outro site → 403 (vale também no modo aberto, sem AUTH_SECRET)", async () => {
+    const res = await exportar(pedir({ range: "all", filtro: {} }, { "sec-fetch-site": "cross-site" }));
+    expect(res.status).toBe(403);
+    expect(dubles.addAuditEntry).not.toHaveBeenCalled();
+  });
+
+  it("filtro sem ninguém → 422 e nenhum registro; corpo que não é JSON → 400", async () => {
+    const vazio = await exportar(pedir({ range: "all", filtro: { status: "cliente" } }));
+    expect(vazio.status).toBe(422);
+    const torto = await exportar(pedir("isto não é json"));
+    expect(torto.status).toBe(400);
+    expect(dubles.addAuditEntry).not.toHaveBeenCalled();
+  });
+
+  it("filtroDoPedido confere campo a campo: o que não é conhecido vira “sem filtro”", () => {
+    expect(
+      filtroDoPedido({
+        status: "hack",
+        dono: "toString",
+        campanha: 42,
+        conjunto: "  Lookalike  ",
+        sinalizadores: ["teste", "x", "teste", "constructor"],
+        busca: "  ana  ",
+      }),
+    ).toEqual({
+      status: "todos",
+      campanha: undefined,
+      conjunto: "Lookalike",
+      dono: undefined,
+      sinalizadores: ["teste"],
+      busca: "ana",
+    });
+    expect(filtroDoPedido(null)).toEqual({ ...FILTRO_VAZIO, campanha: undefined, conjunto: undefined, dono: undefined });
+    expect(filtroDoPedido({ status: "agendado", dono: "COM" })).toMatchObject({ status: "agendado", dono: "COM" });
+  });
+
+  it("periodoDoRegistro: as datas que o servidor aplicou, ou a campanha inteira", () => {
+    expect(periodoDoRegistro("7 dias", { from: "2026-10-07", to: "2026-10-13" })).toBe(
+      "7 dias (07/10/2026 a 13/10/2026)",
+    );
+    expect(periodoDoRegistro("7 dias", undefined)).toBe("Campanha (todo o histórico)");
+  });
+
+  it("a tela pede ao servidor e só recebe arquivo com o registro feito; a contagem do aviso é a do servidor", async () => {
+    const { pedirCsvDeLeads } = await import("@/components/leads/exportar-csv");
+    const enviados: { url: string; corpo: string }[] = [];
+    // O fetch da tela ligado direto no route handler.
+    const buscar = (async (url: string, init?: RequestInit) => {
+      enviados.push({ url, corpo: String(init?.body) });
+      return exportar(
+        new Request(`http://localhost${url}`, { method: init?.method, headers: init?.headers, body: init?.body }),
+      );
+    }) as typeof fetch;
+
+    const ok = await pedirCsvDeLeads(
+      "2026-10-08..2026-10-08",
+      { ...FILTRO_VAZIO, status: "lead", busca: "Busca" },
+      buscar,
+    );
+    expect(ok.ok).toBe(true);
+    if (ok.ok) {
+      expect(ok.n).toBe(1);
+      expect(await ok.arquivo.text()).toContain(N2.name);
+    }
+    // A busca vai no corpo; a URL não leva nada.
+    expect(enviados[0].url).toBe("/leads/exportar");
+    expect(JSON.parse(enviados[0].corpo)).toMatchObject({
+      range: "2026-10-08..2026-10-08",
+      filtro: { busca: "Busca" },
+    });
+
+    dubles.addAuditEntry.mockRejectedValueOnce(new Error("insert falhou"));
+    const falhou = await pedirCsvDeLeads("all", FILTRO_VAZIO, buscar);
+    expect(falhou).toEqual({ ok: false, message: expect.stringContaining("não foi gerado") });
+  });
+
+  it("a tela: resposta que não é CSV (login, rede caída) não vira arquivo", async () => {
+    const { pedirCsvDeLeads } = await import("@/components/leads/exportar-csv");
+    const login = (async () =>
+      new Response("<html>entrar</html>", { status: 200, headers: { "content-type": "text/html" } })) as typeof fetch;
+    expect((await pedirCsvDeLeads("all", FILTRO_VAZIO, login)).ok).toBe(false);
+    const caiu = (async () => {
+      throw new TypeError("Failed to fetch");
+    }) as typeof fetch;
+    const r = await pedirCsvDeLeads("all", FILTRO_VAZIO, caiu);
+    expect(r).toEqual({ ok: false, message: expect.stringContaining("nada foi exportado") });
+  });
+});
+
+describe("o nome abre a ficha COM o período (Histórico e Revisar)", () => {
+  afterEach(() => {
+    dubles.range = "7d";
+  });
+  const evento: LeadEvent = {
+    id: "EV1",
+    leadId: "LEAD-LP-abc",
+    leadName: "Pessoa Abc",
+    actor: "ana",
+    action: "nota",
+    createdAt: brt("2026-10-08", "10:00"),
+    payload: { texto: "ligar à tarde" },
+  };
+  const revisado = {
+    id: "LEAD-LP-abc",
+    name: "Pessoa Abc",
+    status: "lead" as const,
+    createdAt: brt("2026-10-08", "10:00"),
+    origem: "—",
+    porque: "e-mail de teste",
+  };
+
+  it("Histórico de alterações: /leads/ID?range=7d", async () => {
+    const { LeadActivity } = await import("@/components/leads/lead-activity");
+    const html = renderToStaticMarkup(createElement(LeadActivity, { events: [evento] }));
+    expect(html).toContain('href="/leads/LEAD-LP-abc?range=7d"');
+  });
+
+  it("Revisar: /leads/ID?range=7d", async () => {
+    const { Revisar } = await import("@/components/leads/revisar");
+    const dados = { testes: [revisado], duplicados: [], desistencias: [], contatos: [] };
+    const html = renderToStaticMarkup(createElement(Revisar, { dados, podeAgir: false }));
+    expect(html).toContain('href="/leads/LEAD-LP-abc?range=7d"');
+    expect(html).toContain("por causa do e-mail de teste");
+  });
+
+  it("sem ?range= na URL vale o padrão da página — o mesmo que o resto da tela usa", async () => {
+    dubles.range = null;
+    const { LeadActivity } = await import("@/components/leads/lead-activity");
+    const html = renderToStaticMarkup(createElement(LeadActivity, { events: [evento] }));
+    expect(html).toContain(`href="${comPeriodo("/leads/LEAD-LP-abc", periodoPadraoDe("/leads"))}"`);
+  });
+});
+
+describe("o porquê do “—” diz quando a pessoa volta à Fila", () => {
+  it("falou e não fechou nada: volta HORAS_APOS_CONVERSA depois da última tentativa — a mesma conta da Fila", () => {
+    const J = lead("31", { status: "em_contato", firstContactAt: brt("2026-10-08", "10:00") });
+    const ev = [tentativa(J.id, brt("2026-10-08", "10:00"), true)];
+    const [agora] = montarLinhasDeLeads(base({ leads: [J] }), ev, AGORA);
+    expect(agora.proximaAcao).toBe("—");
+    expect(agora.acaoPorque).not.toContain("Nada pendente");
+    expect(agora.acaoPorque).toContain("já falou com a pessoa");
+    expect(agora.acaoPorque).toContain(`volta à Fila (“Retornar hoje”) em ${formatDateTime(brt("2026-10-09", "10:00"))}`);
+    expect(agora.acaoPorque).toContain(`${HORAS_APOS_CONVERSA} h depois`);
+    // E a Fila concorda: passado o prazo, a mesma pessoa está em "retornar".
+    const [depois] = montarLinhasDeLeads(base({ leads: [J] }), ev, brt("2026-10-09", "10:01"));
+    expect(depois.proximaAcao).toBe("retornar");
+  });
+
+  it("cadência encerrada sem conversa: o mesmo relógio, sem dizer que falou", () => {
+    const K = lead("32", { status: "em_contato", firstContactAt: brt("2026-10-08", "11:00") });
+    const semRetorno: LeadEvent = {
+      id: "T-fim",
+      leadId: K.id,
+      leadName: K.name,
+      actor: "ana",
+      action: "tentativa",
+      occurredAt: brt("2026-10-08", "11:00"),
+      createdAt: brt("2026-10-08", "11:00"),
+      payload: { canal: "telefone", falou: "nao" },
+    };
+    const [linha] = montarLinhasDeLeads(base({ leads: [K] }), [semRetorno], AGORA);
+    expect(linha.proximaAcao).toBe("—");
+    expect(linha.acaoPorque).not.toContain("falou");
+    expect(linha.acaoPorque).toContain(formatDateTime(brt("2026-10-09", "11:00")));
   });
 });

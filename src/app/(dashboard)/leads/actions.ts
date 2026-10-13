@@ -18,30 +18,12 @@ import { proximaPelaCadencia, resumoContato, type CanalContato } from "@/lib/con
 import { formatDateTime } from "@/lib/format";
 import { can } from "@/lib/auth/guard";
 import { currentActor, newEventId } from "@/lib/auth/actor";
-import { activeBrandSlug } from "@/lib/active-brand";
-import { registrarAuditoria } from "@/lib/auditoria";
 import { aplicarStatus, type StatusResult } from "@/lib/leads/mudar-status";
 import type { LeadStatus } from "@/lib/types";
 
-/**
- * Registra uma exportação de leads ANTES de o navegador montar o arquivo: o
- * CSV leva nome, telefone e e-mail, e saber quem levou o quê é parte da LGPD.
- * Só quem trabalha o lead exporta (`leads:write` — comercial e administrador);
- * Marketing vê o contato mascarado e não tem o botão. A descrição é o filtro em
- * palavras (`descreverFiltro`), sem o texto da busca — PII não vai ao log.
- */
-export async function registrarExportacaoAction(descricaoDoFiltro: string, n: number): Promise<StatusResult> {
-  if (!(await can("leads:write"))) {
-    return { ok: false, message: "Só o comercial e o administrador exportam leads." };
-  }
-  const qtd = Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
-  const brand = await activeBrandSlug();
-  await registrarAuditoria(
-    "exportar_leads",
-    `${qtd} lead${qtd === 1 ? "" : "s"} · marca: ${brand} · ${descricaoDoFiltro.trim().slice(0, 400)}`,
-  );
-  return { ok: true, message: `Exportação de ${qtd} lead${qtd === 1 ? "" : "s"} registrada.` };
-}
+// A exportação de leads em CSV mora em `leads/exportar/route.ts`: o servidor
+// recalcula as linhas, grava em audit_log o que de fato sai e só então devolve o
+// arquivo. Não há mais ação que só "registre" uma contagem dita pelo navegador.
 
 /**
  * Exclui um lead (ex.: teste, duplicado, spam) de forma REVERSÍVEL: ele sai de

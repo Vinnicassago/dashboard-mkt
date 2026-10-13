@@ -14,7 +14,7 @@ import { resumoContato, quando } from "@/lib/contato";
 import { etapaDoLead, FILA_ETAPAS } from "@/lib/fila";
 import { gruposDuplicados, pareceTeste, problemasDeContato } from "@/lib/identidade";
 import { ETAPA_MAXIMA_LABEL, etapaMaxima } from "@/lib/lead-status";
-import { mascararEmail, mascararTelefone } from "@/lib/lgpd";
+import { mascararEmail, mascararNoTexto, mascararTelefone } from "@/lib/lgpd";
 import { everBooked } from "@/lib/metrics";
 import { origemDoLead } from "@/lib/origem";
 import { normalizarTelefone } from "@/lib/phone";
@@ -35,17 +35,21 @@ function Linha({ rotulo, children }: { rotulo: string; children: React.ReactNode
 
 const data = (iso?: string) => (iso ? formatDateTime(iso) : "—");
 
-/** Contato novo digitado num reenvio vai mascarado para o papel mascarado. */
+/**
+ * Contato novo digitado num reenvio, e o contato cru que motivos antigos de
+ * exclusão ("parece teste") levavam, vão mascarados para o papel mascarado.
+ */
 function mascararEvento(e: LeadEvent): LeadEvent {
   if (!e.payload) return e;
-  const { telefoneNovo, emailNovo } = e.payload;
-  if (!telefoneNovo && !emailNovo) return e;
+  const { telefoneNovo, emailNovo, motivo } = e.payload;
+  if (!telefoneNovo && !emailNovo && !motivo) return e;
   return {
     ...e,
     payload: {
       ...e.payload,
       ...(telefoneNovo ? { telefoneNovo: mascararTelefone(telefoneNovo) } : {}),
       ...(emailNovo ? { emailNovo: mascararEmail(emailNovo) } : {}),
+      ...(motivo ? { motivo: mascararNoTexto(motivo) } : {}),
     },
   };
 }
@@ -157,7 +161,8 @@ export default async function FichaDoLead({
                   name: lead.name,
                   deletedAt: lead.deletedAt,
                   deletedBy: lead.deletedBy,
-                  deletedReason: lead.deletedReason,
+                  // Motivos antigos de "parece teste" foram gravados com o contato cru.
+                  deletedReason: mascarar ? mascararNoTexto(lead.deletedReason) || undefined : lead.deletedReason,
                 },
               ]}
               canRestore={canDelete}

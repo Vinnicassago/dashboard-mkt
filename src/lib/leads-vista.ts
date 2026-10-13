@@ -10,9 +10,9 @@
  * Leads diz de uma pessoa ser o que a Fila e o Funil dizem dela.
  */
 
-import { eventosPorLead, resumoContato } from "./contato";
+import { eventosPorLead, resumoContato, type ResumoContato } from "./contato";
 import { DONO_LABEL, type Dono } from "./dono";
-import { etapaDoLead, FILA_ETAPAS, type FilaEtapa } from "./fila";
+import { etapaDoLead, FILA_ETAPAS, HORAS_APOS_CONVERSA, type FilaEtapa } from "./fila";
 import { formatDateTime, formatarEspera } from "./format";
 import { horasUteisEntre, somarHorasUteis } from "./horario-util";
 import { gruposDuplicados, pareceTeste, problemasDeContato } from "./identidade";
@@ -112,7 +112,7 @@ function donoDoLead(l: Lead, etapa: FilaEtapa | undefined): Dono | undefined {
 }
 
 /** O motivo de não haver ação agora — para a dica do "—" não ser um zero disfarçado. */
-function porqueSemAcao(l: Lead, proximaTentativa: string | undefined): string {
+function porqueSemAcao(l: Lead, contato: ResumoContato): string {
   if (isLostStatus(l.status)) return `Encerrado como “${statusLabel(l.status)}”.`;
   if (l.status === "cliente") return "Fechou — nada a fazer.";
   if (l.status === "reuniao_realizada") return "Compareceu; o desfecho (cliente ou não) é do especialista.";
@@ -120,7 +120,19 @@ function porqueSemAcao(l: Lead, proximaTentativa: string | undefined): string {
     return `Reunião em ${formatDateTime(l.meetingFor)} — confirmar ${FILA_ETAPAS.confirmar.slaHoras} h antes.`;
   }
   if (l.status === "agendado") return "Agendado sem data registrada; vira “sem desfecho” uma semana depois.";
-  if (proximaTentativa) return `Retorno combinado pela cadência para ${formatDateTime(proximaTentativa)}.`;
+  if (contato.proxima) return `Retorno combinado pela cadência para ${formatDateTime(contato.proxima)}.`;
+  // Tentativa sem retorno combinado (falou e não fechou nada, ou a cadência
+  // acabou): a Fila traz a pessoa de volta HORAS_APOS_CONVERSA depois da última
+  // tentativa — a MESMA conta de `etapaDoLead`. Até lá existe um prazo; dizer
+  // "nada pendente" esconderia o relógio que estoura amanhã.
+  if (l.status === "em_contato" && contato.ultima) {
+    const volta = new Date(Date.parse(contato.ultima) + HORAS_APOS_CONVERSA * 3_600_000).toISOString();
+    const conversa = contato.falou ? " — já falou com a pessoa" : "";
+    return (
+      `Última tentativa em ${formatDateTime(contato.ultima)}${conversa}, sem desfecho; ` +
+      `volta à Fila (“${FILA_ETAPAS.retornar.label}”) em ${formatDateTime(volta)}, ${HORAS_APOS_CONVERSA} h depois.`
+    );
+  }
   return "Nada pendente neste momento.";
 }
 
@@ -181,7 +193,7 @@ export function montarLinhasDeLeads(
         ? etapa.venceEm
           ? `${FILA_ETAPAS[etapa.nome].hint} Vence ${formatDateTime(etapa.venceEm)}.`
           : `${FILA_ETAPAS[etapa.nome].hint} Desde ${formatDateTime(etapa.desde)}.`
-        : porqueSemAcao(l, contato.proxima),
+        : porqueSemAcao(l, contato),
       origem: origem(l),
       dono: donoDoLead(l, etapa?.nome),
       sinalizadores: {
@@ -261,10 +273,78 @@ export function descreverFiltro(f: FiltroDeLeads, periodo: string): string {
   return partes.join(" · ");
 }
 
+const TETO_TEXTO_DO_FILTRO = 200;
+const textoDoPedido = (v: unknown): string | undefined =>
+  typeof v === "string" && v.trim() ? v.trim().slice(0, TETO_TEXTO_DO_FILTRO) : undefined;
+
+/**
+ * O filtro que o navegador PEDE na exportação, conferido campo a campo: o que
+ * não for um status, um dono ou um sinalizador conhecido cai para "sem filtro"
+ * nesse campo. Quem exporta é o servidor (`/leads/exportar`), que recalcula as
+ * linhas e aplica ESTE filtro — o navegador só diz o que quer, não o que levou.
+ */
+export function filtroDoPedido(entrada: unknown): FiltroDeLeads {
+  const e = (entrada && typeof entrada === "object" ? entrada : {}) as Record<string, unknown>;
+  const status =
+    typeof e.status === "string" && (LEAD_STATUSES as string[]).includes(e.status) ? (e.status as LeadStatus) : "todos";
+  const dono = typeof e.dono === "string" && Object.hasOwn(DONO_LABEL, e.dono) ? (e.dono as Dono) : undefined;
+  const sinalizadores = Array.isArray(e.sinalizadores)
+    ? [
+        ...new Set(
+          e.sinalizadores.filter(
+            (s): s is SinalizadorChave => typeof s === "string" && Object.hasOwn(SINALIZADOR_LABEL, s),
+          ),
+        ),
+      ]
+    : [];
+  return {
+    status,
+    campanha: textoDoPedido(e.campanha),
+    conjunto: textoDoPedido(e.conjunto),
+    dono,
+    sinalizadores,
+    busca: textoDoPedido(e.busca) ?? "",
+  };
+}
+
+const dataBr = (iso: string) => iso.split("-").reverse().join("/");
+
+/**
+ * O período no registro da exportação, com as datas que o servidor de fato
+ * aplicou — não só o rótulo da chave: "7 dias" muda de sentido a cada dia, e uma
+ * chave que não resolve (período inteiro no futuro, chave inválida) exporta a
+ * campanha inteira. O registro diz o que saiu.
+ */
+export function periodoDoRegistro(rotulo: string, range: DateRange | undefined): string {
+  if (!range) return "Campanha (todo o histórico)";
+  return `${rotulo} (${dataBr(range.from)} a ${dataBr(range.to)})`;
+}
+
+/** Onde a tela pede o CSV (route handler da página Leads). */
+export const ROTA_EXPORTAR_LEADS = "/leads/exportar";
+
+/** Cabeçalho da resposta com quantos leads SAÍRAM — o aviso da tela lê daqui, não do filtro. */
+export const CABECALHO_QTD_EXPORTADA = "x-leads-exportados";
+
+/** "1 lead" / "3 leads" — a contagem do registro e do aviso da exportação. */
+export function qtdDeLeads(n: number): string {
+  return `${n} lead${n === 1 ? "" : "s"}`;
+}
+
 // ---------------------------------------------------------------- CSV
 
+/**
+ * Uma célula de texto. Dois cuidados: citar o que carrega `;`, aspas ou quebra
+ * de linha, e NEUTRALIZAR o começo que o Excel executa — `=`, `+`, `-`, `@`
+ * (também atrás de tab/CR). Nome, e-mail e utm_content vêm do formulário
+ * público da LP: um nome `=HYPERLINK(...)` viraria link ou fórmula na máquina
+ * do comercial ao abrir o arquivo. O apóstrofo faz o Excel ler como texto. O
+ * único `=` de propósito é o de `csvTelefone`, que não passa por aqui.
+ */
 function csvCell(v: string): string {
-  return /[;"\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+  const perigoso = /^[=+\-@\t\r]/.test(v);
+  const texto = perigoso ? `'${v}` : v;
+  return perigoso || /[;"\n\r]/.test(texto) ? `"${texto.replace(/"/g, '""')}"` : texto;
 }
 
 /**
