@@ -24,6 +24,9 @@ export default async function UsuariosPage({ searchParams }: { searchParams: Pro
   const veem = papeis.filter((p) => p.veContato).map((p) => p.rotulo);
   const mascarados = papeis.filter((p) => !p.veContato).map((p) => p.rotulo);
   const exportam = papeis.filter((p) => p.exportaLeads).map((p) => p.rotulo);
+  // Duas regras de "importa", nomeadas separadas: leads (comercial) ≠ anúncios (marketing).
+  const importamLeads = papeis.filter((p) => p.importaLeads).map((p) => p.rotulo);
+  const importamAnuncios = papeis.filter((p) => p.importaAnuncios).map((p) => p.rotulo);
   const lista = (nomes: string[]) => nomes.join(" e ");
 
   return (
@@ -70,14 +73,16 @@ export default async function UsuariosPage({ searchParams }: { searchParams: Pro
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[560px] text-sm">
+            <table className="w-full min-w-[640px] text-sm">
               <thead>
                 <tr className="text-left text-xs text-muted-foreground">
                   <th className="pb-2 font-medium">Papel</th>
                   <th className="pb-2 font-medium">Telefone e e-mail</th>
                   <th className="pb-2 font-medium">Exporta leads</th>
                   <th className="pb-2 font-medium">Altera leads</th>
-                  <th className="pb-2 font-medium">Importa, sincroniza, metas</th>
+                  {/* Duas colunas de propósito: importar leads é regra de Comercial; anúncios, de Marketing. */}
+                  <th className="pb-2 font-medium">Importa leads</th>
+                  <th className="pb-2 font-medium">Importa anúncios, sincroniza, metas</th>
                   <th className="pb-2 font-medium">Usuários e zona de perigo</th>
                 </tr>
               </thead>
@@ -88,14 +93,18 @@ export default async function UsuariosPage({ searchParams }: { searchParams: Pro
                     <td className="py-1.5">{p.veContato ? "vê inteiros" : "mascarados"}</td>
                     <td className="py-1.5">{p.exportaLeads ? SIM : NAO}</td>
                     <td className="py-1.5">{p.alteraLeads ? SIM : NAO}</td>
-                    <td className="py-1.5">{p.operaDados ? SIM : NAO}</td>
+                    <td className="py-1.5">{p.importaLeads ? SIM : NAO}</td>
+                    <td className="py-1.5">{p.importaAnuncios ? SIM : NAO}</td>
                     <td className="py-1.5">{p.administra ? SIM : NAO}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          <p className="mt-2 text-xs text-muted-foreground">Exportam a lista: {lista(exportam)}.</p>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Exportam a lista: {lista(exportam)}. Importam leads (CSV ou à mão): {lista(importamLeads)}. Importam
+            anúncios, sincronizam e definem metas: {lista(importamAnuncios)}.
+          </p>
         </CardContent>
       </Card>
     </div>
