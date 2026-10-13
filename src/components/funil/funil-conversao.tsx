@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { FONTE_META } from "@/lib/cascata";
+import { AMOSTRA_MINIMA, FONTE_META } from "@/lib/cascata";
 import { dica } from "@/lib/dicionario";
 import { DONO_LABEL } from "@/lib/dono";
-import type { EtapaFunil, MetaDaEtapa } from "@/lib/funil";
+import type { BlocoFunil, EtapaFunil, MetaDaEtapa } from "@/lib/funil";
 import { formatarAlvo } from "@/lib/metas";
 import { comPeriodo } from "@/lib/range";
 import { formatCurrency, formatInt, formatIntComSinal, formatPercent } from "@/lib/format";
@@ -12,14 +12,9 @@ import { cn } from "@/lib/utils";
 /**
  * O funil de conversão, na vertical, etapa a etapa: volume, conversão da
  * anterior, custo por unidade, dono, fonte, meta e Δ contra o período anterior.
- * Os números vêm prontos de `montarFunil` (lib/funil.ts); aqui só se imprime.
+ * Os números vêm prontos de `montarFunil` (lib/funil.ts); aqui só se imprime —
+ * inclusive a fração pequena, que `formatPercent` escreve "< 0,1%".
  */
-
-/** Fração pequena não vira "0,0%" — 112 em 374 mil é "<0,1%", não "nada". */
-function pct(v: number): string {
-  if (v > 0 && v < 0.001) return "<0,1%";
-  return formatPercent(v);
-}
 
 /** A meta da etapa no formato do badge: "1º contato no prazo 62% (n = 40) · meta 90%". */
 function metaExibida(m: MetaDaEtapa): MetaExibida {
@@ -44,9 +39,16 @@ function Junta({ etapa, rangeKey }: { etapa: EtapaFunil; rangeKey?: string }) {
       />
       <div className="flex min-h-[2rem] flex-wrap items-center gap-x-3 gap-y-1 py-1.5 text-xs">
         {etapa.daAnterior !== undefined ? (
-          <span className="tabular font-medium text-muted-foreground">{pct(etapa.daAnterior)} da anterior</span>
+          <span className="tabular font-medium text-muted-foreground">
+            {formatPercent(etapa.daAnterior)} {etapa.baseDaTaxa ?? "da anterior"}
+          </span>
+        ) : etapa.semTaxa ? (
+          // Populações que não se aninham: a tela diz por quê, em vez de um "166,7%".
+          <span className="text-muted-foreground">{etapa.semTaxa}</span>
         ) : etapa.valor != null ? (
-          <span className="text-muted-foreground" title="Abaixo de 3 na etapa anterior: taxa não é taxa">taxa sem amostra</span>
+          <span className="text-muted-foreground" title={`Abaixo de ${AMOSTRA_MINIMA} na etapa anterior: taxa não é taxa`}>
+            taxa sem amostra
+          </span>
         ) : null}
         {etapa.dono ? (
           <span className="rounded border px-1.5 py-px text-[10px] uppercase tracking-wide text-muted-foreground">
@@ -69,55 +71,78 @@ function Junta({ etapa, rangeKey }: { etapa: EtapaFunil; rangeKey?: string }) {
   );
 }
 
-export function FunilConversao({ etapas, rangeKey }: { etapas: EtapaFunil[]; rangeKey?: string }) {
+function Etapa({ d }: { d: EtapaFunil }) {
+  const desconhecido = d.valor === null;
+  const delta = d.anterior !== undefined && d.valor != null ? d.valor - d.anterior : undefined;
+  return (
+    <div className="flex items-start gap-3">
+      <span
+        aria-hidden
+        className={cn(
+          "mt-2 size-3.5 shrink-0 rounded-full border-2",
+          d.ehAncora ? "border-primary bg-primary/20" : "border-border bg-card",
+        )}
+      />
+      <div className={cn("min-w-0 flex-1 rounded-lg border px-4 py-3", d.ehAncora && "bg-foreground/[0.03]", desconhecido && "border-dashed")}>
+        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+          <p className={cn("text-sm", d.ehAncora ? "font-semibold" : "font-medium")} title={d.dica ? dica(d.dica) : undefined}>
+            {d.label}
+          </p>
+          <p className={cn("tabular text-xl font-semibold", desconhecido && "text-muted-foreground")}>
+            {desconhecido ? "—" : formatInt(d.valor!)}
+            {delta !== undefined ? (
+              <span className="ml-2 text-xs font-medium text-muted-foreground" title="Diferença contra o período anterior, de mesmo tamanho">
+                {formatIntComSinal(delta)} vs. anterior
+              </span>
+            ) : null}
+          </p>
+        </div>
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+          <span className="rounded border px-1.5 py-px text-[10px] uppercase tracking-wide">{FONTE_META[d.fonte].sistema}</span>
+          {d.custo ? (
+            <span className="tabular" title={d.custo.dica ? dica(d.custo.dica) : undefined}>
+              {d.custo.prefixo ? `${d.custo.prefixo} ` : ""}
+              {formatCurrency(d.custo.valor)} {d.custo.rotulo}
+            </span>
+          ) : null}
+          {d.meta ? <StatusMetaBadge meta={metaExibida(d.meta)} /> : null}
+        </div>
+        {d.nota ? (
+          <p className={cn("mt-1.5 text-xs leading-relaxed", desconhecido ? "text-[var(--danger-text)]" : "text-muted-foreground")}>{d.nota}</p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * `etapas` é o funil do painel (Meta → LP → painel), nas duas vistas; `bloco`,
+ * quando o robô está ligado, são as etapas dele e do atendimento — contagens da
+ * campanha inteira, desenhadas abaixo, separadas, com a nota que diz isso.
+ */
+export function FunilConversao({ etapas, bloco, rangeKey }: { etapas: EtapaFunil[]; bloco?: BlocoFunil; rangeKey?: string }) {
   return (
     <div className="flex flex-col">
-      {etapas.map((d, i) => {
-        const desconhecido = d.valor === null;
-        const delta = d.anterior !== undefined && d.valor != null ? d.valor - d.anterior : undefined;
-        return (
-          <div key={d.key}>
-            {i > 0 ? <Junta etapa={d} rangeKey={rangeKey} /> : null}
-            <div className="flex items-start gap-3">
-              <span
-                aria-hidden
-                className={cn(
-                  "mt-2 size-3.5 shrink-0 rounded-full border-2",
-                  d.ehAncora ? "border-primary bg-primary/20" : "border-border bg-card",
-                )}
-              />
-              <div className={cn("min-w-0 flex-1 rounded-lg border px-4 py-3", d.ehAncora && "bg-foreground/[0.03]", desconhecido && "border-dashed")}>
-                <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-                  <p className={cn("text-sm", d.ehAncora ? "font-semibold" : "font-medium")} title={d.dica ? dica(d.dica) : undefined}>
-                    {d.label}
-                  </p>
-                  <p className={cn("tabular text-xl font-semibold", desconhecido && "text-muted-foreground")}>
-                    {desconhecido ? "—" : formatInt(d.valor!)}
-                    {delta !== undefined ? (
-                      <span className="ml-2 text-xs font-medium text-muted-foreground" title="Diferença contra o período anterior, de mesmo tamanho">
-                        {formatIntComSinal(delta)} vs. anterior
-                      </span>
-                    ) : null}
-                  </p>
-                </div>
-                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                  <span className="rounded border px-1.5 py-px text-[10px] uppercase tracking-wide">{FONTE_META[d.fonte].sistema}</span>
-                  {d.custo ? (
-                    <span className="tabular" title={d.custo.dica ? dica(d.custo.dica) : undefined}>
-                      {d.custo.prefixo ? `${d.custo.prefixo} ` : ""}
-                      {formatCurrency(d.custo.valor)} {d.custo.rotulo}
-                    </span>
-                  ) : null}
-                  {d.meta ? <StatusMetaBadge meta={metaExibida(d.meta)} /> : null}
-                </div>
-                {d.nota ? (
-                  <p className={cn("mt-1.5 text-xs leading-relaxed", desconhecido ? "text-[var(--danger-text)]" : "text-muted-foreground")}>{d.nota}</p>
-                ) : null}
-              </div>
-            </div>
+      {etapas.map((d, i) => (
+        <div key={d.key}>
+          {i > 0 ? <Junta etapa={d} rangeKey={rangeKey} /> : null}
+          <Etapa d={d} />
+        </div>
+      ))}
+      {bloco && bloco.etapas.length > 0 ? (
+        <>
+          <div className="mt-4 border-t pt-3">
+            <p className="text-sm font-medium">{bloco.titulo}</p>
+            {bloco.nota ? <p className="text-xs text-muted-foreground">{bloco.nota}</p> : null}
           </div>
-        );
-      })}
+          {bloco.etapas.map((d) => (
+            <div key={d.key}>
+              <Junta etapa={d} rangeKey={rangeKey} />
+              <Etapa d={d} />
+            </div>
+          ))}
+        </>
+      ) : null}
     </div>
   );
 }

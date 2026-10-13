@@ -8,8 +8,12 @@ import { kpisDoPeriodo } from "../kpis";
 import { gargalo, transicoesDoFunil } from "../gargalo";
 import { AMOSTRA_MIN, ATRASO_REGISTRO_SHARE, LOTE_MIN } from "../motor";
 import { TENTATIVAS_PARA_SEM_RESPOSTA } from "../lead-status";
-import { lpKpis } from "../metrics";
+import { lpKpis, type DateRange } from "../metrics";
+import type { CascataComercial, CascataRobo } from "../cascata";
 import {
+  SEM_TAXA_CAMPANHA_INTEIRA,
+  SEM_TAXA_NAO_ANINHADA,
+  SEM_TAXA_PERIODO,
   SLA_PRIMEIRO_CONTATO_HORAS,
   confiancaDoRegistro,
   coortesDoFunil,
@@ -23,6 +27,7 @@ import {
   perdasConfiaveis,
   tendenciaDasTaxas,
   vistaDoFunil,
+  type VistaFunil,
 } from "../funil";
 import type { AdDaily, DashboardData, IgAccountDaily, Lead, LeadEvent, LpDaily, Meta } from "../types";
 
@@ -221,11 +226,266 @@ describe("funil de conversão: período (eventos) × coorte (entrada)", () => {
     // Período anterior (25/09–01/10): nenhum lead entrou.
     expect(f.etapas.find((e) => e.key === "leads")).toMatchObject({ valor: 6, anterior: 0 });
     // Campanha inteira não tem "antes".
-    const inteira = montarFunil({ data, range: undefined, kpis: kpisDe(data, undefined), robo: null, comercial: null, vista: "coorte", hoje: HOJE, agora: AGORA });
+    const inteira = montarFunil({ data, range: undefined, kpis: kpisDoPeriodo(data, undefined, { hoje: HOJE, agora: AGORA }), robo: null, comercial: null, vista: "coorte", hoje: HOJE, agora: AGORA });
     expect(inteira.etapas.find((e) => e.key === "leads")?.anterior).toBeUndefined();
     expect(vistaDoFunil("coorte")).toBe("coorte");
     expect(vistaDoFunil("qualquer")).toBe("periodo");
     expect(vistaDoFunil(undefined)).toBe("periodo");
+  });
+});
+
+// ---------------------------------------------------------------- correções da revisão (6.2)
+
+/** Robô e atendimento ligados — contagens da campanha inteira, sintéticas. */
+const ROBO: CascataRobo = { conversas: 40, responderam: 20, convidados: 10, transferidos: 6, convitePendente: 2 };
+const COMERCIAL: CascataComercial = { abordados: 5, reunioesRealizadas: 3, negociosFechados: 1, aguardandoAbordagem: 1 };
+
+/** `null` = campanha inteira (um `undefined` explícito cairia no default de parâmetro). */
+const funilCom = (
+  data: DashboardData,
+  vista: VistaFunil,
+  robo: CascataRobo | null,
+  comercial: CascataComercial | null,
+  periodo: DateRange | null = SEMANA,
+) =>
+  montarFunil({
+    data,
+    range: periodo ?? undefined,
+    kpis: kpisDoPeriodo(data, periodo ?? undefined, { hoje: HOJE, agora: AGORA, comparar: true }),
+    robo,
+    comercial,
+    vista,
+    hoje: HOJE,
+    agora: AGORA,
+  });
+
+type Funil = ReturnType<typeof funilCom>;
+const porKey = (etapas: Funil["etapas"]) => Object.fromEntries(etapas.map((e) => [e.key, e]));
+const todas = (f: Funil) => [...f.etapas, ...(f.bloco?.etapas ?? [])];
+
+/** Quatro reuniões agendadas NA semana (três de leads de setembro), uma na coorte. */
+const agendamentos = () =>
+  base({
+    adDaily: [ad("2026-10-05", "100001", 900)],
+    leads: [
+      lead("2026-09-10", { status: "agendado", bookedAt: "2026-10-05T12:00:00.000Z", meetingFor: "2026-10-20T12:00:00.000Z", firstContactAt: "2026-10-05T11:00:00.000Z" }),
+      lead("2026-09-11", { status: "reuniao_realizada", bookedAt: "2026-10-05T12:00:00.000Z", attendedAt: "2026-10-06T12:00:00.000Z" }),
+      lead("2026-09-12", { status: "cliente", bookedAt: "2026-10-05T12:00:00.000Z", attendedAt: "2026-10-06T12:00:00.000Z", closedAt: "2026-10-07T12:00:00.000Z", value: 50_000 }),
+      ...Array.from({ length: 5 }, () => lead("2026-10-05", { firstContactAt: "2026-10-05T13:30:00.000Z" })),
+      lead("2026-10-06", { status: "agendado", bookedAt: "2026-10-06T12:00:00.000Z", meetingFor: "2026-10-21T12:00:00.000Z" }),
+    ],
+    metas: [meta("reunioes_agendadas", 7), meta("taxa_lead_agendada", 0.1), meta("primeiro_contato_no_prazo", 0.9)],
+  });
+
+describe("com robô/atendimento ligados, as vistas ainda diferem e a north star fica no funil", () => {
+  const data = agendamentos();
+  const k = kpisDe(data);
+
+  it("por período: Leads → 1º contato → Reuniões agendadas (com o custo do dicionário) → realizadas → vendas; o robô vira bloco", () => {
+    const f = funilCom(data, "periodo", ROBO, COMERCIAL);
+    expect(f.etapas.map((e) => e.key)).toEqual(["impressoes", "leads", "primeiro_contato", "reunioes", "compareceu", "clientes"]);
+    const r = porKey(f.etapas).reunioes;
+    expect(r).toMatchObject({ label: "Reuniões agendadas", valor: k.reunioesAgendadas.valor, dica: "reunioes_agendadas" });
+    expect(r.valor).toBe(4);
+    expect(r.custo).toMatchObject({ valor: 225, rotulo: "por reunião", dica: "custo_por_reuniao" });
+    expect(r.meta).toMatchObject({ metrica: "reunioes_agendadas", alvo: 7 });
+    // Reunião realizada e negócio fechado ficam no painel — o bloco termina no especialista.
+    expect(f.bloco?.etapas.map((e) => e.key)).toEqual(["conversas", "responderam", "convite", "transferidos", "abordados"]);
+    expect(f.bloco?.etapas.every((e) => e.fonte === "robo" || e.fonte === "comercial")).toBe(true);
+  });
+
+  it("por coorte: 'Agendaram reunião' com a taxa lead → reunião — e as duas vistas não são o mesmo funil", () => {
+    const periodo = funilCom(data, "periodo", ROBO, COMERCIAL);
+    const coorte = funilCom(data, "coorte", ROBO, COMERCIAL);
+    const r = porKey(coorte.etapas).reunioes;
+    expect(r).toMatchObject({ label: "Agendaram reunião", valor: k.agendaram.valor, dica: "agendaram" });
+    expect(r.valor).toBe(1);
+    expect(r.custo).toBeUndefined();
+    expect(r.meta?.metrica).toBe("taxa_lead_agendada");
+    const valores = (f: Funil) => f.etapas.map((e) => [e.key, e.label, e.valor]);
+    expect(valores(coorte)).not.toEqual(valores(periodo));
+  });
+
+  it("meio-ligado (robô sem a mesa do atendimento): a meta de reuniões agendadas nunca gruda no número da coorte", () => {
+    for (const vista of ["periodo", "coorte"] as const) {
+      const f = funilCom(data, vista, ROBO, null);
+      expect(f.etapas.some((e) => e.key === "reunioes")).toBe(true);
+      for (const e of todas(f).filter((x) => x.meta?.metrica === "reunioes_agendadas")) {
+        expect(e.valor).toBe(k.reunioesAgendadas.valor);
+      }
+    }
+    const coorte = porKey(funilCom(data, "coorte", ROBO, null).etapas);
+    expect(coorte.reunioes).toMatchObject({ label: "Agendaram reunião", valor: 1 });
+    expect(coorte.reunioes.meta?.metrica).toBe("taxa_lead_agendada");
+    // Sem o atendimento, quem não teve tentativa está parado no 1º contato (como na cascata).
+    expect(coorte.primeiro_contato).toMatchObject({ parados: 5, etapaFila: "novo" });
+    // Com ele, quem espera aparece no bloco (aguardando abordagem) — não duas vezes.
+    expect(porKey(funilCom(data, "coorte", ROBO, COMERCIAL).etapas).primeiro_contato.parados).toBeUndefined();
+  });
+});
+
+describe("'% da anterior' só entre populações aninhadas — nunca acima de 100%", () => {
+  // 10 leads na semana: 3 com tentativa registrada, 5 agendados direto do "Novo" (sem tentativa).
+  const data = base({
+    leads: [
+      ...Array.from({ length: 3 }, () => lead("2026-10-05", { status: "em_contato", firstContactAt: "2026-10-05T13:30:00.000Z" })),
+      ...Array.from({ length: 5 }, () => lead("2026-10-05", { status: "agendado", bookedAt: "2026-10-05T15:00:00.000Z", meetingFor: "2026-10-20T12:00:00.000Z" })),
+      ...Array.from({ length: 2 }, () => lead("2026-10-06")),
+    ],
+  });
+
+  it("por coorte: 1º contato é ramo paralelo e Reuniões é sobre os LEADS (5 de 10), não '166,7% da anterior'", () => {
+    const f = funilCom(data, "coorte", null, null);
+    const e = porKey(f.etapas);
+    expect(e.primeiro_contato.valor).toBe(3);
+    expect(e.primeiro_contato.daAnterior).toBeCloseTo(0.3, 9);
+    expect(e.reunioes).toMatchObject({ valor: 5, baseDaTaxa: "dos leads" });
+    expect(e.reunioes.daAnterior).toBeCloseTo(0.5, 9);
+    expect(e.reunioes.daAnterior).toBeCloseTo(kpisDe(data).taxaLeadAgendada.valor, 9);
+    for (const x of todas(f)) if (x.daAnterior !== undefined) expect(x.daAnterior).toBeLessThanOrEqual(1);
+  });
+
+  it("por período: eventos de leads de qualquer data não são fração da etapa acima — sem taxa, e a tela diz por quê", () => {
+    // Mutirão: 20 leads de setembro contatados nesta semana, contra 5 leads novos.
+    const mutirao = base({
+      leads: [
+        ...Array.from({ length: 20 }, () => lead("2026-09-10", { status: "em_contato", firstContactAt: "2026-10-06T13:00:00.000Z" })),
+        ...Array.from({ length: 5 }, () => lead("2026-10-05")),
+      ],
+    });
+    for (const d of [data, mutirao]) {
+      const f = funilCom(d, "periodo", null, null);
+      for (const key of ["primeiro_contato", "reunioes", "compareceu", "clientes"]) {
+        const e = porKey(f.etapas)[key];
+        expect(e.daAnterior).toBeUndefined();
+        expect(e.semTaxa).toBe(SEM_TAXA_PERIODO);
+      }
+      for (const x of todas(f)) if (x.daAnterior !== undefined) expect(x.daAnterior).toBeLessThanOrEqual(1);
+    }
+    expect(porKey(funilCom(mutirao, "periodo", null, null).etapas).primeiro_contato.valor).toBe(20);
+  });
+
+  it("mais gente que na base (realizadas sem o marco do agendamento) não vira taxa: vira 'sem taxa' com o motivo", () => {
+    const legado = base({
+      leads: [
+        ...Array.from({ length: 3 }, () => lead("2026-10-05", { status: "agendado", bookedAt: "2026-10-05T15:00:00.000Z", meetingFor: "2026-10-20T12:00:00.000Z" })),
+        // Realizada antes de o marco `bookedAt` existir, e depois encerrada: conta como realizada, não como agendada.
+        ...Array.from({ length: 4 }, () => lead("2026-10-05", { status: "sem_interesse", attendedAt: "2026-10-06T12:00:00.000Z", lostAt: "2026-10-07T12:00:00.000Z" })),
+      ],
+    });
+    const e = porKey(funilCom(legado, "coorte", null, null).etapas);
+    expect(e.reunioes.valor).toBe(3);
+    expect(e.compareceu.valor).toBe(4);
+    expect(e.compareceu.daAnterior).toBeUndefined();
+    expect(e.compareceu.semTaxa).toBe(SEM_TAXA_NAO_ANINHADA);
+  });
+});
+
+describe("robô/atendimento com período: nada divide a verba do período pela contagem da campanha inteira", () => {
+  const data = agendamentos();
+
+  it("com ?range=, o bloco sai sem custo, sem taxa sobre os leads do período e sem Δ — a nota fica", () => {
+    for (const vista of ["periodo", "coorte"] as const) {
+      const f = funilCom(data, vista, ROBO, COMERCIAL);
+      const bloco = f.bloco!;
+      expect(bloco.nota).toContain("campanha inteira");
+      expect(bloco.etapas.every((e) => e.custo === undefined)).toBe(true);
+      expect(bloco.etapas.every((e) => e.anterior === undefined)).toBe(true);
+      expect(bloco.etapas[0]).toMatchObject({ key: "conversas", semTaxa: SEM_TAXA_CAMPANHA_INTEIRA });
+      expect(bloco.etapas[0].daAnterior).toBeUndefined();
+      // Dentro do bloco, campanha inteira sobre campanha inteira: a taxa fica.
+      expect(porKey(bloco.etapas).responderam.daAnterior).toBeCloseTo(20 / 40, 9);
+      // E nenhuma etapa do bloco se passa por etapa do painel.
+      expect(f.etapas.some((e) => e.fonte === "robo" || e.fonte === "comercial")).toBe(false);
+    }
+    // Sem a mesa do robô, o 1º degrau do bloco é o do atendimento — mesma regra.
+    const soComercial = funilCom(data, "periodo", null, COMERCIAL).bloco!;
+    expect(soComercial.etapas[0]).toMatchObject({ key: "abordados", semTaxa: SEM_TAXA_CAMPANHA_INTEIRA });
+    expect(soComercial.etapas.every((e) => e.custo === undefined)).toBe(true);
+  });
+
+  it("na campanha inteira numerador e denominador coincidem: o custo por etapa do robô volta", () => {
+    const f = funilCom(data, "coorte", ROBO, COMERCIAL, null);
+    const e = porKey(f.bloco?.etapas ?? []);
+    expect(f.investimentoConversao).toBe(900);
+    expect(e.conversas.custo).toMatchObject({ valor: 900 / 40, rotulo: "por conversa" });
+    expect(e.transferidos.custo).toMatchObject({ valor: 900 / 6, rotulo: "por transferido" });
+    expect(f.bloco?.nota).not.toContain("sem custo");
+  });
+});
+
+// ---------------------------------------------------------------- verificação (6.2): um número por fato
+
+describe("reunião realizada e venda: um número por fato no card, com o atendimento ligado", () => {
+  // Painel na campanha inteira: 2 realizadas (ambas em 06/10) e 1 venda (07/10).
+  // O atendimento registra 3 realizadas e 1 negócio fechado (COMERCIAL).
+  const data = agendamentos();
+  const fatoRealizada = (e: { key: string }) => e.key === "compareceu" || e.key === "reuniao";
+  const fatoVenda = (e: { key: string }) => e.key === "clientes" || e.key === "negocio";
+
+  it("nas duas vistas, com e sem período, o card imprime cada fato UMA vez — e o bloco não repete o painel", () => {
+    for (const vista of ["periodo", "coorte"] as const) {
+      for (const periodo of [SEMANA, null]) {
+        const f = funilCom(data, vista, ROBO, COMERCIAL, periodo);
+        expect(todas(f).filter(fatoRealizada).map((e) => e.key)).toEqual(["compareceu"]);
+        expect(todas(f).filter(fatoVenda).map((e) => e.key)).toEqual(["clientes"]);
+        expect(f.bloco?.etapas.some((e) => e.label === "Reunião realizada" || e.label === "Negócio fechado")).toBe(false);
+        expect(f.bloco?.nota).toContain("Reuniões realizadas e vendas ficam só no painel");
+      }
+    }
+  });
+
+  it("com período: o número é o do painel e a nota liga o do atendimento, dizendo que as fontes discordam", () => {
+    const periodo = porKey(funilCom(data, "periodo", ROBO, COMERCIAL).etapas);
+    expect(periodo.compareceu.valor).toBe(2);
+    expect(periodo.compareceu.nota).toContain("pela data em que a reunião aconteceu");
+    expect(periodo.compareceu.nota).toContain("o atendimento registra 3 reuniões realizadas e o painel, 2 — as fontes discordam");
+    // A venda bate (1 × 1): nenhuma nota a mais, e nenhum outro número para ela no card.
+    expect(periodo.clientes.valor).toBe(1);
+    expect(periodo.clientes.nota).not.toContain("atendimento");
+
+    // O cenário da revisão: a coorte da semana não tem realizada — "0" no painel e
+    // o "3" do atendimento só existe ligado a ele, na nota.
+    const coorte = porKey(funilCom(data, "coorte", ROBO, COMERCIAL).etapas);
+    expect(coorte.compareceu.valor).toBe(0);
+    expect(coorte.compareceu.nota).toContain("o atendimento registra 3 reuniões realizadas e o painel, 2 — as fontes discordam");
+    expect(coorte.clientes.valor).toBe(0);
+    expect(coorte.clientes.nota).not.toContain("atendimento");
+  });
+
+  it("sem período (mesmo escopo nos dois): atendimento acima do painel vira '—' com a divergência nomeada, nunca um lado em silêncio", () => {
+    for (const vista of ["periodo", "coorte"] as const) {
+      const e = porKey(funilCom(data, vista, ROBO, COMERCIAL, null).etapas);
+      expect(e.compareceu.valor).toBeNull();
+      expect(e.compareceu.daAnterior).toBeUndefined();
+      expect(e.compareceu.nota).toBe("o atendimento registra 3 reuniões realizadas e o painel conta 2 — as fontes discordam");
+      // Sem base, a venda não vira fração de um número que ninguém afirma.
+      expect(e.clientes.valor).toBe(1);
+      expect(e.clientes.daAnterior).toBeUndefined();
+    }
+    // Vendas divergindo também: 2 negócios no atendimento contra 1 no painel.
+    const vendas = porKey(funilCom(data, "coorte", ROBO, { ...COMERCIAL, negociosFechados: 2 }, null).etapas);
+    expect(vendas.clientes.valor).toBeNull();
+    expect(vendas.clientes.nota).toBe("o atendimento registra 2 negócios fechados e o painel conta 1 — as fontes discordam");
+  });
+
+  it("atendimento abaixo do painel não contradiz (só vê quem passou pelo especialista): o número fica, com nota neutra", () => {
+    const menos = { ...COMERCIAL, reunioesRealizadas: 1 };
+    for (const periodo of [SEMANA, null]) {
+      const e = porKey(funilCom(data, "periodo", ROBO, menos, periodo).etapas);
+      expect(e.compareceu.valor).toBe(2);
+      expect(e.compareceu.nota).toContain("o atendimento registra 1 reunião realizada na campanha inteira — só quem passou pelo especialista");
+      expect(e.compareceu.nota).not.toContain("discordam");
+    }
+    // Batendo, nenhuma nota do atendimento.
+    const iguais = porKey(funilCom(data, "periodo", ROBO, { ...COMERCIAL, reunioesRealizadas: 2 }).etapas);
+    expect(iguais.compareceu.nota).toBe("pela data em que a reunião aconteceu");
+  });
+
+  it("sem o atendimento (só o robô), as etapas do painel não ganham nota de outra fonte", () => {
+    const e = porKey(funilCom(data, "periodo", ROBO, null).etapas);
+    expect(e.compareceu.nota).toBe("pela data em que a reunião aconteceu");
+    expect(e.clientes.nota).toBe("fechadas no período, pela data do fechamento");
   });
 });
 
@@ -273,6 +533,31 @@ describe("funil de descoberta: a conta do Instagram, rotulada com honestidade", 
       ["dm", 5],
     ]);
     expect(f.investimentoDescoberta).toBe(100);
+  });
+
+  it("período anterior sem dia do Instagram é sem leitura: nenhum '+N vs. anterior'", () => {
+    // A integração ligou nesta semana: nada em 25/09–01/10.
+    const data = base({ igAccountDaily: [ig("2026-10-05", { dmConversations: 3 }), ig("2026-10-06", { followers: 1010, dmConversations: 2 })] });
+    const f = funilDeDescoberta(data, SEMANA, kpisDe(data));
+    expect(f.semDado).toBe(false);
+    expect(f.etapas.every((e) => e.anterior === undefined)).toBe(true);
+    expect(f.extras.length).toBeGreaterThan(0);
+    expect(f.extras.every((x) => x.anterior === undefined)).toBe(true);
+    expect(f.semComparacao).toContain("não tem leitura");
+  });
+
+  it("período anterior com menos dias que o atual também não compara; com cobertura completa, compara", () => {
+    const semana = ["2026-10-02", "2026-10-03", "2026-10-04", "2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08"];
+    const anterior = ["2026-09-25", "2026-09-26", "2026-09-27", "2026-09-28", "2026-09-29", "2026-09-30", "2026-10-01"];
+    const buraco = base({ igAccountDaily: [ig(anterior[0]), ...semana.map((d) => ig(d))] });
+    const f = funilDeDescoberta(buraco, SEMANA, kpisDe(buraco));
+    expect(f.etapas.every((e) => e.anterior === undefined)).toBe(true);
+    expect(f.semComparacao).toContain("1 dia com dado");
+    const completo = base({ igAccountDaily: [...anterior, ...semana].map((d) => ig(d)) });
+    const g = funilDeDescoberta(completo, SEMANA, kpisDe(completo));
+    expect(g.semComparacao).toBeUndefined();
+    expect(g.etapas.find((e) => e.key === "alcance")).toMatchObject({ valor: 3500, anterior: 3500 });
+    expect(g.extras.find((x) => x.key === "link_bio")).toMatchObject({ valor: 28, anterior: 28 });
   });
 });
 

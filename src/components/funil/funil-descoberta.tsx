@@ -64,6 +64,7 @@ export function FunilDescoberta({ funil }: { funil: Descoberta }) {
       <p className="text-xs text-muted-foreground">
         {funil.dias} {funil.dias === 1 ? "dia" : "dias"} com dado no período
         {funil.investimentoDescoberta > 0 ? ` · ${formatCurrency0(funil.investimentoDescoberta)} de verba de descoberta` : " · sem verba de descoberta"}
+        {funil.semComparacao ? ` · ${funil.semComparacao}` : ""}
       </p>
     </div>
   );
