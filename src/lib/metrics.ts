@@ -722,11 +722,14 @@ export function followerSeries(rows: IgAccountDaily[], range?: DateRange): Follo
 
 /**
  * `sem-resultado` (B17): gastou e não trouxe lead — não é fadiga, é criativo que
- * nunca funcionou. `parado`: tinha veiculação antes e não teve nenhuma impressão
- * na janela recente — anúncio pausado, não "amostra insuficiente". O motor lê
- * só `fadigado`; os outros níveis são da tela.
+ * nunca funcionou. `parado`: tinha veiculação antes e um sync que deu certo
+ * confirmou dias da janela recente sem impressão — anúncio pausado, não
+ * "amostra insuficiente". `sem-dados`: a mesma janela vazia, mas NENHUM sync
+ * bem-sucedido a cobriu — pode ter havido veiculação que o painel não viu
+ * (ADR-06: dia sem linha e sem cobertura é "sem dados", nunca "sem
+ * veiculação"). O motor lê só `fadigado`; os outros níveis são da tela.
  */
-export type FatigueLevel = "novo" | "parado" | "saudavel" | "atencao" | "fadigado" | "sem-resultado";
+export type FatigueLevel = "novo" | "parado" | "sem-dados" | "saudavel" | "atencao" | "fadigado" | "sem-resultado";
 
 /**
  * Uma das duas janelas de 7 dias que a regra compara. O CPL daqui é o **CPL
@@ -783,6 +786,13 @@ export interface OpcoesFadiga {
    */
   fim?: string;
   /**
+   * Dias cobertos por syncs de anúncio bem-sucedidos (ADR-06, `janelasCobertas`).
+   * Só com eles uma janela recente vazia vira "Parado": dia sem linha e sem
+   * cobertura é "sem dados". Ausente = nenhum dia confirmado (como em
+   * `dailySeries`).
+   */
+  cobertura?: Intervalo[];
+  /**
    * Liga a regra "sem resultado" (só para criativos de conversão): gasto do
    * período, leads do PAINEL do período e o CPL alvo (meta vigente ou, sem meta,
    * o CPL do período da conta). `cplAlvo` nulo desliga a regra.
@@ -827,8 +837,11 @@ function janelaFadiga(rows: AdDaily[], from: string, to: string): JanelaFadiga {
  *                (painel)" da coluna ao lado, e sem Pixel esse lado nunca dispara.
  *   Atenção    = só um dos lados da regra (CTR caiu sem confirmação, ou
  *                frequência/CPL subiram sem queda de CTR).
- *   Parado     = nenhuma impressão na janela recente, com linhas antes dela:
- *                anúncio pausado, julgado como tal — nunca "Novo".
+ *   Parado     = nenhuma impressão na janela recente, com veiculação antes
+ *                dela, em dias que um sync bem-sucedido confirmou
+ *                (`opts.cobertura`): anúncio pausado — nunca "Novo".
+ *   Sem dados  = a mesma janela vazia sem NENHUM dia confirmado: o sync pode
+ *                ter parado, então não se afirma "sem veiculação" (ADR-06).
  *   Sem resultado (só conversão, via `opts.semResultado`) = gasto do período
  *                ≥ 2 × CPL alvo E 0 leads do painel.
  *
@@ -866,21 +879,41 @@ export function computeFatigue(rows: AdDaily[], opts: OpcoesFadiga = {}): Fatigu
   const anterior = janelaFadiga(rows, dia(-(2 * janelaDias - 1)), dia(-janelaDias));
   const janelas = { recente, anterior };
 
-  // 2. Parado: veiculou antes e não teve impressão nenhuma na janela recente.
+  // 2. Janela recente vazia, com veiculação antes dela: pausado OU sync parado.
   //    Sem isto, um anúncio pausado há dois meses sairia "Novo (amostra
-  //    insuficiente)" ao lado dos ativos — e a faixa de fadiga o listaria.
+  //    insuficiente)" ao lado dos ativos — e a faixa de fadiga o listaria. Mas
+  //    "sem veiculação" é afirmação que só um sync bem-sucedido sustenta
+  //    (ADR-06): dia confirmado = coberto por sync que deu certo ou com linha do
+  //    anúncio (zerada). Nenhum confirmado = "sem dados", a mesma leitura do
+  //    gráfico diário — senão um sync parado há 7 dias pintaria TODOS os
+  //    criativos de "Parado (sem veiculação)", o contrário do que o gráfico diz.
   const ultimaAntes = rows
     .filter((r) => r.date < recente.from && r.impressions > 0)
     .map((r) => r.date)
     .sort()
     .at(-1);
   if (recente.impressions === 0 && ultimaAntes) {
-    return {
-      level: "parado",
-      frequency: 0,
-      reason: `sem veiculação nos últimos ${janelaDias} dias (${formatDia(recente.from)}–${formatDia(fim)}); última impressão em ${formatDia(ultimaAntes)}`,
-      janelas,
-    };
+    const comLinha = new Set(rows.filter((r) => r.date >= recente.from && r.date <= fim).map((r) => r.date));
+    const diasDaJanela = Array.from({ length: janelaDias }, (_, i) => dia(-(janelaDias - 1) + i));
+    const confirmados = diasDaJanela.filter((d) => comLinha.has(d) || (opts.cobertura ? diaCoberto(opts.cobertura, d) : false));
+    const ultima = `última impressão em ${formatDia(ultimaAntes)}`;
+    if (confirmados.length === 0) {
+      return {
+        level: "sem-dados",
+        frequency: 0,
+        reason: `sem dados nos últimos ${janelaDias} dias (${formatDia(recente.from)}–${formatDia(fim)}): nenhuma sincronização bem-sucedida cobriu esses dias — pode ter havido veiculação que o painel não viu; ${ultima}`,
+        janelas,
+      };
+    }
+    // Os dias mais recentes costumam estar sem cobertura (a Meta atrasa até
+    // 48 h): o motivo diz QUAIS dias sustentam o "sem veiculação".
+    const trecho =
+      confirmados.length === janelaDias
+        ? `nos últimos ${janelaDias} dias (${formatDia(recente.from)}–${formatDia(fim)})`
+        : confirmados.length === 1
+          ? `em ${formatDia(confirmados[0])} (o único dia dos últimos ${janelaDias} até ${formatDia(fim)} que a sincronização confirmou)`
+          : `de ${formatDia(confirmados[0])} a ${formatDia(confirmados.at(-1)!)} (os dias dos últimos ${janelaDias} até ${formatDia(fim)} que a sincronização confirmou)`;
+    return { level: "parado", frequency: 0, reason: `sem veiculação ${trecho}; ${ultima}`, janelas };
   }
 
   // 3. Piso absoluto: sem 1.000 impressões em cada janela não há leitura.
@@ -996,9 +1029,28 @@ export function rotuloCriativo(
     : `${c.name} · ${conjunto}`;
 }
 
+/**
+ * Como `creativePerformance` julga a saúde: o fim do período e a cobertura do
+ * sync — os MESMOS que /midia passa a `criativosAgregados`, para a ação do
+ * motor (M3, M6) e o briefing da IA lerem o selo que a tabela mostra.
+ */
+export interface OpcoesCriativos {
+  /**
+   * Fim do período (AAAA-MM-DD) onde terminam as janelas da saúde. Sem ele vale
+   * `range.to`; sem os dois (histórico inteiro), o último dia com linha de
+   * anúncio da conta — nunca o último dia de CADA anúncio, que julgaria o
+   * pausado pelos seus próprios últimos 14 dias. Quem sabe o dia de hoje
+   * (motor, briefing, página) passa `hoje`.
+   */
+  fim?: string;
+  /** Dias cobertos por syncs bem-sucedidos (ADR-06): separam "Parado" de "Sem dados". */
+  cobertura?: Intervalo[];
+}
+
 export function creativePerformance(
   data: DashboardData,
   range?: DateRange,
+  opts: OpcoesCriativos = {},
 ): CreativePerf[] {
   const ads = filterAds(data.adDaily, range);
   const leads = filterLeads(data.leads, range);
@@ -1012,11 +1064,14 @@ export function creativePerformance(
   // Saúde do criativo: as duas janelas de 7 dias terminam no FIM do período
   // selecionado (`opts.fim`), sobre o histórico inteiro do anúncio.
   const allByAd = new Map<string, AdDaily[]>();
+  let ultimoDiaDaConta: string | undefined;
   for (const r of data.adDaily) {
     const list = allByAd.get(r.adId) ?? [];
     list.push(r);
     allByAd.set(r.adId, list);
+    if (!ultimoDiaDaConta || r.date > ultimoDiaDaConta) ultimoDiaDaConta = r.date;
   }
+  const saude = { fim: opts.fim ?? range?.to ?? ultimoDiaDaConta, cobertura: opts.cobertura };
 
   // Atribui leads, reuniões, clientes e receita ao anúncio pela junção ÚNICA
   // (atribuicao.ts). Reuniões pela data do agendamento, como o resto do painel,
@@ -1074,7 +1129,7 @@ export function creativePerformance(
       cpl: k.cpl,
       cplPainel: div(k.spend, leadsPainel),
       cpr: div(k.spend, meetings),
-      fatigue: computeFatigue(allByAd.get(creative.adId) ?? [], { fim: range?.to }),
+      fatigue: computeFatigue(allByAd.get(creative.adId) ?? [], saude),
       hookRate: creative.videoPlays ? div(creative.videoPlays, k.impressions) : undefined,
       thruPlayRate: creative.thruPlays ? div(creative.thruPlays, k.impressions) : undefined,
       holdRate: creative.videoPlays ? div(creative.thruPlays ?? 0, creative.videoPlays) : undefined,

@@ -29,12 +29,15 @@ const FORMATO: Record<LinhaCriativo["formato"], string> = { video: "Vídeo", car
 
 // Cor SEMPRE com texto (CLAUDE.md): os tokens --status-* e o rótulo ao lado.
 const SAUDE: Record<FatigueLevel, { ponto: string; texto: string; rotulo: string; ordem: number; sufixo?: string }> = {
-  "sem-resultado": { ponto: "var(--status-fora)", texto: "text-[var(--status-fora-text)]", rotulo: "Sem resultado", ordem: 5 },
-  fadigado: { ponto: "var(--status-fora)", texto: "text-[var(--status-fora-text)]", rotulo: "Fadigando", ordem: 4 },
-  atencao: { ponto: "var(--status-perto)", texto: "text-[var(--status-perto-text)]", rotulo: "Atenção", ordem: 3 },
-  saudavel: { ponto: "var(--status-ok)", texto: "text-[var(--status-ok-text)]", rotulo: "Saudável", ordem: 2 },
-  novo: { ponto: "var(--muted)", texto: "text-muted-foreground", rotulo: "Novo", ordem: 1, sufixo: "(amostra insuficiente)" },
-  // Pausado: não é "Novo" — teve veiculação e não tem mais (o motivo diz desde quando).
+  "sem-resultado": { ponto: "var(--status-fora)", texto: "text-[var(--status-fora-text)]", rotulo: "Sem resultado", ordem: 6 },
+  fadigado: { ponto: "var(--status-fora)", texto: "text-[var(--status-fora-text)]", rotulo: "Fadigando", ordem: 5 },
+  atencao: { ponto: "var(--status-perto)", texto: "text-[var(--status-perto-text)]", rotulo: "Atenção", ordem: 4 },
+  saudavel: { ponto: "var(--status-ok)", texto: "text-[var(--status-ok-text)]", rotulo: "Saudável", ordem: 3 },
+  novo: { ponto: "var(--muted)", texto: "text-muted-foreground", rotulo: "Novo", ordem: 2, sufixo: "(amostra insuficiente)" },
+  // Janela vazia que nenhum sync bem-sucedido cobriu (ADR-06): não se afirma
+  // "sem veiculação" — pode ter havido gasto que o painel não viu.
+  "sem-dados": { ponto: "var(--muted)", texto: "text-muted-foreground", rotulo: "Sem dados", ordem: 1, sufixo: "(sincronização sem cobertura)" },
+  // Pausado: não é "Novo" — teve veiculação e um sync confirmou que não tem mais.
   parado: { ponto: "var(--muted)", texto: "text-muted-foreground", rotulo: "Parado", ordem: 0, sufixo: "(sem veiculação)" },
 };
 

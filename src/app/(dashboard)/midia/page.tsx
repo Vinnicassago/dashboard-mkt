@@ -22,7 +22,9 @@ import {
   descobertaDaMidia,
   faixaDeSaude,
   moedaOuTraco,
+  notaDeNaoAtribuidos,
   rankingsDeCriativos,
+  REGRA_ATRIBUICAO_REUNIAO,
   resumoDaMidia,
   tendenciaSemanalMidia,
   textoRegraSaude,
@@ -66,8 +68,11 @@ export default async function MidiaPage({ searchParams }: { searchParams: Promis
   // `fim` (e não `range?.to`): sem `?range=` a Mídia olha o histórico inteiro e
   // as janelas da saúde têm de terminar HOJE — senão cada anúncio pausado seria
   // julgado pelos seus próprios últimos 14 dias e sairia "Saudável" ou
-  // "Fadigando" ao lado dos ativos. Com o fim certo, pausado sai "Parado".
-  const criativos = criativosAgregados(data, range, { fim, cplAlvo: cplAlvo.alvo, custoPorReuniaoExibivel: cprExibivel });
+  // "Fadigando" ao lado dos ativos. Com o fim certo, pausado sai "Parado" — mas
+  // só onde o sync confirmou a falta de veiculação (`cobertura`, a mesma do
+  // gráfico diário); sem cobertura, "Sem dados" (ADR-06). O motor e o briefing
+  // passam o mesmo fim e a mesma cobertura a `creativePerformance`.
+  const criativos = criativosAgregados(data, range, { fim, cobertura, cplAlvo: cplAlvo.alvo, custoPorReuniaoExibivel: cprExibivel });
   const regraSaude = textoRegraSaude(cplAlvo);
   const ranking = rankingsDeCriativos(criativos.conversao);
   // A faixa cita cada criativo pelo rótulo desambiguado (dois "Carrossel -" não
@@ -101,7 +106,7 @@ export default async function MidiaPage({ searchParams }: { searchParams: Promis
         <CardHeader>
           <CardTitle>Campanhas e conjuntos de conversão</CardTitle>
           <CardDescription>
-            Onde a verba vira reunião. Agrupado pelo id da Meta — dois conjuntos com o mesmo nome em campanhas diferentes são duas linhas.{" "}
+            Onde a verba vira reunião. Agrupado pelo id da Meta — dois conjuntos com o mesmo nome em campanhas diferentes são duas linhas. {REGRA_ATRIBUICAO_REUNIAO}{" "}
             {cprExibivel
               ? `O custo por agendada aparece só com ${MIN_REUNIOES} reuniões ou mais na linha.`
               : `O custo por agendada fica em “—” até ${MIN_REUNIOES} reuniões de conversão no período (hoje ${formatInt(kp.reunioesConversao.valor)}).`}
@@ -214,7 +219,7 @@ export default async function MidiaPage({ searchParams }: { searchParams: Promis
           <CardHeader>
             <CardTitle>Criativos de conversão</CardTitle>
             <CardDescription>
-              Reuniões só pelo id do anúncio (o link padrão traz “{"{{ad.id}}"}”); leads também por nome único de anúncio. Nome que existe em mais de um anúncio aparece como atribuição ambígua e não entra em ninguém. Passe o mouse no cabeçalho “Saúde” para ver a regra; no selo, o motivo.
+              {REGRA_ATRIBUICAO_REUNIAO} Nome que existe em mais de um anúncio aparece como atribuição ambígua e não entra em ninguém. Passe o mouse no cabeçalho “Saúde” para ver a regra; no selo, o motivo.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -289,19 +294,14 @@ function Stat({ rotulo, valor, dica: titulo, destaque }: { rotulo: string; valor
   );
 }
 
-/** Leads do período que não entraram em nenhuma linha, e por quê. */
+/** Leads e reuniões do período que não entraram em nenhuma linha, e por quê (o texto sai de `lib/midia.ts`). */
 function NotaNaoAtribuidos({ n, rangeKey }: { n: NaoAtribuidos; rangeKey?: string }) {
-  const partes: string[] = [];
-  if (n.ambigua > 0) partes.push(`${formatInt(n.ambigua)} com nome ambíguo`);
-  if (n.macro > 0) partes.push(`${formatInt(n.macro)} com macro {{…}} sem resolver`);
-  if (n.desconhecida > 0) partes.push(`${formatInt(n.desconhecida)} com origem desconhecida`);
-  if (n.semOrigem > 0) partes.push(`${formatInt(n.semOrigem)} sem origem (orgânico ou direto)`);
-  if (n.semLinhaNoPeriodo > 0) partes.push(`${formatInt(n.semLinhaNoPeriodo)} de conjunto sem veiculação no período`);
-  if (partes.length === 0) return null;
+  const nota = notaDeNaoAtribuidos(n);
+  if (!nota) return null;
   return (
     <p className="text-xs text-muted-foreground">
-      Fora das linhas: {partes.join(" · ")}. Esses leads contam no total, mas não no custo por conjunto.{" "}
-      {n.ambigua > 0 || n.macro > 0 ? (
+      {[nota.leads, nota.reunioes].filter(Boolean).join(" ")}{" "}
+      {nota.linkUtm ? (
         <Link href={comPeriodo("/configuracoes/ferramentas#utm", rangeKey)} className="text-primary underline-offset-4 hover:underline">
           Gerar o link com {"{{ad.id}}"} →
         </Link>

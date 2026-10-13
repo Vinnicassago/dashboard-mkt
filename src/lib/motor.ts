@@ -35,6 +35,7 @@ import {
   filterLeads,
   lpKpis,
   rotuloCriativo,
+  type CreativePerf,
   type DateRange,
 } from "./metrics";
 // M2 e M4 leem os conjuntos da MESMA função da página /midia (por id, S20):
@@ -435,6 +436,17 @@ function regraM1(c: Contexto): Acao | null {
   };
 }
 
+/**
+ * Os criativos do período julgados como /midia#criativos os julga: as janelas
+ * da saúde terminam no fim do período (HOJE quando não há `range` — senão o
+ * anúncio pausado seria julgado pelos seus próprios últimos 14 dias e o M3
+ * mandaria renovar a arte do que a tabela mostra "Parado") e com a mesma
+ * cobertura do sync. M3, M4 e M6 leem daqui.
+ */
+function criativosDoPeriodo(c: Contexto): CreativePerf[] {
+  return creativePerformance(c.data, c.range, { fim: c.range?.to ?? c.hoje, cobertura: c.cobertura });
+}
+
 /** As linhas de CONJUNTO (não as de campanha) que /midia#conjuntos mostra, nos dois baldes. */
 function linhasDeConjunto(c: Contexto): LinhaMidia[] {
   const bloco = conjuntosPorId(c.data, c.range, { custoPorReuniaoExibivel: custoExibivel(c.kpis.custoPorReuniao) });
@@ -479,7 +491,7 @@ function regraM2(c: Contexto): Acao | null {
 }
 
 function regrasM3(c: Contexto): Acao[] {
-  const criativos = creativePerformance(c.data, c.range);
+  const criativos = criativosDoPeriodo(c);
   const fadigados = criativos.filter((x) => x.fatigue.level === "fadigado" && x.spend > 0).sort((a, b) => b.spend - a.spend);
   const conf = confiancaDeMidia(c);
   return fadigados.slice(0, 2).map((x) => {
@@ -536,7 +548,7 @@ function regrasM4(c: Contexto): Acao[] {
     const a = porAnuncio.get(adId) ?? { n: 0, invalidos: 0 };
     porAnuncio.set(adId, { n: a.n + 1, invalidos: a.invalidos + inv });
   }
-  const criativos = creativePerformance(c.data, c.range);
+  const criativos = criativosDoPeriodo(c);
   for (const [adId, v] of porAnuncio) {
     if (v.n < AMOSTRA_MIN.M4 || v.invalidos / v.n <= CONTATO_INVALIDO_MAX) continue;
     if (conjuntosQueDispararam.has(chaveDoConjunto.get(adId) ?? "")) continue;
@@ -585,9 +597,12 @@ function regraM5(c: Contexto): Acao | null {
 /** Além do relatório: o vencedor com amostra, para escalar (regra v1 que continua valendo). */
 function regraM6(c: Contexto): Acao | null {
   if (!custoExibivel(c.kpis.custoPorReuniao)) return null;
-  const criativos = creativePerformance(c.data, c.range);
+  const criativos = criativosDoPeriodo(c);
+  // Só se escala o que está no ar: fadigando não, e parado (pausado) ou sem
+  // dados (sync sem cobertura) também não — "aumente o orçamento" de um anúncio
+  // que a tabela mostra "Parado" seria a ação errada.
   const vencedor = criativos
-    .filter((x) => x.meetings >= MIN_REUNIOES && x.spend > 0 && x.fatigue.level !== "fadigado")
+    .filter((x) => x.meetings >= MIN_REUNIOES && x.spend > 0 && !["fadigado", "parado", "sem-dados"].includes(x.fatigue.level))
     .sort((a, b) => a.cpr - b.cpr)[0];
   if (!vencedor) return null;
   const conf = confiancaDeMidia(c);
