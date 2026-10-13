@@ -16,7 +16,7 @@ import { getCurrentUser } from "@/lib/auth/current-user";
 import { formatarEspera } from "@/lib/format";
 import { paraRevisar } from "@/lib/identidade";
 import { montarLinhasDeLeads } from "@/lib/leads-vista";
-import { mascararContato, mascararEmail, mascararTelefone } from "@/lib/lgpd";
+import { mascararContato, mascararEmail, mascararNoTexto, mascararTelefone } from "@/lib/lgpd";
 import { pageRange } from "@/lib/page-range";
 import { comPeriodo, rangeLabel } from "@/lib/range";
 import type { Lead, LeadEvent } from "@/lib/types";
@@ -27,19 +27,21 @@ export const dynamic = "force-dynamic";
 const duracao = (min: number | null) => formatarEspera(min == null ? null : min / 60);
 
 /**
- * O histórico de um reenvio pode trazer o contato novo que a pessoa digitou.
- * Para o papel mascarado, ele vai mascarado também — o resto do evento fica.
+ * O histórico de um reenvio pode trazer o contato novo que a pessoa digitou, e
+ * o motivo de uma exclusão antiga de "parece teste" foi gravado com o contato
+ * cru. Para o papel mascarado, os dois vão mascarados — o resto do evento fica.
  */
 function mascararEvento(e: LeadEvent): LeadEvent {
   if (!e.payload) return e;
-  const { telefoneNovo, emailNovo } = e.payload;
-  if (!telefoneNovo && !emailNovo) return e;
+  const { telefoneNovo, emailNovo, motivo } = e.payload;
+  if (!telefoneNovo && !emailNovo && !motivo) return e;
   return {
     ...e,
     payload: {
       ...e.payload,
       ...(telefoneNovo ? { telefoneNovo: mascararTelefone(telefoneNovo) } : {}),
       ...(emailNovo ? { emailNovo: mascararEmail(emailNovo) } : {}),
+      ...(motivo ? { motivo: mascararNoTexto(motivo) } : {}),
     },
   };
 }
@@ -79,7 +81,8 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
     name: l.name,
     deletedAt: l.deletedAt ?? "",
     deletedBy: l.deletedBy,
-    deletedReason: l.deletedReason,
+    // Motivos antigos de "parece teste" foram gravados com o contato cru.
+    deletedReason: mascarar ? mascararNoTexto(l.deletedReason) || undefined : l.deletedReason,
   }));
   const origem = rotuladorDeOrigem(data);
 
@@ -93,15 +96,20 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
     : comercial.rows;
   const { kpis } = comercial;
 
-  const revisarLead = (l: Lead): RevisarLead => ({
-    id: l.id,
-    name: l.name,
-    status: l.status,
-    createdAt: l.createdAt,
-    phone: l.phone,
-    email: l.email,
-    origem: origem(l),
-  });
+  // Revisar só aparece para quem age (comercial/admin); a máscara aqui é a
+  // mesma da tabela, para o contato não depender de quem enxerga o bloco.
+  const revisarLead = (l: Lead): RevisarLead => {
+    const r: RevisarLead = {
+      id: l.id,
+      name: l.name,
+      status: l.status,
+      createdAt: l.createdAt,
+      phone: l.phone,
+      email: l.email,
+      origem: origem(l),
+    };
+    return mascarar ? mascararContato(r) : r;
+  };
   const rev = paraRevisar(data.leads);
   const revisar: RevisarDados = {
     testes: rev.testes.map((t) => ({ ...revisarLead(t.lead), porque: t.porque })),

@@ -10,9 +10,9 @@
  * Leads diz de uma pessoa ser o que a Fila e o Funil dizem dela.
  */
 
-import { eventosPorLead, resumoContato } from "./contato";
+import { eventosPorLead, resumoContato, type ResumoContato } from "./contato";
 import { DONO_LABEL, type Dono } from "./dono";
-import { etapaDoLead, FILA_ETAPAS, type FilaEtapa } from "./fila";
+import { etapaDoLead, FILA_ETAPAS, HORAS_APOS_CONVERSA, type FilaEtapa } from "./fila";
 import { formatDateTime, formatarEspera } from "./format";
 import { horasUteisEntre, somarHorasUteis } from "./horario-util";
 import { gruposDuplicados, pareceTeste, problemasDeContato } from "./identidade";
@@ -112,7 +112,7 @@ function donoDoLead(l: Lead, etapa: FilaEtapa | undefined): Dono | undefined {
 }
 
 /** O motivo de não haver ação agora — para a dica do "—" não ser um zero disfarçado. */
-function porqueSemAcao(l: Lead, proximaTentativa: string | undefined): string {
+function porqueSemAcao(l: Lead, contato: ResumoContato): string {
   if (isLostStatus(l.status)) return `Encerrado como “${statusLabel(l.status)}”.`;
   if (l.status === "cliente") return "Fechou — nada a fazer.";
   if (l.status === "reuniao_realizada") return "Compareceu; o desfecho (cliente ou não) é do especialista.";
@@ -120,7 +120,19 @@ function porqueSemAcao(l: Lead, proximaTentativa: string | undefined): string {
     return `Reunião em ${formatDateTime(l.meetingFor)} — confirmar ${FILA_ETAPAS.confirmar.slaHoras} h antes.`;
   }
   if (l.status === "agendado") return "Agendado sem data registrada; vira “sem desfecho” uma semana depois.";
-  if (proximaTentativa) return `Retorno combinado pela cadência para ${formatDateTime(proximaTentativa)}.`;
+  if (contato.proxima) return `Retorno combinado pela cadência para ${formatDateTime(contato.proxima)}.`;
+  // Tentativa sem retorno combinado (falou e não fechou nada, ou a cadência
+  // acabou): a Fila traz a pessoa de volta HORAS_APOS_CONVERSA depois da última
+  // tentativa — a MESMA conta de `etapaDoLead`. Até lá existe um prazo; dizer
+  // "nada pendente" esconderia o relógio que estoura amanhã.
+  if (l.status === "em_contato" && contato.ultima) {
+    const volta = new Date(Date.parse(contato.ultima) + HORAS_APOS_CONVERSA * 3_600_000).toISOString();
+    const conversa = contato.falou ? " — já falou com a pessoa" : "";
+    return (
+      `Última tentativa em ${formatDateTime(contato.ultima)}${conversa}, sem desfecho; ` +
+      `volta à Fila (“${FILA_ETAPAS.retornar.label}”) em ${formatDateTime(volta)}, ${HORAS_APOS_CONVERSA} h depois.`
+    );
+  }
   return "Nada pendente neste momento.";
 }
 
@@ -181,7 +193,7 @@ export function montarLinhasDeLeads(
         ? etapa.venceEm
           ? `${FILA_ETAPAS[etapa.nome].hint} Vence ${formatDateTime(etapa.venceEm)}.`
           : `${FILA_ETAPAS[etapa.nome].hint} Desde ${formatDateTime(etapa.desde)}.`
-        : porqueSemAcao(l, contato.proxima),
+        : porqueSemAcao(l, contato),
       origem: origem(l),
       dono: donoDoLead(l, etapa?.nome),
       sinalizadores: {
@@ -263,8 +275,18 @@ export function descreverFiltro(f: FiltroDeLeads, periodo: string): string {
 
 // ---------------------------------------------------------------- CSV
 
+/**
+ * Uma célula de texto. Dois cuidados: citar o que carrega `;`, aspas ou quebra
+ * de linha, e NEUTRALIZAR o começo que o Excel executa — `=`, `+`, `-`, `@`
+ * (também atrás de tab/CR). Nome, e-mail e utm_content vêm do formulário
+ * público da LP: um nome `=HYPERLINK(...)` viraria link ou fórmula na máquina
+ * do comercial ao abrir o arquivo. O apóstrofo faz o Excel ler como texto. O
+ * único `=` de propósito é o de `csvTelefone`, que não passa por aqui.
+ */
 function csvCell(v: string): string {
-  return /[;"\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+  const perigoso = /^[=+\-@\t\r]/.test(v);
+  const texto = perigoso ? `'${v}` : v;
+  return perigoso || /[;"\n\r]/.test(texto) ? `"${texto.replace(/"/g, '""')}"` : texto;
 }
 
 /**

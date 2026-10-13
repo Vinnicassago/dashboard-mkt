@@ -128,8 +128,12 @@ export const FILA_ETAPAS: Record<FilaEtapa, EtapaMeta> = {
   },
 };
 
-/** Horas sem resposta depois de falar com a pessoa até ela voltar à fila. */
-const HORAS_APOS_CONVERSA = 24;
+/**
+ * Horas sem desfecho depois de falar com a pessoa até ela voltar à fila.
+ * Exportado para a vista de Leads dizer QUANDO ela volta — o "—" de quem tem
+ * esse relógio correndo não é "nada pendente". Fonte única do prazo.
+ */
+export const HORAS_APOS_CONVERSA = 24;
 /** Reunião agendada antes de existir data (legado): sem desfecho depois disto. */
 const DIAS_AGENDADO_SEM_DATA = 7;
 

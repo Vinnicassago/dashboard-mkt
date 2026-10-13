@@ -46,14 +46,22 @@ export function problemasDeContato(l: Pick<Lead, "phone" | "email">): string[] {
 
 const NOMES_DE_TESTE = new Set(["nome", "teste", "test", "testando", "asdf", "xxx", "aaa", "fulano", "lead teste"]);
 
-/** Parece cadastro de teste? Devolve o porquê (para quem revisa confirmar). */
+/**
+ * Parece cadastro de teste? Devolve o porquê (para quem revisa confirmar).
+ *
+ * O motivo NÃO carrega o telefone nem o e-mail: ele vai para a dica do selo
+ * "Teste", para o aviso da ficha e para o motivo da exclusão — lugares que o
+ * papel Marketing lê com o contato mascarado (LGPD); o valor cru ali furava a
+ * máscara. O nome fica, porque aparece em toda tela; o contato em si está na
+ * coluna ao lado, para quem pode vê-lo.
+ */
 export function pareceTeste(l: Pick<Lead, "name" | "email" | "phone">): string | null {
   const nome = chaveNome(l.name);
   if (nome && NOMES_DE_TESTE.has(nome)) return `nome “${l.name}”`;
   const email = (l.email ?? "").trim().toLowerCase();
-  if (email === "email" || /^(teste?|test)\d*@/.test(email)) return `e-mail “${l.email}”`;
+  if (email === "email" || /^(teste?|test)\d*@/.test(email)) return "e-mail de teste";
   const d = (l.phone ?? "").replace(/\D/g, "");
-  if (/(\d)\1{6,}/.test(d)) return `telefone “${l.phone}”`;
+  if (/(\d)\1{6,}/.test(d)) return "telefone com dígitos repetidos";
   return null;
 }
 

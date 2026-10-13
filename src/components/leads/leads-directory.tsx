@@ -400,7 +400,7 @@ export function LeadsDirectory({
   const comPeriodo = useComPeriodo();
   const [filtro, setFiltro] = useState<FiltroDeLeads>(() => filtroDaUrl(new URLSearchParams(params.toString())));
   const [exportando, startExport] = useTransition();
-  const [msgExport, setMsgExport] = useState<string | null>(null);
+  const [msgExport, setMsgExport] = useState<{ ok: boolean; text: string } | null>(null);
 
   // Filtro → URL (sem servidor). Só os campos que valem a pena compartilhar.
   const { status, campanha, conjunto, dono, sinalizadores } = filtro;
@@ -458,10 +458,11 @@ export function LeadsDirectory({
     const linhas = filtradas;
     const descricao = descreverFiltro(filtro, rangeLabel(rangeKey));
     startExport(async () => {
-      // Registra ANTES de montar o arquivo: sem registro, sem CSV.
+      // Registra ANTES de montar o arquivo: sem registro, sem CSV. `ok: false`
+      // inclui o registro que não entrou em audit_log — o arquivo não nasce.
       const r = await registrarExportacaoAction(descricao, linhas.length);
       if (!r.ok) {
-        setMsgExport(r.message);
+        setMsgExport({ ok: false, text: r.message });
         return;
       }
       const blob = new Blob([montarCsvDeLeads(linhas)], { type: "text/csv;charset=utf-8" });
@@ -471,7 +472,7 @@ export function LeadsDirectory({
       a.download = "leads.csv";
       a.click();
       URL.revokeObjectURL(url);
-      setMsgExport(r.message);
+      setMsgExport({ ok: true, text: r.message });
     });
   }
 
@@ -505,7 +506,17 @@ export function LeadsDirectory({
               <Download className="size-4" />
               Exportar CSV ({filtradas.length})
             </button>
-            {msgExport ? <span className="text-[11px] text-muted-foreground">{msgExport}</span> : null}
+            {msgExport ? (
+              <span
+                role={msgExport.ok ? undefined : "alert"}
+                className={cn(
+                  "max-w-xs text-right text-[11px]",
+                  msgExport.ok ? "text-muted-foreground" : "text-[var(--danger-text)]",
+                )}
+              >
+                {msgExport.text}
+              </span>
+            ) : null}
           </div>
         ) : null}
       </div>

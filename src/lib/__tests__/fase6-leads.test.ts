@@ -2,8 +2,10 @@
  * Fase 6.4 — a página Leads. Fixture sintética (nenhum dado real).
  * Datas em Brasília (UTC−3, sem horário de verão). 2026-10-08 é quinta.
  */
-import { describe, expect, it } from "vitest";
-import { mascararContato, mascararEmail, mascararTelefone } from "../lgpd";
+import { createElement, type ReactNode } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { mascararContato, mascararEmail, mascararNoTexto, mascararTelefone } from "../lgpd";
 import { ETAPA_MAXIMA_LABEL, etapaMaxima } from "../lead-status";
 import {
   CSV_CABECALHO,
@@ -16,7 +18,38 @@ import {
   type LinhaDeLead,
 } from "../leads-vista";
 import { proximaPelaCadencia } from "../contato";
+import { HORAS_APOS_CONVERSA } from "../fila";
+import { formatDateTime } from "../format";
+import { pareceTeste } from "../identidade";
+import { comPeriodo } from "../range";
+import { periodoPadraoDe } from "@/components/layout/nav-items";
 import type { AdDaily, Creative, DashboardData, Lead, LeadEvent } from "../types";
+
+// ---------------------------------------------------------------- dublês
+// Só o que a ação de exportar e os componentes da ficha tocam: o store (o
+// insert em audit_log), o papel, quem age, a marca e a URL (`?range=`).
+const dubles = vi.hoisted(() => ({
+  addAuditEntry: vi.fn<(entry: unknown) => Promise<void>>(async () => {}),
+  can: vi.fn<(cap: string) => Promise<boolean>>(async () => true),
+  range: "7d" as string | null,
+}));
+
+vi.mock("@/lib/data/store", () => ({ addAuditEntry: dubles.addAuditEntry }));
+vi.mock("@/lib/auth/guard", () => ({ can: dubles.can }));
+vi.mock("@/lib/auth/actor", () => ({ currentActor: async () => "ana", newEventId: () => "EVT-teste" }));
+vi.mock("@/lib/active-brand", () => ({ activeBrandSlug: async () => "consorcio" }));
+vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/leads",
+  useSearchParams: () => new URLSearchParams(dubles.range ? `range=${dubles.range}` : ""),
+  useRouter: () => ({ refresh: () => {}, push: () => {}, replace: () => {} }),
+}));
+vi.mock("next/link", async () => {
+  const { createElement: h } = await import("react");
+  return {
+    default: ({ href, children, ...resto }: { href: string; children?: ReactNode }) => h("a", { href, ...resto }, children),
+  };
+});
 
 const brt = (dia: string, hhmm: string) => new Date(`${dia}T${hhmm}:00-03:00`).toISOString();
 
@@ -301,5 +334,195 @@ describe("abas, filtros e CSV", () => {
     expect(d).toBe("período: 30 dias · status: Agendado · campanha: Consórcio Leads · dono: comercial · sinalizadores: Duplicado · busca: sim");
     expect(d).not.toContain("11999990003");
     expect(descreverFiltro(FILTRO_VAZIO, "Campanha")).toBe("período: Campanha · status: todos");
+  });
+});
+
+// ---------------------------------------------------------------- revisão (Fase 6.4)
+
+describe("“Parece teste” não fura a máscara (LGPD)", () => {
+  const porEmail = lead("21", { name: "Pessoa Vinte e Um", email: "teste7@exemplo.com", phone: "11987654321" });
+  const porFone = lead("22", { name: "Pessoa Vinte e Dois", email: "p22@exemplo.com", phone: "(11) 99999-9999" });
+  const linhas = montarLinhasDeLeads(base({ leads: [porEmail, porFone] }), [], AGORA);
+  const l = porId(linhas);
+
+  it("o motivo diz o porquê sem o contato — é o que vai para a dica do selo e para o aviso da ficha", () => {
+    expect(l.get("21")!.sinalizadores.teste).toBe("e-mail de teste");
+    expect(l.get("22")!.sinalizadores.teste).toBe("telefone com dígitos repetidos");
+    // A ficha chama `pareceTeste(lead)` com o lead cru: o texto já sai sem PII.
+    for (const x of [porEmail, porFone]) {
+      const motivo = pareceTeste(x)!;
+      expect(motivo).not.toContain("@");
+      expect(motivo).not.toMatch(/\d/);
+    }
+  });
+
+  it("a linha mascarada (papel Marketing) não carrega o contato cru em campo nenhum", () => {
+    for (const crua of linhas) {
+      const json = JSON.stringify(mascararContato(crua));
+      expect(json).not.toContain(crua.email!);
+      expect(json).not.toContain(crua.phone!);
+      expect(json).not.toMatch(/9{5}|987654321/);
+    }
+  });
+
+  it("motivo antigo gravado com o contato cru sai mascarado; datas e ids de lead passam intactos", () => {
+    expect(mascararNoTexto("teste (e-mail “teste7@exemplo.com”)")).toBe("teste (e-mail “t•••@exemplo.com”)");
+    expect(mascararNoTexto("teste (telefone “(11) 99999-9999”)")).toBe("teste (telefone “(11) •••••-9999”)");
+    expect(mascararNoTexto("teste (telefone “+55 11 99999-9999”)")).not.toContain("99999");
+    expect(mascararNoTexto("spam — 08/10/2026 10:00")).toBe("spam — 08/10/2026 10:00");
+    expect(mascararNoTexto("duplicado de Pessoa 2 (LEAD-LP-17283912345678)")).toBe(
+      "duplicado de Pessoa 2 (LEAD-LP-17283912345678)",
+    );
+    expect(mascararNoTexto(undefined)).toBe("");
+  });
+});
+
+describe("CSV: nada que o Excel execute", () => {
+  const [modelo] = montarLinhasDeLeads(base({ leads: [lead("41")] }), [], AGORA);
+  const linhaDoCsv = (r: LinhaDeLead) => montarCsvDeLeads([r]).split("\r\n")[1];
+
+  it("nome, e-mail e origem que começam com = + - @ (ou tab/CR) saem como texto, com apóstrofo e entre aspas", () => {
+    const maliciosa: LinhaDeLead = {
+      ...modelo,
+      name: '=HYPERLINK("https://phish.example";"Abrir ficha")',
+      email: "+5@exemplo.com",
+      origem: { ...modelo.origem, campanha: "@SOMA(1;2)", conjunto: "\t=1+1", anuncio: "-2+3+cmd|x" },
+    };
+    const linha = linhaDoCsv(maliciosa);
+    expect(linha.startsWith(`"'=HYPERLINK(""https://phish.example"";""Abrir ficha"")";`)).toBe(true);
+    expect(linha).toContain(`;"'+5@exemplo.com";`);
+    expect(linha).toContain(`;"'@SOMA(1;2)";"'\t=1+1";"'-2+3+cmd|x";`);
+    // Fora das aspas, a única célula que começa com caractere perigoso é o telefone.
+    const foraDasAspas = linha.replace(/"'[^"]*(?:""[^"]*)*"/g, "TEXTO");
+    expect(foraDasAspas.split(";").filter((c) => /^[=+\-@\t\r]/.test(c))).toEqual([`="${modelo.phone}"`]);
+  });
+
+  it("o único = de propósito continua: o telefone como texto; texto comum não ganha apóstrofo", () => {
+    const comum: LinhaDeLead = { ...modelo, name: "Ana-Maria Souza", email: "ana@exemplo.com" };
+    const colunas = linhaDoCsv(comum).split(";");
+    expect(colunas[0]).toBe("Ana-Maria Souza");
+    expect(colunas[1]).toBe("ana@exemplo.com");
+    expect(colunas[2]).toBe(`="${modelo.phone}"`);
+  });
+});
+
+describe("exportação: sem registro em audit_log, sem CSV", () => {
+  const silencio = vi.spyOn(console, "error");
+  beforeEach(() => {
+    dubles.addAuditEntry.mockReset();
+    dubles.addAuditEntry.mockImplementation(async () => {});
+    dubles.can.mockReset();
+    dubles.can.mockImplementation(async () => true);
+    silencio.mockImplementation(() => {});
+  });
+  afterEach(() => silencio.mockReset());
+
+  it("o insert falhou → ok: false (a tela não monta o arquivo), em vez do registro que engolia o erro", async () => {
+    dubles.addAuditEntry.mockRejectedValueOnce(new Error("connect ECONNREFUSED 127.0.0.1:5432"));
+    const { registrarExportacaoAction } = await import("@/app/(dashboard)/leads/actions");
+    const r = await registrarExportacaoAction("período: 7 dias · status: todos", 3);
+    expect(r.ok).toBe(false);
+    expect(r.message).toContain("não foi gerado");
+    expect(r.message).not.toContain("ECONNREFUSED");
+    expect(dubles.addAuditEntry).toHaveBeenCalledTimes(1);
+  });
+
+  it("o insert entrou → ok: true, com quem, quantos, a marca e o filtro no registro", async () => {
+    const { registrarExportacaoAction } = await import("@/app/(dashboard)/leads/actions");
+    const r = await registrarExportacaoAction("período: 7 dias · status: todos", 3);
+    expect(r.ok).toBe(true);
+    expect(dubles.addAuditEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actor: "ana",
+        action: "exportar_leads",
+        detail: "3 leads · marca: consorcio · período: 7 dias · status: todos",
+      }),
+    );
+  });
+
+  it("sem leads:write (Marketing) → ok: false e nenhum registro", async () => {
+    dubles.can.mockImplementation(async () => false);
+    const { registrarExportacaoAction } = await import("@/app/(dashboard)/leads/actions");
+    const r = await registrarExportacaoAction("período: Campanha · status: todos", 10);
+    expect(r.ok).toBe(false);
+    expect(dubles.addAuditEntry).not.toHaveBeenCalled();
+  });
+});
+
+describe("o nome abre a ficha COM o período (Histórico e Revisar)", () => {
+  afterEach(() => {
+    dubles.range = "7d";
+  });
+  const evento: LeadEvent = {
+    id: "EV1",
+    leadId: "LEAD-LP-abc",
+    leadName: "Pessoa Abc",
+    actor: "ana",
+    action: "nota",
+    createdAt: brt("2026-10-08", "10:00"),
+    payload: { texto: "ligar à tarde" },
+  };
+  const revisado = {
+    id: "LEAD-LP-abc",
+    name: "Pessoa Abc",
+    status: "lead" as const,
+    createdAt: brt("2026-10-08", "10:00"),
+    origem: "—",
+    porque: "e-mail de teste",
+  };
+
+  it("Histórico de alterações: /leads/ID?range=7d", async () => {
+    const { LeadActivity } = await import("@/components/leads/lead-activity");
+    const html = renderToStaticMarkup(createElement(LeadActivity, { events: [evento] }));
+    expect(html).toContain('href="/leads/LEAD-LP-abc?range=7d"');
+  });
+
+  it("Revisar: /leads/ID?range=7d", async () => {
+    const { Revisar } = await import("@/components/leads/revisar");
+    const dados = { testes: [revisado], duplicados: [], desistencias: [], contatos: [] };
+    const html = renderToStaticMarkup(createElement(Revisar, { dados, podeAgir: false }));
+    expect(html).toContain('href="/leads/LEAD-LP-abc?range=7d"');
+    expect(html).toContain("por causa do e-mail de teste");
+  });
+
+  it("sem ?range= na URL vale o padrão da página — o mesmo que o resto da tela usa", async () => {
+    dubles.range = null;
+    const { LeadActivity } = await import("@/components/leads/lead-activity");
+    const html = renderToStaticMarkup(createElement(LeadActivity, { events: [evento] }));
+    expect(html).toContain(`href="${comPeriodo("/leads/LEAD-LP-abc", periodoPadraoDe("/leads"))}"`);
+  });
+});
+
+describe("o porquê do “—” diz quando a pessoa volta à Fila", () => {
+  it("falou e não fechou nada: volta HORAS_APOS_CONVERSA depois da última tentativa — a mesma conta da Fila", () => {
+    const J = lead("31", { status: "em_contato", firstContactAt: brt("2026-10-08", "10:00") });
+    const ev = [tentativa(J.id, brt("2026-10-08", "10:00"), true)];
+    const [agora] = montarLinhasDeLeads(base({ leads: [J] }), ev, AGORA);
+    expect(agora.proximaAcao).toBe("—");
+    expect(agora.acaoPorque).not.toContain("Nada pendente");
+    expect(agora.acaoPorque).toContain("já falou com a pessoa");
+    expect(agora.acaoPorque).toContain(`volta à Fila (“Retornar hoje”) em ${formatDateTime(brt("2026-10-09", "10:00"))}`);
+    expect(agora.acaoPorque).toContain(`${HORAS_APOS_CONVERSA} h depois`);
+    // E a Fila concorda: passado o prazo, a mesma pessoa está em "retornar".
+    const [depois] = montarLinhasDeLeads(base({ leads: [J] }), ev, brt("2026-10-09", "10:01"));
+    expect(depois.proximaAcao).toBe("retornar");
+  });
+
+  it("cadência encerrada sem conversa: o mesmo relógio, sem dizer que falou", () => {
+    const K = lead("32", { status: "em_contato", firstContactAt: brt("2026-10-08", "11:00") });
+    const semRetorno: LeadEvent = {
+      id: "T-fim",
+      leadId: K.id,
+      leadName: K.name,
+      actor: "ana",
+      action: "tentativa",
+      occurredAt: brt("2026-10-08", "11:00"),
+      createdAt: brt("2026-10-08", "11:00"),
+      payload: { canal: "telefone", falou: "nao" },
+    };
+    const [linha] = montarLinhasDeLeads(base({ leads: [K] }), [semRetorno], AGORA);
+    expect(linha.proximaAcao).toBe("—");
+    expect(linha.acaoPorque).not.toContain("falou");
+    expect(linha.acaoPorque).toContain(formatDateTime(brt("2026-10-09", "11:00")));
   });
 });

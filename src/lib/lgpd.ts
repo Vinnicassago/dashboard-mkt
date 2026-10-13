@@ -55,3 +55,28 @@ export function mascararContato<T extends ComContato>(x: T): T {
     ...(x.email ? { email: mascararEmail(x.email) } : {}),
   };
 }
+
+const EMAIL_NO_TEXTO = /[^\s@“”"'(),;:<>]+@[^\s@“”"'(),;:<>]+/g;
+/** 8+ dígitos com os separadores de telefone (espaço, ponto, hífen, parênteses). */
+const TELEFONE_NO_TEXTO = /\+?\(?\d[\d\s().-]{6,}\d/g;
+
+/** Letra, dígito, "_" ou "-" colado no número: é pedaço de id, não telefone. */
+const COLADO = /[\w-]/;
+
+/**
+ * Texto livre que pode ter um contato no meio — o motivo de uma exclusão. Até
+ * out/2026 o motivo de "parece teste" levava o e-mail ou o telefone cru
+ * ("teste (e-mail “…”)") e ficou gravado assim; para o papel mascarado, o
+ * contato que aparecer no texto sai mascarado como na coluna. Datas
+ * ("08/10/2026") e horas não têm 8 dígitos seguidos, e ids de lead
+ * ("LEAD-LP-1728…") têm o número colado — os dois passam intactos.
+ */
+export function mascararNoTexto(texto?: string | null): string {
+  if (!texto) return "";
+  return texto
+    .replace(EMAIL_NO_TEXTO, (e) => mascararEmail(e))
+    .replace(TELEFONE_NO_TEXTO, (t: string, i: number, s: string) => {
+      const colado = COLADO.test(s[i - 1] ?? "") || COLADO.test(s[i + t.length] ?? "");
+      return !colado && t.replace(/\D/g, "").length >= 8 ? mascararTelefone(t) : t;
+    });
+}
