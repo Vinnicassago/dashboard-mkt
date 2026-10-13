@@ -12,8 +12,14 @@
  *   paga seguidores.
  * - DUAS VISTAS do mesmo funil. "Por período (eventos)" conta o que ACONTECEU no
  *   período (reunião marcada pela data do agendamento — a north star); "por coorte"
- *   segue os leads que ENTRARAM no período até onde chegaram. A cascata já era
- *   coorte de Leads para baixo; a vista de período troca só esses degraus.
+ *   segue os leads que ENTRARAM no período até onde chegaram. De Leads para baixo
+ *   as etapas do PAINEL (1º contato, reuniões, realizadas, vendas) são montadas
+ *   aqui, pela vista, com ou sem robô; as do robô e do atendimento — contagens da
+ *   campanha inteira, de outro sistema — vão num BLOCO separado, e com período
+ *   definido não dividem a verba nem os leads dele (numerador e denominador de
+ *   janelas diferentes). "X% da anterior" só entre populações ANINHADAS: o 1º
+ *   contato é ramo paralelo (quem agenda direto não passa por ele), então a taxa
+ *   de reuniões é sobre LEADS — e nunca passa de 100%.
  * - TENDÊNCIA das três taxas, semana a semana, com `kpisDoPeriodo` + `lpKpis`:
  *   o ponto do gráfico é o número do KPI daquela semana (ADR-03).
  * - COORTES com TODAS as semanas, inclusive as de 0 lead (B21), e a partição
@@ -88,8 +94,6 @@ export function vistaDoFunil(raw?: string | null): VistaFunil {
 
 // ---------------------------------------------------------------- a resposta
 
-const pct = (v: number) => formatPercent(v, v < 0.1 ? 1 : 0);
-
 /**
  * A linha de resposta — o gargalo com dono e impacto, nas MESMAS palavras do
  * bloco "Onde trava" da Bússola (`components/kpi/onde-trava.tsx`).
@@ -105,7 +109,8 @@ export function fraseDoGargalo(g: Gargalo | null): { titulo: string; detalhe: st
   const regua = t.referencia!.origem === "meta" ? "meta de" : "média de 8 semanas de";
   return {
     titulo: `Gargalo: ${t.rotulo}`,
-    detalhe: `(${DONO_LABEL[t.dono]}) — ${pct(t.taxa!)} contra ${regua} ${pct(t.referencia!.taxa)}. ${textoDoImpacto(g)}.`,
+    // As mesmas casas do "Onde trava": uma abaixo de 10%, nenhuma acima.
+    detalhe: `(${DONO_LABEL[t.dono]}) — ${formatPercent(t.taxa!, t.taxa! < 0.1 ? 1 : 0)} contra ${regua} ${formatPercent(t.referencia!.taxa, t.referencia!.taxa < 0.1 ? 1 : 0)}. ${textoDoImpacto(g)}.`,
   };
 }
 
@@ -132,8 +137,15 @@ export interface EtapaFunil {
   dono?: Dono;
   ehAncora?: boolean;
   trocaDeSistema?: boolean;
-  /** Conversão da etapa anterior — ausente abaixo da amostra ou sem leitura. */
+  /**
+   * Conversão da etapa anterior (0–1) — só entre populações aninhadas, com
+   * amostra e leitura; nunca acima de 1. Ausente, `semTaxa` diz por quê.
+   */
   daAnterior?: number;
+  /** Sobre quem a taxa é quando não é a etapa logo acima ("dos leads"); ausente = "da anterior". */
+  baseDaTaxa?: string;
+  /** Por que não há "X% da anterior": populações que não se aninham (eventos do período, campanha inteira…). */
+  semTaxa?: string;
   /** A entrada do dicionário que define este número (o ⓘ da tela), quando existe. */
   dica?: MetricaId;
   /** "R$ 12,30 por lead" — só com amostra; o custo por reunião segue `custoExibivel`. */
@@ -161,9 +173,19 @@ export interface EntradaFunil {
   agora: string;
 }
 
+/** As etapas do robô e do atendimento, fora da coluna do painel. */
+export interface BlocoFunil {
+  titulo: string;
+  nota?: string;
+  etapas: EtapaFunil[];
+}
+
 export interface FunilConversao {
   vista: VistaFunil;
+  /** O funil do painel: Meta → LP → painel, nas duas vistas. */
   etapas: EtapaFunil[];
+  /** Robô/atendimento ligados: as etapas deles, como bloco separado (contagens da campanha inteira). */
+  bloco?: BlocoFunil;
   investimentoConversao: number;
   /** A cascata de origem (notas, vazamento, Pixel). */
   cascata: CascataResult;
@@ -194,131 +216,228 @@ function eventosNoPeriodo(data: DashboardData, range: DateRange | undefined) {
   return { realizadas, vendas };
 }
 
-/** Traduz os degraus da cascata nas etapas do funil, na vista pedida. */
-function etapasDaCascata(degraus: Degrau[], e: EntradaFunil): EtapaFunil[] {
-  const { data, range, kpis, robo, comercial, vista } = e;
-  const semRobo = !robo && !comercial;
+/** Um degrau da cascata traduzido em etapa — os números vêm como estão. */
+function traduzDegrau(d: Degrau): EtapaFunil {
+  return {
+    key: d.key,
+    label: d.label,
+    valor: d.valor,
+    fonte: d.fonte,
+    dono: d.dono,
+    ehAncora: d.ehAncora,
+    trocaDeSistema: d.trocaDeSistema,
+    daAnterior: d.daAnterior,
+    nota: d.nota,
+    dica: d.key === "leads" ? "leads" : undefined,
+    custo:
+      d.custoUnitario !== undefined
+        ? { valor: d.custoUnitario, prefixo: d.custoPrefixo, rotulo: ROTULO_CUSTO[d.key] ?? "cada", dica: d.key === "leads" ? "cpl" : undefined }
+        : undefined,
+    parados: d.parados,
+    etapaFila: d.etapaFila,
+  };
+}
+
+/** A vista de período conta EVENTOS de leads de qualquer data: não há "fração da etapa acima". */
+export const SEM_TAXA_PERIODO = "sem taxa: eventos do período, de leads de qualquer data";
+/** Mais gente que na base: não é a mesma população (ex.: quem agenda sem tentativa registrada). */
+export const SEM_TAXA_NAO_ANINHADA = "sem taxa: mais gente que na etapa acima — não é a mesma população";
+/** O robô e o atendimento não guardam data: a contagem deles não é fração dos leads do período. */
+export const SEM_TAXA_CAMPANHA_INTEIRA = "sem taxa: contagem da campanha inteira, não dos leads do período";
+
+/**
+ * "X% da anterior" só entre populações ANINHADAS — quem chegou aqui é parte de
+ * quem estava na base. Abaixo da amostra não é taxa (a tela diz "taxa sem
+ * amostra"); mais gente que na base é outra população, e a tela diz isso em vez
+ * de imprimir "166,7% da anterior".
+ */
+function taxaAninhada(et: EtapaFunil, base: number | null | undefined, rotulo?: string): void {
+  et.daAnterior = undefined;
+  if (et.valor == null || base == null || base < AMOSTRA_MINIMA) return;
+  if (et.valor > base) {
+    et.semTaxa = SEM_TAXA_NAO_ANINHADA;
+    return;
+  }
+  et.daAnterior = et.valor / base;
+  if (rotulo) et.baseDaTaxa = rotulo;
+}
+
+/**
+ * Traduz os degraus da cascata nas etapas do funil, na vista pedida. O funil do
+ * PAINEL (Meta → LP → painel) existe nas duas vistas, com ou sem robô: de Leads
+ * para baixo as etapas são montadas AQUI, pela vista — não pelo que a cascata
+ * trouxe (ela só conhece a coorte). As etapas do robô e do atendimento viram um
+ * BLOCO separado: contagens da campanha inteira, de outro sistema, que não cabem
+ * numa coluna que lê o período.
+ */
+function etapasDaCascata(degraus: Degrau[], e: EntradaFunil): { etapas: EtapaFunil[]; bloco?: BlocoFunil } {
+  const { data, range, kpis, comercial, vista } = e;
   const periodo = vista === "periodo";
-  const out: EtapaFunil[] = [];
+  const etapas: EtapaFunil[] = [];
+  const doRobo: EtapaFunil[] = [];
 
   for (const d of degraus) {
     // Envios de formulário são EVENTOS, não pessoas: viram nota de medição.
     if (d.key === "envios") continue;
-    const et: EtapaFunil = {
-      key: d.key,
-      label: d.label,
-      valor: d.valor,
-      fonte: d.fonte,
-      dono: d.dono,
-      ehAncora: d.ehAncora,
-      trocaDeSistema: d.trocaDeSistema,
-      nota: d.nota,
-      dica: d.key === "leads" ? "leads" : undefined,
-      custo:
-        d.custoUnitario !== undefined
-          ? { valor: d.custoUnitario, prefixo: d.custoPrefixo, rotulo: ROTULO_CUSTO[d.key] ?? "cada", dica: d.key === "leads" ? "cpl" : undefined }
-          : undefined,
-      parados: d.parados,
-      etapaFila: d.etapaFila,
-    };
+    // O fundo do painel é montado abaixo, pela vista.
+    if (d.key === "reunioes" || d.key === "compareceu" || d.key === "clientes") continue;
+    (d.fonte === "robo" || d.fonte === "comercial" ? doRobo : etapas).push(traduzDegrau(d));
+  }
 
-    if (semRobo && d.key === "reunioes") {
-      // Quem espera o 1º contato está parado ANTES do 1º contato, não antes da reunião.
-      et.parados = undefined;
-      et.etapaFila = undefined;
-      if (periodo) {
-        et.label = "Reuniões agendadas";
-        et.dica = "reunioes_agendadas";
-        et.valor = kpis.reunioesAgendadas.valor;
-        et.nota = "marcadas no período, pela data do agendamento — a north star";
-        // O custo por reunião do dicionário (verba de conversão ÷ reuniões de
-        // conversão do período), com a régua única da quarentena.
-        if (custoExibivel(kpis.custoPorReuniao)) {
-          et.custo = {
-            valor: kpis.custoPorReuniao.valor,
-            prefixo: kpis.custoPorReuniao.confianca ? (kpis.custoPorReuniao.confianca.nivel === "piso" ? "≥" : "≤") : undefined,
-            rotulo: ROTULO_CUSTO.reunioes,
-            dica: "custo_por_reuniao",
-          };
-        }
-      } else {
-        et.label = "Agendaram reunião";
-        et.dica = "agendaram";
-      }
-    }
-    if (semRobo && d.key === "compareceu") {
-      et.label = "Reuniões realizadas";
-      if (periodo) {
-        et.valor = eventosNoPeriodo(data, range).realizadas;
-        et.nota = "pela data em que a reunião aconteceu";
-      } else {
-        et.nota = "dos leads que entraram no período";
-      }
-    }
-    if (semRobo && d.key === "clientes") {
-      et.label = "Vendas";
-      if (periodo) {
-        et.valor = eventosNoPeriodo(data, range).vendas;
-        et.nota = "fechadas no período, pela data do fechamento";
-      } else {
-        et.nota = "dos leads que entraram no período";
-      }
-    }
+  // Topo: impressões → visitas → leads, cada uma fração da que ficou acima
+  // (sem "envios" no meio, Leads é fração das visitas).
+  for (let i = 1; i < etapas.length; i++) taxaAninhada(etapas[i], etapas[i - 1].valor);
 
-    out.push(et);
+  const leadCount = kpis.leads.valor;
+  const ev = periodo ? eventosNoPeriodo(data, range) : undefined;
 
-    if (d.key === "leads" && semRobo) {
-      // O 1º contato é a etapa do comercial que o relatório pede no funil — e é
-      // onde quem ainda não foi contatado está parado (a aba "Novos" da Fila).
-      const semContato = data.leads.filter((l) => l.status === "lead").length;
-      out.push({
-        key: "primeiro_contato",
-        label: "1º contato registrado",
-        valor: primeiroContatoRegistrado(data, range, vista),
+  // 1º contato: a etapa do comercial que o relatório pede — e um RAMO PARALELO
+  // (`TRANSICOES.lead` inclui "agendado": quem agenda direto não passa por ela).
+  // Sem a mesa do atendimento, quem ainda não teve tentativa está parado aqui (a
+  // aba "Novos" da Fila) — a mesma regra da cascata; com ela, quem espera
+  // aparece no bloco (aguardando abordagem), e contar aqui também seria dobrar.
+  const semContato = comercial ? 0 : data.leads.filter((l) => l.status === "lead").length;
+  const contato: EtapaFunil = {
+    key: "primeiro_contato",
+    label: "1º contato registrado",
+    valor: primeiroContatoRegistrado(data, range, vista),
+    fonte: "crm",
+    dono: "COM",
+    parados: semContato > 0 ? semContato : undefined,
+    etapaFila: semContato > 0 ? "novo" : undefined,
+    nota: periodo
+      ? "tentativas de 1º contato feitas no período, pela data da 1ª tentativa"
+      : "dos leads que entraram no período, quantos já tiveram uma tentativa de contato",
+  };
+  if (periodo) contato.semTaxa = SEM_TAXA_PERIODO;
+  else taxaAninhada(contato, leadCount);
+  etapas.push(contato);
+
+  // Reuniões: por período, as AGENDADAS no período (a north star) com o custo por
+  // reunião do dicionário; por coorte, "Agendaram" — e a taxa é sobre LEADS,
+  // pulando o ramo paralelo (o mesmo "lead → reunião" dos KPIs).
+  const reunioes: EtapaFunil = periodo
+    ? {
+        key: "reunioes",
+        label: "Reuniões agendadas",
+        dica: "reunioes_agendadas",
+        valor: kpis.reunioesAgendadas.valor,
         fonte: "crm",
         dono: "COM",
-        parados: semContato > 0 ? semContato : undefined,
-        etapaFila: semContato > 0 ? "novo" : undefined,
-        nota: periodo
-          ? "tentativas de 1º contato feitas no período, pela data da 1ª tentativa"
-          : "dos leads que entraram no período, quantos já tiveram uma tentativa de contato",
-      });
+        nota: "marcadas no período, pela data do agendamento — a north star",
+        semTaxa: SEM_TAXA_PERIODO,
+      }
+    : {
+        key: "reunioes",
+        label: "Agendaram reunião",
+        dica: "agendaram",
+        valor: kpis.agendaram.valor,
+        fonte: "crm",
+        dono: "COM",
+        nota: "dos leads que entraram no período, em qualquer data",
+      };
+  if (periodo) {
+    // A régua única da quarentena (`custoExibivel`): abaixo dela, sem custo.
+    if (custoExibivel(kpis.custoPorReuniao)) {
+      reunioes.custo = {
+        valor: kpis.custoPorReuniao.valor,
+        prefixo: kpis.custoPorReuniao.confianca ? (kpis.custoPorReuniao.confianca.nivel === "piso" ? "≥" : "≤") : undefined,
+        rotulo: ROTULO_CUSTO.reunioes,
+        dica: "custo_por_reuniao",
+      };
+    }
+  } else if (leadCount >= AMOSTRA_MINIMA) {
+    reunioes.daAnterior = kpis.taxaLeadAgendada.valor;
+    reunioes.baseDaTaxa = "dos leads";
+  }
+  etapas.push(reunioes);
+
+  const compareceu: EtapaFunil = {
+    key: "compareceu",
+    label: "Reuniões realizadas",
+    valor: periodo ? ev!.realizadas : kpis.overview.attended,
+    fonte: "crm",
+    dono: "COM",
+    nota: periodo ? "pela data em que a reunião aconteceu" : "dos leads que entraram no período",
+  };
+  if (periodo) compareceu.semTaxa = SEM_TAXA_PERIODO;
+  else taxaAninhada(compareceu, reunioes.valor);
+  etapas.push(compareceu);
+
+  const clientes: EtapaFunil = {
+    key: "clientes",
+    label: "Vendas",
+    valor: periodo ? ev!.vendas : kpis.overview.clients,
+    fonte: "crm",
+    dono: "COM",
+    nota: periodo ? "fechadas no período, pela data do fechamento" : "dos leads que entraram no período",
+  };
+  if (periodo) clientes.semTaxa = SEM_TAXA_PERIODO;
+  else taxaAninhada(clientes, compareceu.valor);
+  etapas.push(clientes);
+
+  if (doRobo.length === 0) return { etapas };
+
+  // Bloco do robô/atendimento. As taxas DENTRO dele (responderam ÷ conversas…)
+  // são campanha inteira sobre campanha inteira e ficam; a do primeiro degrau é
+  // sobre Leads, e o custo é sobre a verba — do período, quando há período:
+  // numerador e denominador de janelas diferentes, então saem (a nota fica).
+  const primeiro = doRobo[0];
+  if (range) {
+    for (const et of doRobo) et.custo = undefined;
+    primeiro.daAnterior = undefined;
+    primeiro.semTaxa = SEM_TAXA_CAMPANHA_INTEIRA;
+  } else {
+    // Campanha inteira sobre campanha inteira: a taxa sobre os leads vale, com a
+    // régua de aninhamento — o robô pode conversar com quem nunca passou pelo
+    // formulário, e com mais conversas que leads ela deixa de ser fração.
+    taxaAninhada(primeiro, leadCount, "dos leads");
+  }
+  for (const et of doRobo.slice(1)) {
+    if (et.daAnterior !== undefined && et.daAnterior > 1) {
+      et.daAnterior = undefined;
+      et.semTaxa = SEM_TAXA_NAO_ANINHADA;
     }
   }
-
-  // Conversão da anterior, recalculada entre as etapas que ficaram. Abaixo da
-  // amostra mínima "1 de 1" imprimiria "100%" com cara de medição.
-  for (let i = 1; i < out.length; i++) {
-    const d = out[i];
-    const ant = out[i - 1];
-    d.daAnterior = d.valor != null && ant.valor != null && ant.valor >= AMOSTRA_MINIMA ? d.valor / ant.valor : undefined;
-  }
-  return out;
+  return {
+    etapas,
+    bloco: {
+      titulo: "No robô e no atendimento",
+      nota: range
+        ? "contagens da campanha inteira (o robô não guarda data) — por isso sem custo, sem taxa sobre os leads do período e sem Δ"
+        : "contagens da campanha inteira, sobre os mesmos leads do funil acima",
+      etapas: doRobo,
+    },
+  };
 }
 
-/** A métrica com meta que rege cada etapa do painel, por vista. */
-function metricaDaEtapa(key: string, vista: VistaFunil): MetricaComMeta | undefined {
-  if (key === "leads") return "leads";
-  if (key === "primeiro_contato") return "primeiro_contato_no_prazo";
-  if (key === "reunioes") return vista === "periodo" ? "reunioes_agendadas" : "taxa_lead_agendada";
-  if (key === "compareceu") return "comparecimento";
+/**
+ * A métrica com meta que rege cada etapa do painel. A de reuniões vem da `dica`
+ * — a entrada do dicionário que a etapa de fato carrega —, nunca do par (key,
+ * vista): a meta de "reuniões agendadas" só gruda no número de `kpis.reunioesAgendadas`.
+ */
+function metricaDaEtapa(et: EtapaFunil): MetricaComMeta | undefined {
+  if (et.key === "leads") return "leads";
+  if (et.key === "primeiro_contato") return "primeiro_contato_no_prazo";
+  if (et.dica === "reunioes_agendadas") return "reunioes_agendadas";
+  if (et.dica === "agendaram") return "taxa_lead_agendada";
+  if (et.key === "compareceu") return "comparecimento";
   return undefined;
 }
 
 export function montarFunil(e: EntradaFunil): FunilConversao {
   const { data, range, kpis, robo, comercial, vista } = e;
   const cascata = montarCascata({ data, range, robo, comercial, kpis });
-  const etapas = etapasDaCascata(cascata.degraus, e);
+  const { etapas, bloco } = etapasDaCascata(cascata.degraus, e);
 
-  // Δ: o MESMO funil no período anterior (só com período concreto). As etapas
-  // do robô e do atendimento são contagens da campanha inteira — sem "antes".
+  // Δ: o MESMO funil no período anterior (só com período concreto). O bloco do
+  // robô/atendimento é campanha inteira — sem "antes".
   if (range) {
     const ant = previousRange(range);
     const kAnt = kpisDoPeriodo(data, ant, { hoje: e.hoje, agora: e.agora });
     const cascAnt = montarCascata({ data, range: ant, robo, comercial, kpis: kAnt });
-    const porKey = new Map(etapasDaCascata(cascAnt.degraus, { ...e, range: ant, kpis: kAnt }).map((x) => [x.key, x.valor]));
+    const porKey = new Map(etapasDaCascata(cascAnt.degraus, { ...e, range: ant, kpis: kAnt }).etapas.map((x) => [x.key, x.valor]));
     for (const et of etapas) {
-      if (et.fonte === "robo" || et.fonte === "comercial") continue;
       const v = porKey.get(et.key);
       if (v != null) et.anterior = v;
     }
@@ -328,11 +447,14 @@ export function montarFunil(e: EntradaFunil): FunilConversao {
   // taxa sempre — sem alvo o badge diz "sem meta" (princípio 2 do relatório).
   const regua = new Map(reguaDoPeriodo(kpis, data, range, e.hoje).map((l) => [l.metrica, l]));
   for (const et of etapas) {
-    const metrica = metricaDaEtapa(et.key, vista);
+    const metrica = metricaDaEtapa(et);
     const l = metrica ? regua.get(metrica) : undefined;
     if (!metrica || !l) continue;
     const def = META_DEF[metrica];
     if (def.formato !== "pct" && l.alvo == null) continue;
+    // Meta de contagem: o badge avalia o número da MEDIDA ("meta 7 · 57%") sem
+    // imprimi-lo — então só gruda numa etapa que mostra exatamente esse número.
+    if (def.formato !== "pct" && et.valor !== l.medida.valor) continue;
     et.meta = {
       metrica,
       nome: def.nome,
@@ -345,7 +467,7 @@ export function montarFunil(e: EntradaFunil): FunilConversao {
     };
   }
 
-  return { vista, etapas, investimentoConversao: cascata.investimentoConversao, cascata };
+  return { vista, etapas, bloco, investimentoConversao: cascata.investimentoConversao, cascata };
 }
 
 /** Impressões SÓ das campanhas de conversão no período — o topo do funil de conversão. */
@@ -374,6 +496,8 @@ export interface FunilDescoberta {
   /** Dias com dado do Instagram no período; 0 = sem leitura. */
   dias: number;
   semDado: boolean;
+  /** Por que não há "vs. anterior": o período anterior sem leitura, ou com menos dias que este. */
+  semComparacao?: string;
   investimentoDescoberta: number;
 }
 
@@ -388,8 +512,18 @@ export function funilDeDescoberta(
   kpis: Pick<KpisDoPeriodo, "investimentoDescoberta">,
 ): FunilDescoberta {
   const ig = igAccountTotals(data.igAccountDaily, range);
-  const ant = range ? igAccountTotals(data.igAccountDaily, previousRange(range)) : null;
   const semDado = ig.days === 0;
+  // Período anterior sem dia sincronizado é SEM LEITURA, não zero: contra 0 a
+  // tela imprimiria "+N vs. anterior" sobre um salto que não existiu. Com menos
+  // dias que o atual, a soma também não compara — um buraco de sync vira "alta".
+  const antBruto = range ? igAccountTotals(data.igAccountDaily, previousRange(range)) : null;
+  const ant = antBruto && antBruto.days > 0 && antBruto.days >= ig.days ? antBruto : null;
+  const semComparacao =
+    antBruto && !ant && !semDado
+      ? antBruto.days === 0
+        ? "sem comparação: o período anterior não tem leitura do Instagram"
+        : `sem comparação: o período anterior tem ${formatInt(antBruto.days)} ${antBruto.days === 1 ? "dia" : "dias"} com dado, contra ${formatInt(ig.days)} deste`
+      : undefined;
   const verba = kpis.investimentoDescoberta.valor;
   const v = (n: number) => (semDado ? null : n);
   const taxa = (num: number, den: number) => (den >= AMOSTRA_MINIMA && num >= 0 ? num / den : undefined);
@@ -442,7 +576,7 @@ export function funilDeDescoberta(
     });
   }
 
-  return { etapas, extras, dias: ig.days, semDado, investimentoDescoberta: verba };
+  return { etapas, extras, dias: ig.days, semDado, semComparacao, investimentoDescoberta: verba };
 }
 
 // ---------------------------------------------------------------- tendência semanal

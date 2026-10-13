@@ -98,7 +98,6 @@ export default async function FunilPage({
 
   const parcial = fontes.falha?.tipo === "erro";
   const semRobo = fontes.falha?.tipo === "desligado";
-  const comRobo = Boolean(fontes.robo || fontes.comercial);
   const ex = perdas.excluidos;
   const excluidos = [
     ex.testes > 0 ? `${formatInt(ex.testes)} ${ex.testes === 1 ? "teste" : "testes"}` : "",
@@ -142,17 +141,19 @@ export default async function FunilPage({
             <CardDescription>
               Só campanhas de conversão: custo por unidade sobre{" "}
               <span title={dica("investimento_conversao")}>{formatCurrency0(funil.investimentoConversao)} de verba de conversão</span>.
-              Cada etapa reparte o mesmo dinheiro — não some entre linhas. Acima de Leads a base são impressões; de
-              Leads para baixo, Leads é 100%.
-              {comRobo && vista === "periodo" ? " As etapas do robô e do atendimento são contagens da campanha inteira." : ""}
+              Cada etapa reparte o mesmo dinheiro — não some entre linhas. Acima de Leads a base são impressões.
+              {vista === "periodo"
+                ? " De Leads para baixo, cada etapa conta o que aconteceu no período, com leads de qualquer data — não são frações umas das outras, então não há “% da anterior” (a taxa lead → reunião está na vista por coorte)."
+                : " De Leads para baixo, os leads que entraram no período são 100%; a taxa de reuniões é sobre eles — o 1º contato é ramo paralelo, porque há quem agende sem tentativa registrada."}
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <FunilConversao etapas={funil.etapas} rangeKey={rangeKey} />
+            {/* O robô/atendimento, quando ligado, vem como bloco separado — com a nota de que é campanha inteira. */}
+            <FunilConversao etapas={funil.etapas} bloco={funil.bloco} rangeKey={rangeKey} />
             {semRobo ? (
               <p className="mt-4 border-t pt-4 text-xs text-muted-foreground">
-                O robô de WhatsApp não está conectado, então o funil usa o painel do lead para baixo. Com ele ligado,
-                aparecem as etapas de conversa, convite e transferência ao especialista.
+                O robô de WhatsApp não está conectado, então o funil termina no painel do lead. Com ele ligado, as
+                etapas de conversa, convite e transferência ao especialista aparecem num bloco à parte, abaixo.
               </p>
             ) : null}
           </CardContent>
