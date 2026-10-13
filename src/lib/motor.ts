@@ -30,14 +30,17 @@ import { montarFila, type EntradaComercial, type EntradaConvite, type FilaResult
 import { custoExibivel, kpisDoPeriodo, periodoDaRegua, reguaDoPeriodo, type KpisDoPeriodo } from "./kpis";
 import { metaVigente, taxasObservadas } from "./metas";
 import {
-  adsetPerformance,
   creativePerformance,
   dailySeries,
   filterLeads,
   lpKpis,
   rotuloCriativo,
+  type CreativePerf,
   type DateRange,
 } from "./metrics";
+// M2 e M4 leem os conjuntos da MESMA função da página /midia (por id, S20):
+// a ação cita a linha que o link abre, com o número que ela mostra.
+import { chaveDoConjuntoPorAnuncio, conjuntosPorId, rotuloConjunto, type LinhaMidia } from "./midia";
 import type { Intervalo } from "./cobertura";
 import { atribuidor } from "./atribuicao";
 import { MIN_REUNIOES } from "./trust";
@@ -433,16 +436,38 @@ function regraM1(c: Contexto): Acao | null {
   };
 }
 
+/**
+ * Os criativos do período julgados como /midia#criativos os julga: as janelas
+ * da saúde terminam no fim do período (HOJE quando não há `range` — senão o
+ * anúncio pausado seria julgado pelos seus próprios últimos 14 dias e o M3
+ * mandaria renovar a arte do que a tabela mostra "Parado") e com a mesma
+ * cobertura do sync. M3, M4 e M6 leem daqui.
+ */
+function criativosDoPeriodo(c: Contexto): CreativePerf[] {
+  return creativePerformance(c.data, c.range, { fim: c.range?.to ?? c.hoje, cobertura: c.cobertura });
+}
+
+/** As linhas de CONJUNTO (não as de campanha) que /midia#conjuntos mostra, nos dois baldes. */
+function linhasDeConjunto(c: Contexto): LinhaMidia[] {
+  const bloco = conjuntosPorId(c.data, c.range, { custoPorReuniaoExibivel: custoExibivel(c.kpis.custoPorReuniao) });
+  return [...bloco.conversao, ...bloco.descoberta].flatMap((campanha) => campanha.conjuntos ?? []);
+}
+
 function regraM2(c: Contexto): Acao | null {
   const cpr = c.kpis.custoPorReuniao;
   const alvo = metaVigente(c.data.metas, "custo_por_reuniao", c.hoje)?.alvo;
   if (!custoExibivel(cpr) || alvo == null || alvo <= 0 || cpr.valor <= alvo) return null;
-  const conjuntos = adsetPerformance(c.data, c.range).filter((a) => a.bucket === "conversao" && a.meetings >= MIN_REUNIOES && a.spend > 0);
-  const pior = conjuntos.sort((a, b) => b.cpr - a.cpr)[0];
+  // O conjunto mais caro é a LINHA de /midia#conjuntos (por id — dois
+  // "Interesses" em campanhas diferentes são dois), e o custo por agendada é o
+  // que a linha imprime: só com MIN_REUNIOES nela (senão `null`).
+  const pior = linhasDeConjunto(c)
+    .filter((l) => l.bucket === "conversao" && l.custoPorAgendada != null && l.spend > 0)
+    .sort((a, b) => b.custoPorAgendada! - a.custoPorAgendada!)[0];
   const aMais = (cpr.valor - alvo) * (cpr.n / c.semanas);
   const conf = confiancaDeMidia(c);
   return {
-    id: "M2",
+    // O alvo da ação é o conjunto citado: outro conjunto no topo = outra ação.
+    id: pior ? `M2:${pior.chave}` : "M2",
     regra: "M2",
     dono: "MKT",
     severidade: "alta",
@@ -450,8 +475,8 @@ function regraM2(c: Contexto): Acao | null {
     detalhe:
       `${formatInt(cpr.n)} reuniões de conversão no período. ` +
       (pior
-        ? `O conjunto mais caro é “${pior.adset}” (${formatCurrency(pior.cpr)} por reunião, ${formatInt(pior.meetings)} reuniões): pause-o ou reduza a verba dele.`
-        : "Nenhum conjunto tem 3 reuniões sozinho — compare pelo CPL do painel antes de pausar."),
+        ? `O conjunto mais caro é “${rotuloConjunto(pior)}” (${formatCurrency(pior.custoPorAgendada!)} por reunião, ${formatInt(pior.agendadas)} reuniões): pause-o ou reduza a verba dele.`
+        : `Nenhum conjunto tem ${MIN_REUNIOES} reuniões sozinho — compare pelo CPL do painel antes de pausar.`),
     href: "/midia#conjuntos",
     impacto:
       aMais >= 1
@@ -466,7 +491,7 @@ function regraM2(c: Contexto): Acao | null {
 }
 
 function regrasM3(c: Contexto): Acao[] {
-  const criativos = creativePerformance(c.data, c.range);
+  const criativos = criativosDoPeriodo(c);
   const fadigados = criativos.filter((x) => x.fatigue.level === "fadigado" && x.spend > 0).sort((a, b) => b.spend - a.spend);
   const conf = confiancaDeMidia(c);
   return fadigados.slice(0, 2).map((x) => {
@@ -491,46 +516,42 @@ function regrasM3(c: Contexto): Acao[] {
 }
 
 function regrasM4(c: Contexto): Acao[] {
-  const leads = filterLeads(c.data.leads, c.range);
+  const out: Acao[] = [];
+  // Por CONJUNTO: a linha de /midia#conjuntos (por id), com os leads do painel
+  // e os "Contato inválido" que ela mesma imprime — a taxa da ação é a da tela.
+  const conjuntosQueDispararam = new Set<string>();
+  for (const l of linhasDeConjunto(c)) {
+    if (l.leadsPainel < AMOSTRA_MIN.M4 || l.pctContatoInvalido == null || l.pctContatoInvalido <= CONTATO_INVALIDO_MAX) continue;
+    conjuntosQueDispararam.add(l.chave);
+    out.push({
+      id: `M4:${l.chave}`,
+      regra: "M4",
+      dono: "MKT",
+      severidade: "alta",
+      titulo: `Conjunto “${rotuloConjunto(l)}”: ${pct(l.pctContatoInvalido)} de contatos inválidos — revisar formulário e segmentação`,
+      detalhe: `${formatInt(l.contatoInvalido)} de ${formatInt(l.leadsPainel)} leads do período com telefone ou e-mail inválido. Lead que não existe custa como lead e nunca vira reunião.`,
+      href: "/midia#conjuntos",
+      semImpacto: "estimativa indisponível",
+      confianca: "alta",
+      amostra: { n: l.leadsPainel, minimo: AMOSTRA_MIN.M4 },
+      prioridade: 0,
+    });
+  }
+  // Por ANÚNCIO, só onde o conjunto dele não disparou (senão é a mesma ação duas vezes).
   const atribuir = atribuidor(c.data.creatives);
-  const adToAdset = new Map<string, string>();
-  for (const r of c.data.adDaily) if (!adToAdset.has(r.adId)) adToAdset.set(r.adId, r.adset);
-  const porConjunto = new Map<string, { n: number; invalidos: number }>();
+  const chaveDoConjunto = chaveDoConjuntoPorAnuncio(c.data.adDaily);
   const porAnuncio = new Map<string, { n: number; invalidos: number }>();
-  for (const l of leads) {
+  for (const l of filterLeads(c.data.leads, c.range)) {
     const adId = atribuir(l).adId;
     if (!adId) continue;
     const inv = l.status === "contato_invalido" ? 1 : 0;
     const a = porAnuncio.get(adId) ?? { n: 0, invalidos: 0 };
     porAnuncio.set(adId, { n: a.n + 1, invalidos: a.invalidos + inv });
-    const adset = adToAdset.get(adId);
-    if (!adset) continue;
-    const s = porConjunto.get(adset) ?? { n: 0, invalidos: 0 };
-    porConjunto.set(adset, { n: s.n + 1, invalidos: s.invalidos + inv });
   }
-  const out: Acao[] = [];
-  const conjuntosQueDispararam = new Set<string>();
-  for (const [adset, v] of porConjunto) {
-    if (v.n < AMOSTRA_MIN.M4 || v.invalidos / v.n <= CONTATO_INVALIDO_MAX) continue;
-    conjuntosQueDispararam.add(adset);
-    out.push({
-      id: `M4:${adset}`,
-      regra: "M4",
-      dono: "MKT",
-      severidade: "alta",
-      titulo: `Conjunto “${adset}”: ${pct(v.invalidos / v.n)} de contatos inválidos — revisar formulário e segmentação`,
-      detalhe: `${formatInt(v.invalidos)} de ${formatInt(v.n)} leads do período com telefone ou e-mail inválido. Lead que não existe custa como lead e nunca vira reunião.`,
-      href: "/midia#conjuntos",
-      semImpacto: "estimativa indisponível",
-      confianca: "alta",
-      amostra: { n: v.n, minimo: AMOSTRA_MIN.M4 },
-      prioridade: 0,
-    });
-  }
-  const criativos = creativePerformance(c.data, c.range);
+  const criativos = criativosDoPeriodo(c);
   for (const [adId, v] of porAnuncio) {
     if (v.n < AMOSTRA_MIN.M4 || v.invalidos / v.n <= CONTATO_INVALIDO_MAX) continue;
-    if (conjuntosQueDispararam.has(adToAdset.get(adId) ?? "")) continue;
+    if (conjuntosQueDispararam.has(chaveDoConjunto.get(adId) ?? "")) continue;
     const cr = criativos.find((x) => x.adId === adId);
     const nome = cr ? rotuloCriativo(cr, criativos) : adId;
     out.push({
@@ -576,9 +597,12 @@ function regraM5(c: Contexto): Acao | null {
 /** Além do relatório: o vencedor com amostra, para escalar (regra v1 que continua valendo). */
 function regraM6(c: Contexto): Acao | null {
   if (!custoExibivel(c.kpis.custoPorReuniao)) return null;
-  const criativos = creativePerformance(c.data, c.range);
+  const criativos = criativosDoPeriodo(c);
+  // Só se escala o que está no ar: fadigando não, e parado (pausado) ou sem
+  // dados (sync sem cobertura) também não — "aumente o orçamento" de um anúncio
+  // que a tabela mostra "Parado" seria a ação errada.
   const vencedor = criativos
-    .filter((x) => x.meetings >= MIN_REUNIOES && x.spend > 0 && x.fatigue.level !== "fadigado")
+    .filter((x) => x.meetings >= MIN_REUNIOES && x.spend > 0 && !["fadigado", "parado", "sem-dados"].includes(x.fatigue.level))
     .sort((a, b) => a.cpr - b.cpr)[0];
   if (!vencedor) return null;
   const conf = confiancaDeMidia(c);

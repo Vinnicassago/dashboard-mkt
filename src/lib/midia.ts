@@ -11,17 +11,25 @@
  *      ponto um `kpisDoPeriodo` da semana;
  *   3. `conjuntosPorId` — campanhas → conjuntos agrupados por ID (S20: dois
  *      "Interesses 25-45" em campanhas diferentes eram uma linha só), com
- *      leads e reuniões atribuídos pelo `adsetId` do lead ou pelo anúncio;
+ *      leads atribuídos pelo `adsetId` do lead ou pelo anúncio (id ou nome
+ *      único) e REUNIÕES só com id (`adsetId` do lead ou id de anúncio);
  *   4. `criativosAgregados` — o mesmo criativo roda em vários anúncios (um por
  *      conjunto): agrega por `creativeId`, detalha por anúncio, e a saúde sai
  *      da regra explícita de `computeFatigue` calculada no período (S13/B17);
  *   5. `rankingsDeCriativos` — "melhor CPL" e "maior CTR" só com volume mínimo.
  *
+ * UMA regra de atribuição de reunião em toda a tela e no motor (relatório
+ * §7.3): a reunião só entra num conjunto, num criativo ou numa ação (M2, M6)
+ * quando o lead tem id de anúncio (`lead.adId`, "nome|id" no utm_content ou o
+ * `adsetId` da UTM padrão). Nome único ainda atribui o LEAD — nunca a reunião:
+ * era o que fazia o mesmo agendamento contar no conjunto e não no criativo.
+ *
  * Regras de exibição que a tela obedece lendo daqui: custo com denominador
  * zero é `null` (a tela imprime "—"); custo por reunião só com `MIN_REUNIOES`
  * na LINHA e com a conta fora de quarentena; "Leads (painel)" e "Conversões
  * Meta (Pixel)" são colunas diferentes com nomes diferentes — nunca uma coluna
- * "Leads" com dado do Pixel.
+ * "Leads" com dado do Pixel. O motor (M2, M4) lê `conjuntosPorId` daqui: a
+ * ação cita a linha que /midia#conjuntos abre, com o mesmo número.
  */
 
 import {
@@ -48,11 +56,12 @@ import {
   type OpcoesKpis,
 } from "./kpis";
 import { atribuidor, type TipoAtribuicao } from "./atribuicao";
+import type { Intervalo } from "./cobertura";
 import { formatarAlvo, metaVigente, type AvaliacaoMeta } from "./metas";
 import { MIN_REUNIOES } from "./trust";
 import { ultimasSemanas } from "./semana";
 import { formatCurrency, formatCurrency0, formatInt, formatPercent } from "./format";
-import type { MetricaId } from "./dicionario";
+import { dica, type MetricaId } from "./dicionario";
 import type { AdDaily, Creative, DashboardData, Lead } from "./types";
 
 const div = (a: number, b: number): number | null => (b > 0 ? a / b : null);
@@ -231,6 +240,13 @@ export interface NaoAtribuidos {
   semOrigem: number;
   /** Atribuídos a um conjunto/anúncio sem linha no período (parado, mas o lead chegou). */
   semLinhaNoPeriodo: number;
+  /**
+   * REUNIÕES agendadas no período cujo lead chegou só com o NOME (único) do
+   * anúncio: o lead entra na linha, a reunião não (só com id — §7.3). Sem esta
+   * conta a soma de "Agendadas" dos conjuntos fica abaixo das reuniões da conta
+   * sem explicação no bloco.
+   */
+  reunioesSoPorNome: number;
 }
 
 export interface BlocoConjuntos {
@@ -240,7 +256,7 @@ export interface BlocoConjuntos {
   naoAtribuidos: NaoAtribuidos;
 }
 
-const vazio = (): NaoAtribuidos => ({ ambigua: 0, macro: 0, desconhecida: 0, semOrigem: 0, semLinhaNoPeriodo: 0 });
+const vazio = (): NaoAtribuidos => ({ ambigua: 0, macro: 0, desconhecida: 0, semOrigem: 0, semLinhaNoPeriodo: 0, reunioesSoPorNome: 0 });
 
 function contarNaoAtribuido(n: NaoAtribuidos, tipo: TipoAtribuicao) {
   if (tipo === "ambigua") n.ambigua += 1;
@@ -269,6 +285,24 @@ function resolvedorDeChaves(rows: AdDaily[]) {
     chaveConjunto,
     chave: (r: AdDaily) => `${chaveCampanha(r)}|${chaveConjunto(r)}`,
   };
+}
+
+/**
+ * Anúncio → chave do conjunto (a mesma `chave` das linhas de `conjuntosPorId`),
+ * pelo histórico INTEIRO — a linha mais recente vence, então o lead de um
+ * anúncio que parou continua sendo dele. O motor (M4) usa para saber em qual
+ * linha de /midia#conjuntos um anúncio mora.
+ */
+export function chaveDoConjuntoPorAnuncio(rows: AdDaily[]): Map<string, string> {
+  const chaves = resolvedorDeChaves(rows);
+  const porAnuncio = new Map<string, string>();
+  for (const r of [...rows].sort((a, b) => a.date.localeCompare(b.date))) porAnuncio.set(r.adId, chaves.chave(r));
+  return porAnuncio;
+}
+
+/** "campanha › conjunto" — como a tabela nomeia a linha e como a ação a cita. */
+export function rotuloConjunto(l: Pick<LinhaMidia, "campanha" | "nome">): string {
+  return `${l.campanha} › ${l.nome}`;
 }
 
 interface Acumulado {
@@ -330,9 +364,12 @@ function baldeDominante(rows: AdDaily[]): ObjectiveBucket {
 /**
  * Campanhas → conjuntos do período, agrupados por ID (S20), com leads e
  * reuniões do painel atribuídos ao conjunto: pelo `adsetId` gravado no lead
- * (UTM padrão, D6) e, sem ele, pelo anúncio que `atribuidor` reconhece (id ou
- * nome único) → o conjunto desse anúncio no histórico. Nome ambíguo, macro e
- * sem origem ficam de fora (e contados em `naoAtribuidos`).
+ * (UTM padrão, D6) e, sem ele, pelo anúncio que `atribuidor` reconhece → o
+ * conjunto desse anúncio no histórico. LEAD entra por id ou por nome único;
+ * REUNIÃO só com id (`adsetId` do lead ou `tipo: "id"`) — a mesma regra de
+ * `criativosAgregados` e de `creativePerformance`, senão a mesma reunião
+ * imprime "3" no conjunto e "0" no criativo dele. Nome ambíguo, macro e sem
+ * origem ficam de fora (e contados em `naoAtribuidos`).
  *
  * `custoPorReuniaoExibivel` = o custo por reunião da CONTA se sustenta
  * (`custoExibivel(kp.custoPorReuniao)`); em quarentena nenhuma linha imprime
@@ -380,20 +417,24 @@ export function conjuntosPorId(
 
   // Anúncio → conjunto e adsetId → conjunto, pelo histórico inteiro (a linha
   // mais recente vence): o lead de um anúncio que parou continua sendo dele.
-  const chavePorAnuncio = new Map<string, string>();
+  const chavePorAnuncio = chaveDoConjuntoPorAnuncio(data.adDaily);
   const chavePorAdsetId = new Map<string, string>();
   for (const r of [...data.adDaily].sort((a, b) => a.date.localeCompare(b.date))) {
-    const chave = chaves.chave(r);
-    chavePorAnuncio.set(r.adId, chave);
-    if (r.adsetId) chavePorAdsetId.set(r.adsetId, chave);
+    if (r.adsetId) chavePorAdsetId.set(r.adsetId, chaves.chave(r));
   }
   const atribuir = atribuidor(data.creatives);
   const naoAtribuidos = vazio();
+  /**
+   * `contar` = é a passada dos LEADS do período (conta os não atribuídos e
+   * aceita nome único); `false` = é a passada das REUNIÕES, que só entram com
+   * id — `adsetId` do lead ou anúncio por `tipo: "id"` (relatório §7.3).
+   */
   const conjuntoDoLead = (l: Lead, contar: boolean): Grupo | undefined => {
     let chave: string | undefined;
     if (l.adsetId && chavePorAdsetId.has(l.adsetId)) chave = chavePorAdsetId.get(l.adsetId);
     else {
       const a = atribuir(l);
+      if (!contar && a.tipo !== "id") return undefined;
       if (a.adId) chave = chavePorAnuncio.get(a.adId);
       if (!chave && contar) {
         if (a.adId) naoAtribuidos.desconhecida += 1;
@@ -415,6 +456,8 @@ export function conjuntosPorId(
   for (const l of reunioesNoPeriodo(data.leads, range)) {
     const g = conjuntoDoLead(l, false);
     if (g) g.acc.agendadas += 1;
+    // Só com o nome do anúncio: a reunião fica fora de toda linha — e a nota diz.
+    else if (!(l.adsetId && chavePorAdsetId.has(l.adsetId)) && atribuir(l).tipo === "nome") naoAtribuidos.reunioesSoPorNome += 1;
   }
 
   // Linhas de conjunto, agrupadas por (balde, campanha).
@@ -464,6 +507,47 @@ export function conjuntosPorId(
     descoberta: linhas.filter((l) => l.bucket === "descoberta").sort(porGasto),
     naoAtribuidos,
   };
+}
+
+/**
+ * A regra de atribuição em uma frase, para a descrição dos blocos de conjuntos
+ * e de criativos: o leitor vê ANTES da tabela por que a soma de "Agendadas"
+ * pode ficar abaixo das reuniões da conta.
+ */
+export const REGRA_ATRIBUICAO_REUNIAO =
+  "Reunião entra na linha só com o id do anúncio ou do conjunto (o link padrão traz {{ad.id}}); lead entra também pelo nome único do anúncio.";
+
+/** O texto da nota abaixo da tabela de conjuntos — `null` = nada ficou de fora. */
+export interface NotaDeNaoAtribuidos {
+  /** Leads do período fora das linhas, por motivo. */
+  leads: string | null;
+  /** Reuniões do período que chegaram só com o nome do anúncio. */
+  reunioes: string | null;
+  /** Mostrar o atalho para gerar o link com {{ad.id}} (o que resolve os casos acima). */
+  linkUtm: boolean;
+}
+
+/**
+ * Leads E reuniões do período que não entraram em nenhuma linha, e por quê. As
+ * reuniões que chegaram só com o nome do anúncio contam no total da conta mas
+ * não em "Agendadas" de conjunto nenhum (só com id, §7.3) — a nota diz quantas,
+ * senão a diferença entre a soma das linhas e o resumo fica sem explicação.
+ */
+export function notaDeNaoAtribuidos(n: NaoAtribuidos): NotaDeNaoAtribuidos | null {
+  const partes: string[] = [];
+  if (n.ambigua > 0) partes.push(`${formatInt(n.ambigua)} com nome ambíguo`);
+  if (n.macro > 0) partes.push(`${formatInt(n.macro)} com macro {{…}} sem resolver`);
+  if (n.desconhecida > 0) partes.push(`${formatInt(n.desconhecida)} com origem desconhecida`);
+  if (n.semOrigem > 0) partes.push(`${formatInt(n.semOrigem)} sem origem (orgânico ou direto)`);
+  if (n.semLinhaNoPeriodo > 0) partes.push(`${formatInt(n.semLinhaNoPeriodo)} de conjunto sem veiculação no período`);
+  const leads = partes.length ? `Fora das linhas: ${partes.join(" · ")}. Esses leads contam no total, mas não no custo por conjunto.` : null;
+  const r = n.reunioesSoPorNome;
+  const reunioes =
+    r > 0
+      ? `${r === 1 ? "1 reunião do período chegou" : `${formatInt(r)} reuniões do período chegaram`} só com o nome do anúncio, sem id: ${r === 1 ? "conta" : "contam"} nas reuniões da conta, mas não em “Agendadas” de nenhum conjunto (reunião só entra com id).`
+      : null;
+  if (!leads && !reunioes) return null;
+  return { leads, reunioes, linkUtm: n.ambigua > 0 || n.macro > 0 || r > 0 };
 }
 
 // ---------------------------------------------------------------- 4. criativos
@@ -537,12 +621,26 @@ export function textoRegraSaude(cplAlvo: { alvo: number | null; origem: "meta" |
       ? `${formatCurrency(cplAlvo.alvo)} (${cplAlvo.origem === "meta" ? "meta de CPL" : "CPL do período, sem meta cadastrada"})`
       : "— (sem meta de CPL nem CPL do período: a regra fica desligada)";
   return [
-    `Fadigando = CTR dos últimos ${r.janelaDias} dias ≤ ${Math.round(r.quedaCtr * 100)}% do CTR dos ${r.janelaDias} dias anteriores E (frequência ≥ ${r.frequenciaAlta} OU CPL ${r.janelaDias} d ≥ ${Math.round(r.altaCpl * 100)}% do anterior), com ≥ ${formatInt(r.impressoesMinimas)} impressões em cada janela; as janelas terminam no fim do período.`,
+    `Fadigando = CTR dos últimos ${r.janelaDias} dias ≤ ${Math.round(r.quedaCtr * 100)}% do CTR dos ${r.janelaDias} dias anteriores E (frequência ≥ ${r.frequenciaAlta} OU CPL Meta (Pixel) ${r.janelaDias} d ≥ ${Math.round(r.altaCpl * 100)}% do anterior), com ≥ ${formatInt(r.impressoesMinimas)} impressões em cada janela; as janelas terminam no fim do período.`,
+    `O CPL Meta (Pixel) ${r.janelaDias} d é gasto ÷ conversões do Pixel na janela — não é o CPL (painel) da coluna ao lado; sem Pixel configurado esse lado da regra nunca dispara.`,
     `Atenção = só um dos lados da regra.`,
     `Sem resultado (só conversão) = gasto no período ≥ ${r.multiploSemResultado} × o CPL alvo com 0 leads do painel. CPL alvo: ${alvo}.`,
+    `Parado = nenhuma impressão nos últimos ${r.janelaDias} dias do período, com veiculação antes, em dias que uma sincronização bem-sucedida confirmou (anúncio pausado).`,
+    `Sem dados = a mesma janela vazia sem nenhum dia coberto por sincronização bem-sucedida: pode ter havido veiculação que o painel não viu.`,
     `Novo = menos de ${formatInt(r.impressoesMinimas)} impressões em alguma janela (amostra insuficiente).`,
     `Criativos de descoberta são julgados por CPM e retenção, nunca por leads.`,
   ].join(" ");
+}
+
+/**
+ * A dica (ⓘ) do CABEÇALHO de uma coluna de Mídia: a regra da saúde na coluna
+ * Saúde, a definição do dicionário onde a métrica tem uma, nada nas demais.
+ * As duas tabelas leem daqui — o selo da célula fica com o motivo, e o
+ * cabeçalho com a régua, senão o título mais interno engole a regra.
+ */
+export function tituloDoCabecalho(coluna: Pick<ColunaMidia, "key" | "dica">, regraSaude?: string): string | undefined {
+  if (coluna.key === "saude") return regraSaude;
+  return coluna.dica ? dica(coluna.dica) : undefined;
 }
 
 function saudeDe(
@@ -550,10 +648,11 @@ function saudeDe(
   bucket: ObjectiveBucket,
   gasto: number,
   leadsPainel: number,
-  opts: { fim?: string; cplAlvo: number | null },
+  opts: { fim?: string; cobertura?: Intervalo[]; cplAlvo: number | null },
 ): Fatigue {
   return computeFatigue(rows, {
     fim: opts.fim,
+    cobertura: opts.cobertura,
     semResultado: bucket === "conversao" ? { gastoPeriodo: gasto, leadsPainel, cplAlvo: opts.cplAlvo } : undefined,
   });
 }
@@ -567,10 +666,21 @@ function saudeDe(
 export function criativosAgregados(
   data: DashboardData,
   range: DateRange | undefined,
-  opts: { fim?: string; cplAlvo: number | null; custoPorReuniaoExibivel?: boolean },
+  opts: {
+    /** Fim do período (hoje na vista padrão): onde as janelas da saúde terminam. */
+    fim?: string;
+    /** Dias cobertos por syncs bem-sucedidos: sem eles a janela vazia é "Sem dados", não "Parado" (ADR-06). */
+    cobertura?: Intervalo[];
+    cplAlvo: number | null;
+    custoPorReuniaoExibivel?: boolean;
+  },
 ): BlocoCriativos {
   const exibivel = opts.custoPorReuniaoExibivel ?? true;
-  const perf = creativePerformance(data, range);
+  // Sem `fim` (chamador antigo), o último dia com linha da CONTA — nunca o de
+  // cada anúncio, que julgaria o pausado pelos seus próprios últimos 14 dias.
+  const fim = opts.fim ?? range?.to ?? data.adDaily.reduce<string | undefined>((m, r) => (!m || r.date > m ? r.date : m), undefined);
+  const saudeOpts = { fim, cobertura: opts.cobertura, cplAlvo: opts.cplAlvo };
+  const perf = creativePerformance(data, range, { fim, cobertura: opts.cobertura });
   const criativoPorAd = new Map(data.creatives.map((c) => [c.adId, c]));
 
   const todasPorAd = new Map<string, AdDaily[]>();
@@ -628,7 +738,7 @@ export function criativosAgregados(
       ambiguos: ambiguosPorNome.get(c.name.trim().toLowerCase()) ?? 0,
       hookRate: c.hookRate,
       holdRate: c.holdRate,
-      saude: saudeDe(todasPorAd.get(c.adId) ?? [], bucket, c.spend, c.leadsPainel, opts),
+      saude: saudeDe(todasPorAd.get(c.adId) ?? [], bucket, c.spend, c.leadsPainel, saudeOpts),
     };
   };
 
@@ -662,6 +772,8 @@ export function criativosAgregados(
       nivel: "criativo",
       chave,
       creativeId: principal.creativeId,
+      // Nome cru do criativo; vira `rotuloCriativoAgregado` depois, quando
+      // todas as linhas existem e dá para ver quem é homônimo de quem.
       nome: criativoPorAd.get(principal.adId!)?.name ?? principal.nome,
       formato: principal.formato,
       thumbnailUrl: anuncios.find((a) => a.thumbnailUrl)?.thumbnailUrl,
@@ -684,14 +796,81 @@ export function criativosAgregados(
       ambiguos,
       hookRate: plays > 0 && impressions > 0 ? plays / impressions : undefined,
       holdRate: plays > 0 ? thru / plays : undefined,
-      saude: anuncios.length === 1 ? principal.saude : saudeDe(rowsTodas, bucket, spend, leadsPainel, opts),
+      saude: anuncios.length === 1 ? principal.saude : saudeDe(rowsTodas, bucket, spend, leadsPainel, saudeOpts),
       anunciosDetalhe: anuncios,
     });
   }
+  // Dois criativos podem se chamar "Carrossel -": o rótulo que a faixa, os
+  // rankings e a coluna Nome imprimem tem de dizer QUAL (CLAUDE.md).
+  const rotulos = linhas.map((l) => rotuloCriativoAgregado(l, linhas));
+  linhas.forEach((l, i) => {
+    l.nome = rotulos[i];
+  });
   linhas.sort((a, b) => b.spend - a.spend);
   return {
     conversao: linhas.filter((l) => l.bucket === "conversao"),
     descoberta: linhas.filter((l) => l.bucket === "descoberta"),
+  };
+}
+
+/**
+ * Nome que identifica UM criativo agregado — o `rotuloCriativo` do nível
+ * criativo. Dois criativos com `creativeId` diferente podem ter o mesmo nome
+ * ("Carrossel -"), e o nome sozinho manda pausar ou escalar o errado. Com um
+ * anúncio só, vale o rótulo do anúncio (já desambiguado pelo conjunto); com
+ * vários, entram os conjuntos em que roda e, se ainda colidir, o fim do
+ * `creativeId`. Sem homônimo, o nome cru. Puro: `todos` são as linhas de
+ * nível criativo ANTES de rotular (compara pelo nome cru).
+ */
+export function rotuloCriativoAgregado(
+  c: Pick<LinhaCriativo, "chave" | "nome" | "creativeId" | "anunciosDetalhe">,
+  todos: Pick<LinhaCriativo, "chave" | "nome" | "creativeId" | "anunciosDetalhe">[],
+): string {
+  const homonimos = todos.filter((o) => o.chave !== c.chave && o.nome === c.nome);
+  if (homonimos.length === 0) return c.nome;
+  const porConjuntos = (x: Pick<LinhaCriativo, "nome" | "anunciosDetalhe">): string => {
+    const anuncios = x.anunciosDetalhe ?? [];
+    if (anuncios.length === 1) return anuncios[0].nome;
+    const conjuntos = [...new Set(anuncios.map((a) => a.conjunto).filter((s): s is string => Boolean(s)))]
+      .map((s) => (s.length > 32 ? `${s.slice(0, 31)}…` : s))
+      .join(", ");
+    return conjuntos ? `${x.nome} · ${conjuntos}` : x.nome;
+  };
+  const rotulo = porConjuntos(c);
+  const aindaColide = homonimos.some((o) => porConjuntos(o) === rotulo);
+  return aindaColide ? `${rotulo} · ${(c.creativeId ?? c.chave).slice(-4)}` : rotulo;
+}
+
+/** Uma frase da faixa de saúde: o rótulo em negrito e a lista, já em texto. */
+export interface FraseDaFaixa {
+  rotulo: string;
+  texto: string;
+}
+
+/**
+ * A faixa acima dos criativos: quem está fadigando (conversão e descoberta) e
+ * quem gastou sem resultado (só conversão). Cita cada criativo pelo `nome` de
+ * `criativosAgregados`, que já é o `rotuloCriativoAgregado` — dois "Carrossel -"
+ * nunca saem como "Carrossel -, Carrossel -" (CLAUDE.md: o nome sozinho manda
+ * pausar o errado). Parado não entra: anúncio pausado não fadiga. `null` = nada
+ * a dizer.
+ */
+export function faixaDeSaude(bloco: BlocoCriativos): { fadigando: FraseDaFaixa | null; semResultado: FraseDaFaixa | null } {
+  const fadigados = [...bloco.conversao, ...bloco.descoberta].filter((c) => c.saude.level === "fadigado");
+  const semResultado = bloco.conversao.filter((c) => c.saude.level === "sem-resultado");
+  return {
+    fadigando: fadigados.length
+      ? {
+          rotulo: fadigados.length === 1 ? "1 criativo fadigando:" : `${fadigados.length} criativos fadigando:`,
+          texto: `${fadigados.map((c) => c.nome).join(", ")}. Renove a arte antes que o custo dispare.`,
+        }
+      : null,
+    semResultado: semResultado.length
+      ? {
+          rotulo: semResultado.length === 1 ? "1 criativo sem resultado:" : `${semResultado.length} criativos sem resultado:`,
+          texto: `${semResultado.map((c) => `${c.nome} (${formatCurrency0(c.spend)})`).join(", ")} — gasto de pelo menos ${REGRA_FADIGA.multiploSemResultado} × o CPL alvo e nenhum lead do painel.`,
+        }
+      : null,
   };
 }
 

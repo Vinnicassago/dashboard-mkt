@@ -810,20 +810,29 @@ export function followerSeries(rows: IgAccountDaily[], range?: DateRange): Follo
 
 /**
  * `sem-resultado` (B17): gastou e não trouxe lead — não é fadiga, é criativo que
- * nunca funcionou. O motor lê só `fadigado`; os outros níveis são da tela.
+ * nunca funcionou. `parado`: tinha veiculação antes e um sync que deu certo
+ * confirmou dias da janela recente sem impressão — anúncio pausado, não
+ * "amostra insuficiente". `sem-dados`: a mesma janela vazia, mas NENHUM sync
+ * bem-sucedido a cobriu — pode ter havido veiculação que o painel não viu
+ * (ADR-06: dia sem linha e sem cobertura é "sem dados", nunca "sem
+ * veiculação"). O motor lê só `fadigado`; os outros níveis são da tela.
  */
-export type FatigueLevel = "novo" | "saudavel" | "atencao" | "fadigado" | "sem-resultado";
+export type FatigueLevel = "novo" | "parado" | "sem-dados" | "saudavel" | "atencao" | "fadigado" | "sem-resultado";
 
-/** Uma das duas janelas de 7 dias que a regra compara. */
+/**
+ * Uma das duas janelas de 7 dias que a regra compara. O CPL daqui é o **CPL
+ * Meta (Pixel) 7 d**: gasto ÷ conversões do Pixel (`AdDaily.leads`), nunca os
+ * leads do painel — o texto do motivo e a dica dizem isso com todas as letras.
+ */
 export interface JanelaFadiga {
   from: string;
   to: string;
   impressions: number;
   spend: number;
-  /** Conversões do Pixel na janela (o denominador do CPL 7 d). */
+  /** Conversões do Pixel na janela (o denominador do CPL Meta (Pixel) 7 d). */
   leads: number;
   ctr: number;
-  /** Gasto ÷ conversões do Pixel; `Infinity` = gastou sem conversão; `null` = nem gasto. */
+  /** CPL Meta (Pixel) 7 d: gasto ÷ conversões do Pixel; `Infinity` = gastou sem conversão; `null` = nem gasto. */
   cpl: number | null;
   frequency: number;
 }
@@ -852,7 +861,7 @@ export const REGRA_FADIGA = {
   quedaCtr: 0.75,
   /** …E frequência ≥ 2… */
   frequenciaAlta: 2,
-  /** …OU CPL 7 d ≥ 120% do anterior. */
+  /** …OU CPL Meta (Pixel) 7 d ≥ 120% do anterior (conversões do Pixel, não leads do painel). */
   altaCpl: 1.2,
   /** Sem resultado (só conversão): gasto do período ≥ 2 × CPL alvo com 0 leads do painel. */
   multiploSemResultado: 2,
@@ -864,6 +873,13 @@ export interface OpcoesFadiga {
    * saúde ser a do PERÍODO em tela (S13). Ausente = a última data das linhas.
    */
   fim?: string;
+  /**
+   * Dias cobertos por syncs de anúncio bem-sucedidos (ADR-06, `janelasCobertas`).
+   * Só com eles uma janela recente vazia vira "Parado": dia sem linha e sem
+   * cobertura é "sem dados". Ausente = nenhum dia confirmado (como em
+   * `dailySeries`).
+   */
+  cobertura?: Intervalo[];
   /**
    * Liga a regra "sem resultado" (só para criativos de conversão): gasto do
    * período, leads do PAINEL do período e o CPL alvo (meta vigente ou, sem meta,
@@ -902,11 +918,18 @@ function janelaFadiga(rows: AdDaily[], from: string, to: string): JanelaFadiga {
  * PERÍODO:
  *
  *   Fadigando  = CTR dos últimos 7 dias ≤ 75% do CTR dos 7 dias anteriores
- *                E (frequência ≥ 2 OU CPL 7 d ≥ 120% do anterior),
+ *                E (frequência ≥ 2 OU CPL Meta (Pixel) 7 d ≥ 120% do anterior),
  *                com ≥ 1.000 impressões em CADA janela — senão "amostra
- *                insuficiente" (nível `novo`).
+ *                insuficiente" (nível `novo`). O CPL da janela é o do PIXEL
+ *                (`AdDaily.leads`), rotulado assim no motivo: não é o "CPL
+ *                (painel)" da coluna ao lado, e sem Pixel esse lado nunca dispara.
  *   Atenção    = só um dos lados da regra (CTR caiu sem confirmação, ou
  *                frequência/CPL subiram sem queda de CTR).
+ *   Parado     = nenhuma impressão na janela recente, com veiculação antes
+ *                dela, em dias que um sync bem-sucedido confirmou
+ *                (`opts.cobertura`): anúncio pausado — nunca "Novo".
+ *   Sem dados  = a mesma janela vazia sem NENHUM dia confirmado: o sync pode
+ *                ter parado, então não se afirma "sem veiculação" (ADR-06).
  *   Sem resultado (só conversão, via `opts.semResultado`) = gasto do período
  *                ≥ 2 × CPL alvo E 0 leads do painel.
  *
@@ -915,6 +938,7 @@ function janelaFadiga(rows: AdDaily[], from: string, to: string): JanelaFadiga {
  */
 export function computeFatigue(rows: AdDaily[], opts: OpcoesFadiga = {}): Fatigue {
   const { janelaDias, impressoesMinimas, quedaCtr, frequenciaAlta, altaCpl, multiploSemResultado } = REGRA_FADIGA;
+  const formatDia = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
 
   // 1. Sem resultado: gastou o que dois leads custariam e não trouxe nenhum.
   const sr = opts.semResultado;
@@ -943,7 +967,44 @@ export function computeFatigue(rows: AdDaily[], opts: OpcoesFadiga = {}): Fatigu
   const anterior = janelaFadiga(rows, dia(-(2 * janelaDias - 1)), dia(-janelaDias));
   const janelas = { recente, anterior };
 
-  // 2. Piso absoluto: sem 1.000 impressões em cada janela não há leitura.
+  // 2. Janela recente vazia, com veiculação antes dela: pausado OU sync parado.
+  //    Sem isto, um anúncio pausado há dois meses sairia "Novo (amostra
+  //    insuficiente)" ao lado dos ativos — e a faixa de fadiga o listaria. Mas
+  //    "sem veiculação" é afirmação que só um sync bem-sucedido sustenta
+  //    (ADR-06): dia confirmado = coberto por sync que deu certo ou com linha do
+  //    anúncio (zerada). Nenhum confirmado = "sem dados", a mesma leitura do
+  //    gráfico diário — senão um sync parado há 7 dias pintaria TODOS os
+  //    criativos de "Parado (sem veiculação)", o contrário do que o gráfico diz.
+  const ultimaAntes = rows
+    .filter((r) => r.date < recente.from && r.impressions > 0)
+    .map((r) => r.date)
+    .sort()
+    .at(-1);
+  if (recente.impressions === 0 && ultimaAntes) {
+    const comLinha = new Set(rows.filter((r) => r.date >= recente.from && r.date <= fim).map((r) => r.date));
+    const diasDaJanela = Array.from({ length: janelaDias }, (_, i) => dia(-(janelaDias - 1) + i));
+    const confirmados = diasDaJanela.filter((d) => comLinha.has(d) || (opts.cobertura ? diaCoberto(opts.cobertura, d) : false));
+    const ultima = `última impressão em ${formatDia(ultimaAntes)}`;
+    if (confirmados.length === 0) {
+      return {
+        level: "sem-dados",
+        frequency: 0,
+        reason: `sem dados nos últimos ${janelaDias} dias (${formatDia(recente.from)}–${formatDia(fim)}): nenhuma sincronização bem-sucedida cobriu esses dias — pode ter havido veiculação que o painel não viu; ${ultima}`,
+        janelas,
+      };
+    }
+    // Os dias mais recentes costumam estar sem cobertura (a Meta atrasa até
+    // 48 h): o motivo diz QUAIS dias sustentam o "sem veiculação".
+    const trecho =
+      confirmados.length === janelaDias
+        ? `nos últimos ${janelaDias} dias (${formatDia(recente.from)}–${formatDia(fim)})`
+        : confirmados.length === 1
+          ? `em ${formatDia(confirmados[0])} (o único dia dos últimos ${janelaDias} até ${formatDia(fim)} que a sincronização confirmou)`
+          : `de ${formatDia(confirmados[0])} a ${formatDia(confirmados.at(-1)!)} (os dias dos últimos ${janelaDias} até ${formatDia(fim)} que a sincronização confirmou)`;
+    return { level: "parado", frequency: 0, reason: `sem veiculação ${trecho}; ${ultima}`, janelas };
+  }
+
+  // 3. Piso absoluto: sem 1.000 impressões em cada janela não há leitura.
   if (recente.impressions < impressoesMinimas || anterior.impressions < impressoesMinimas) {
     return {
       level: "novo",
@@ -953,7 +1014,7 @@ export function computeFatigue(rows: AdDaily[], opts: OpcoesFadiga = {}): Fatigu
     };
   }
 
-  // 3. A regra.
+  // 4. A regra.
   const ctrCaiu = anterior.ctr > 0 && recente.ctr <= anterior.ctr * quedaCtr;
   const freqAlta = recente.frequency >= frequenciaAlta;
   const cplSubiu =
@@ -963,9 +1024,11 @@ export function computeFatigue(rows: AdDaily[], opts: OpcoesFadiga = {}): Fatigu
     recente.cpl >= anterior.cpl * altaCpl;
   const ctrTexto = `CTR ${formatPct1(recente.ctr)} vs ${formatPct1(anterior.ctr)} nos 7 d anteriores`;
   const freqTexto = `frequência ${formatFreq(recente.frequency)}`;
+  // O CPL da janela é o do Pixel — rotulado como na coluna "CPL Meta (Pixel)",
+  // para ninguém o comparar com o "CPL (painel)" da coluna ao lado.
   const cplTexto =
     cplSubiu && anterior.cpl != null && recente.cpl != null
-      ? `CPL 7 d ${Number.isFinite(recente.cpl) ? formatReais(recente.cpl) : "sem conversão"} vs ${formatReais(anterior.cpl)}`
+      ? `CPL Meta (Pixel) 7 d ${Number.isFinite(recente.cpl) ? formatReais(recente.cpl) : "sem conversão"} vs ${formatReais(anterior.cpl)}`
       : "";
 
   if (ctrCaiu && (freqAlta || cplSubiu)) {
@@ -1054,9 +1117,28 @@ export function rotuloCriativo(
     : `${c.name} · ${conjunto}`;
 }
 
+/**
+ * Como `creativePerformance` julga a saúde: o fim do período e a cobertura do
+ * sync — os MESMOS que /midia passa a `criativosAgregados`, para a ação do
+ * motor (M3, M6) e o briefing da IA lerem o selo que a tabela mostra.
+ */
+export interface OpcoesCriativos {
+  /**
+   * Fim do período (AAAA-MM-DD) onde terminam as janelas da saúde. Sem ele vale
+   * `range.to`; sem os dois (histórico inteiro), o último dia com linha de
+   * anúncio da conta — nunca o último dia de CADA anúncio, que julgaria o
+   * pausado pelos seus próprios últimos 14 dias. Quem sabe o dia de hoje
+   * (motor, briefing, página) passa `hoje`.
+   */
+  fim?: string;
+  /** Dias cobertos por syncs bem-sucedidos (ADR-06): separam "Parado" de "Sem dados". */
+  cobertura?: Intervalo[];
+}
+
 export function creativePerformance(
   data: DashboardData,
   range?: DateRange,
+  opts: OpcoesCriativos = {},
 ): CreativePerf[] {
   const ads = filterAds(data.adDaily, range);
   const leads = filterLeads(data.leads, range);
@@ -1070,22 +1152,29 @@ export function creativePerformance(
   // Saúde do criativo: as duas janelas de 7 dias terminam no FIM do período
   // selecionado (`opts.fim`), sobre o histórico inteiro do anúncio.
   const allByAd = new Map<string, AdDaily[]>();
+  let ultimoDiaDaConta: string | undefined;
   for (const r of data.adDaily) {
     const list = allByAd.get(r.adId) ?? [];
     list.push(r);
     allByAd.set(r.adId, list);
+    if (!ultimoDiaDaConta || r.date > ultimoDiaDaConta) ultimoDiaDaConta = r.date;
   }
+  const saude = { fim: opts.fim ?? range?.to ?? ultimoDiaDaConta, cobertura: opts.cobertura };
 
   // Atribui leads, reuniões, clientes e receita ao anúncio pela junção ÚNICA
-  // (atribuicao.ts). Reuniões pela data do agendamento, como o resto do painel.
+  // (atribuicao.ts). Reuniões pela data do agendamento, como o resto do painel,
+  // e SÓ com id de anúncio (`lead.adId` ou id no utm_content — relatório §7.3):
+  // é a mesma regra de `conjuntosPorId` e `criativosAgregados`, para a reunião
+  // que o motor cita (M6) ser a que a tabela de criativos mostra. Leads seguem
+  // valendo por nome único.
   const atribuir = atribuidor(data.creatives);
   const meetingsByAd = new Map<string, number>();
   const leadsByAd = new Map<string, number>();
   const clientsByAd = new Map<string, number>();
   const revenueByAd = new Map<string, number>();
   for (const l of reunioesNoPeriodo(data.leads, range)) {
-    const key = atribuir(l).adId;
-    if (key) meetingsByAd.set(key, (meetingsByAd.get(key) ?? 0) + 1);
+    const a = atribuir(l);
+    if (a.tipo === "id" && a.adId) meetingsByAd.set(a.adId, (meetingsByAd.get(a.adId) ?? 0) + 1);
   }
   for (const l of leads) {
     const key = atribuir(l).adId;
@@ -1128,7 +1217,7 @@ export function creativePerformance(
       cpl: k.cpl,
       cplPainel: div(k.spend, leadsPainel),
       cpr: div(k.spend, meetings),
-      fatigue: computeFatigue(allByAd.get(creative.adId) ?? [], { fim: range?.to }),
+      fatigue: computeFatigue(allByAd.get(creative.adId) ?? [], saude),
       hookRate: creative.videoPlays ? div(creative.videoPlays, k.impressions) : undefined,
       thruPlayRate: creative.thruPlays ? div(creative.thruPlays, k.impressions) : undefined,
       holdRate: creative.videoPlays ? div(creative.thruPlays ?? 0, creative.videoPlays) : undefined,
@@ -1191,16 +1280,19 @@ export function adsetPerformance(data: DashboardData, range?: DateRange): AdsetP
   }
 
   const atribuir = atribuidor(data.creatives);
-  const conjuntoDe = (l: Lead) => {
-    const adId = atribuir(l).adId;
-    return adId ? adToAdset.get(adId) : undefined;
+  const conjuntoDe = (l: Lead, soPorId = false) => {
+    const a = atribuir(l);
+    if (!a.adId || (soPorId && a.tipo !== "id")) return undefined;
+    return adToAdset.get(a.adId);
   };
   const meetingsByAdset = new Map<string, number>();
   const leadsByAdset = new Map<string, number>();
   const clientsByAdset = new Map<string, number>();
   const revenueByAdset = new Map<string, number>();
+  // Reunião só com id de anúncio (a regra única de `conjuntosPorId`); lead
+  // continua valendo por nome único.
   for (const l of reunioesNoPeriodo(data.leads, range)) {
-    const adset = conjuntoDe(l);
+    const adset = conjuntoDe(l, true);
     if (adset) meetingsByAdset.set(adset, (meetingsByAdset.get(adset) ?? 0) + 1);
   }
   for (const l of leads) {

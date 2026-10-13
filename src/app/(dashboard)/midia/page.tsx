@@ -20,8 +20,11 @@ import {
   cplAlvoDaMidia,
   criativosAgregados,
   descobertaDaMidia,
+  faixaDeSaude,
   moedaOuTraco,
+  notaDeNaoAtribuidos,
   rankingsDeCriativos,
+  REGRA_ATRIBUICAO_REUNIAO,
   resumoDaMidia,
   tendenciaSemanalMidia,
   textoRegraSaude,
@@ -62,11 +65,19 @@ export default async function MidiaPage({ searchParams }: { searchParams: Promis
   const tendencia = tendenciaSemanalMidia(data, { fim, hoje, kpis: { brandRules, cobertura } });
   const conjuntos = conjuntosPorId(data, range, { custoPorReuniaoExibivel: cprExibivel });
   const cplAlvo = cplAlvoDaMidia(data, kp, fim);
-  const criativos = criativosAgregados(data, range, { fim: range?.to, cplAlvo: cplAlvo.alvo, custoPorReuniaoExibivel: cprExibivel });
+  // `fim` (e não `range?.to`): sem `?range=` a Mídia olha o histórico inteiro e
+  // as janelas da saúde têm de terminar HOJE — senão cada anúncio pausado seria
+  // julgado pelos seus próprios últimos 14 dias e sairia "Saudável" ou
+  // "Fadigando" ao lado dos ativos. Com o fim certo, pausado sai "Parado" — mas
+  // só onde o sync confirmou a falta de veiculação (`cobertura`, a mesma do
+  // gráfico diário); sem cobertura, "Sem dados" (ADR-06). O motor e o briefing
+  // passam o mesmo fim e a mesma cobertura a `creativePerformance`.
+  const criativos = criativosAgregados(data, range, { fim, cobertura, cplAlvo: cplAlvo.alvo, custoPorReuniaoExibivel: cprExibivel });
   const regraSaude = textoRegraSaude(cplAlvo);
   const ranking = rankingsDeCriativos(criativos.conversao);
-  const fadigados = [...criativos.conversao, ...criativos.descoberta].filter((c) => c.saude.level === "fadigado");
-  const semResultado = criativos.conversao.filter((c) => c.saude.level === "sem-resultado");
+  // A faixa cita cada criativo pelo rótulo desambiguado (dois "Carrossel -" não
+  // saem iguais) — o texto inteiro sai de `lib/midia.ts`.
+  const faixa = faixaDeSaude(criativos);
   const descoberta = descobertaDaMidia(kp);
 
   const serie = dailySeries(data, range, cobertura);
@@ -95,7 +106,7 @@ export default async function MidiaPage({ searchParams }: { searchParams: Promis
         <CardHeader>
           <CardTitle>Campanhas e conjuntos de conversão</CardTitle>
           <CardDescription>
-            Onde a verba vira reunião. Agrupado pelo id da Meta — dois conjuntos com o mesmo nome em campanhas diferentes são duas linhas.{" "}
+            Onde a verba vira reunião. Agrupado pelo id da Meta — dois conjuntos com o mesmo nome em campanhas diferentes são duas linhas. {REGRA_ATRIBUICAO_REUNIAO}{" "}
             {cprExibivel
               ? `O custo por agendada aparece só com ${MIN_REUNIOES} reuniões ou mais na linha.`
               : `O custo por agendada fica em “—” até ${MIN_REUNIOES} reuniões de conversão no período (hoje ${formatInt(kp.reunioesConversao.valor)}).`}
@@ -130,22 +141,17 @@ export default async function MidiaPage({ searchParams }: { searchParams: Promis
           </p>
         </div>
 
-        {fadigados.length > 0 || semResultado.length > 0 ? (
+        {faixa.fadigando || faixa.semResultado ? (
           <div className="flex items-start gap-2.5 rounded-xl border border-[var(--status-fora)]/30 bg-[var(--status-fora)]/[0.04] px-4 py-3 text-sm">
             <AlertTriangle className="mt-0.5 size-4 shrink-0 text-[var(--status-fora-text)]" />
             <div className="space-y-0.5 text-muted-foreground">
-              {fadigados.length > 0 ? (
-                <p>
-                  <span className="font-medium text-foreground">{fadigados.length === 1 ? "1 criativo fadigando:" : `${fadigados.length} criativos fadigando:`}</span>{" "}
-                  {fadigados.map((c) => c.nome).join(", ")}. Renove a arte antes que o custo dispare.
-                </p>
-              ) : null}
-              {semResultado.length > 0 ? (
-                <p>
-                  <span className="font-medium text-foreground">{semResultado.length === 1 ? "1 criativo sem resultado:" : `${semResultado.length} criativos sem resultado:`}</span>{" "}
-                  {semResultado.map((c) => `${c.nome} (${formatCurrency0(c.spend)})`).join(", ")} — gasto de pelo menos 2 × o CPL alvo e nenhum lead do painel.
-                </p>
-              ) : null}
+              {[faixa.fadigando, faixa.semResultado].map((f) =>
+                f ? (
+                  <p key={f.rotulo}>
+                    <span className="font-medium text-foreground">{f.rotulo}</span> {f.texto}
+                  </p>
+                ) : null,
+              )}
             </div>
           </div>
         ) : null}
@@ -162,7 +168,9 @@ export default async function MidiaPage({ searchParams }: { searchParams: Promis
                 </p>
                 {ranking.melhorCpl ? (
                   <>
-                    <p className="truncate font-semibold">{ranking.melhorCpl.nome}</p>
+                    <p className="truncate font-semibold" title={ranking.melhorCpl.nome}>
+                      {ranking.melhorCpl.nome}
+                    </p>
                     <p className="text-sm text-muted-foreground">
                       {moedaOuTraco(ranking.melhorCpl.cplPainel)} por lead · {formatInt(ranking.melhorCpl.agendadas)}{" "}
                       {ranking.melhorCpl.agendadas === 1 ? "agendada" : "agendadas"}
@@ -186,7 +194,9 @@ export default async function MidiaPage({ searchParams }: { searchParams: Promis
                 <p className="text-xs text-muted-foreground">Maior CTR</p>
                 {ranking.maiorCtr ? (
                   <>
-                    <p className="truncate font-semibold">{ranking.maiorCtr.nome}</p>
+                    <p className="truncate font-semibold" title={ranking.maiorCtr.nome}>
+                      {ranking.maiorCtr.nome}
+                    </p>
                     <p className="text-sm text-muted-foreground">{formatPercent(ranking.maiorCtr.ctr)} de cliques</p>
                     <p className="text-xs text-muted-foreground">{amostraDoRanking(ranking.maiorCtr)}</p>
                   </>
@@ -209,7 +219,7 @@ export default async function MidiaPage({ searchParams }: { searchParams: Promis
           <CardHeader>
             <CardTitle>Criativos de conversão</CardTitle>
             <CardDescription>
-              Leads e reuniões só pelo id do anúncio (o link padrão traz “{"{{ad.id}}"}”); nome que existe em mais de um anúncio aparece como atribuição ambígua e não entra em ninguém. Passe o mouse em “Saúde” para ver a regra.
+              {REGRA_ATRIBUICAO_REUNIAO} Nome que existe em mais de um anúncio aparece como atribuição ambígua e não entra em ninguém. Passe o mouse no cabeçalho “Saúde” para ver a regra; no selo, o motivo.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -284,19 +294,14 @@ function Stat({ rotulo, valor, dica: titulo, destaque }: { rotulo: string; valor
   );
 }
 
-/** Leads do período que não entraram em nenhuma linha, e por quê. */
+/** Leads e reuniões do período que não entraram em nenhuma linha, e por quê (o texto sai de `lib/midia.ts`). */
 function NotaNaoAtribuidos({ n, rangeKey }: { n: NaoAtribuidos; rangeKey?: string }) {
-  const partes: string[] = [];
-  if (n.ambigua > 0) partes.push(`${formatInt(n.ambigua)} com nome ambíguo`);
-  if (n.macro > 0) partes.push(`${formatInt(n.macro)} com macro {{…}} sem resolver`);
-  if (n.desconhecida > 0) partes.push(`${formatInt(n.desconhecida)} com origem desconhecida`);
-  if (n.semOrigem > 0) partes.push(`${formatInt(n.semOrigem)} sem origem (orgânico ou direto)`);
-  if (n.semLinhaNoPeriodo > 0) partes.push(`${formatInt(n.semLinhaNoPeriodo)} de conjunto sem veiculação no período`);
-  if (partes.length === 0) return null;
+  const nota = notaDeNaoAtribuidos(n);
+  if (!nota) return null;
   return (
     <p className="text-xs text-muted-foreground">
-      Fora das linhas: {partes.join(" · ")}. Esses leads contam no total, mas não no custo por conjunto.{" "}
-      {n.ambigua > 0 || n.macro > 0 ? (
+      {[nota.leads, nota.reunioes].filter(Boolean).join(" ")}{" "}
+      {nota.linkUtm ? (
         <Link href={comPeriodo("/configuracoes/ferramentas#utm", rangeKey)} className="text-primary underline-offset-4 hover:underline">
           Gerar o link com {"{{ad.id}}"} →
         </Link>

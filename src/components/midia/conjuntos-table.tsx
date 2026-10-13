@@ -1,12 +1,12 @@
 "use client";
 
 import { DataTable, type Column } from "@/components/ui/data-table";
-import { dica } from "@/lib/dicionario";
 import { formatCurrency, formatCurrency0, formatInt, formatPercent } from "@/lib/format";
 import {
   COLUNAS_CONJUNTOS_CONVERSAO,
   COLUNAS_CONJUNTOS_DESCOBERTA,
   moedaOuTraco,
+  tituloDoCabecalho,
   type ColunaMidia,
   type LinhaMidia,
 } from "@/lib/midia";
@@ -86,14 +86,15 @@ function colunas(defs: ColunaMidia[]): Column<LinhaMidia>[] {
     .map((d) => ({
       key: d.key,
       header: d.header,
+      // O ⓘ do dicionário no CABEÇALHO, quando a métrica tem definição — a
+      // célula fica com o título dela ("n de 3 reuniões…"), sem sobreposição.
+      headerTitle: tituloDoCabecalho(d),
       sortable: true,
       // Cabeçalho quebra linha e célula mais estreita: é o que faz a tabela
       // caber no card a 1366 px sem rolagem horizontal (B13).
       headerClassName: "whitespace-normal leading-tight",
       ...RENDER[d.key],
       className: `px-2 ${RENDER[d.key].className ?? ""}`.trim(),
-      // O ⓘ do dicionário no cabeçalho, quando a métrica tem definição.
-      render: (r: LinhaMidia) => (d.dica ? <span title={dica(d.dica)}>{RENDER[d.key].render(r)}</span> : RENDER[d.key].render(r)),
     }));
 }
 

@@ -32,6 +32,7 @@ import {
   rotuloCriativo,
 } from "../metrics";
 import { MIN_REUNIOES } from "../trust";
+import { hojeEmBrasilia } from "../range";
 import { custoExibivel, kpisDoPeriodo, reguaDoPeriodo } from "../kpis";
 import { META_DEF } from "../metas";
 import { DICIONARIO } from "../dicionario";
@@ -330,7 +331,10 @@ export function buildBriefing(
   const kpPrev = prevRange ? kpisDoPeriodo(data, prevRange) : undefined;
   const obj = objectiveBreakdown(data, range);
   const pacing = campaignPacing(data, opts.nowIso);
-  const criativos = creativePerformance(data, range);
+  // As janelas da saúde terminam no fim do período (hoje sem `range`), como na
+  // tabela de /midia e no motor: a IA não chama de "fadigando" o anúncio que a
+  // tela mostra parado.
+  const criativos = creativePerformance(data, range, { fim: range?.to ?? hojeEmBrasilia(new Date(opts.nowIso)) });
   // Com menos de MIN_REUNIOES o custo por reunião está em quarentena na tela: a
   // IA recebe null e o motivo, nunca o valor — senão argumenta com um número que
   // o painel esconde. A régua vale também por criativo.
