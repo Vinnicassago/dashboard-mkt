@@ -351,9 +351,19 @@ function csvCell(v: string): string {
  * Telefone como TEXTO para o Excel: sem isso ele abre 5511999990000 como número
  * e grava "5,51E+12" — foi assim que telefones viraram notação científica. O
  * importador de leads (`lerTelefone`) desfaz o `="…"`.
+ *
+ * Esta é a única célula que sai como fórmula, e o telefone também vem do
+ * formulário público da LP (gravado só com trim): um `11;=1+1;x` partia a
+ * linha em células e a do meio era executada, e uma quebra de linha abria uma
+ * linha nova começando com `=`. Por isso só passam dígitos e os separadores de
+ * telefone (+, parênteses, espaço, ponto, hífen) — o resto sai.
  */
 export function csvTelefone(v?: string): string {
-  return v ? `="${v.replace(/"/g, "")}"` : "";
+  const limpo = (v ?? "")
+    .replace(/[^\d+().\s-]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return limpo ? `="${limpo}"` : "";
 }
 
 export const CSV_CABECALHO = [

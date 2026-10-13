@@ -16,10 +16,12 @@ import {
 } from "../conteudo";
 import { formatIntComSinal } from "../format";
 import {
+  actualForGoal,
   awarenessKpis,
   buildOrganicFunnel,
   followerSeries,
   igAccountTotals,
+  pontosDoTotalDeSeguidores,
   postingCadence,
   seguidoresDoPeriodo,
 } from "../metrics";
@@ -618,5 +620,62 @@ describe("6.5 — verificação: o líquido de seguidores é o mesmo em todas as
     // E o período anterior pela MESMA regra.
     const anterior = { from: "2026-09-24", to: "2026-09-30" };
     expect(b.perfil.ganhoLiquidoAnterior).toBe(resumoSeguidores(rows, anterior).liquido);
+  });
+});
+
+describe("6.5 — lacunas da verificação final (seguidores)", () => {
+  const SEMANA = { from: "2026-10-01", to: "2026-10-04" };
+
+  it("série completa exige dias CONTÍNUOS: um dia sem linha no meio cai na regra dos totais", () => {
+    // Véspera 1000; 02/10 sem linha (o total subiu 5 nesse dia, que ganhos − perdas não vê).
+    const rows = [
+      dia("2026-09-30", { followers: 1000 }),
+      dia("2026-10-01", { followers: 1003, followsDay: 3, unfollowsDay: 0 }),
+      dia("2026-10-03", { followers: 1010, followsDay: 2, unfollowsDay: 0 }),
+      dia("2026-10-04", { followers: 1010, followsDay: 0, unfollowsDay: 0 }),
+    ];
+    const r = seguidoresDoPeriodo(rows, SEMANA);
+    expect(r.serieCompleta).toBe(false);
+    expect(r.liquido).toBe(10); // fim − véspera, com o dia sem linha dentro
+    expect(r.inicio).toBe(1000);
+  });
+
+  it("o fim do período sem leitura (hoje) não tira a série completa", () => {
+    const rows = [
+      dia("2026-10-01", { followers: 1003, followsDay: 3, unfollowsDay: 0 }),
+      dia("2026-10-02", { followers: 1004, followsDay: 2, unfollowsDay: 1 }),
+      dia("2026-10-03", { followers: 1004, followsDay: 0, unfollowsDay: 0 }),
+    ];
+    const r = seguidoresDoPeriodo(rows, SEMANA);
+    expect(r.serieCompleta).toBe(true);
+    expect(r.liquido).toBe(4);
+  });
+
+  it("o gráfico do TOTAL não desce a zero no dia sem o campo; o da variação mantém todos os dias", () => {
+    const rows = [
+      dia("2026-10-01", { followers: 1240 }),
+      dia("2026-10-02", { followers: 0 }),
+      dia("2026-10-03", { followers: 1250 }),
+    ];
+    const serie = followerSeries(rows, SEMANA);
+    expect(serie).toHaveLength(3);
+    expect(pontosDoTotalDeSeguidores(serie).map((p) => p.followers)).toEqual([1240, 1250]);
+    expect(serie.map((p) => p.gain)).toEqual([0, 0, 10]);
+  });
+
+  it("a meta de seguidores (goals) lê o último total CONHECIDO, não o 0 de um snapshot em branco", () => {
+    const data: DashboardData = {
+      campaign: { id: "c", brand: "consorcio", name: "C", objective: "L", status: "ativa", startDate: "2026-09-01", budgetTotal: 0 },
+      igAccountDaily: [dia("2026-10-01", { followers: 1240 }), dia("2026-10-02", { followers: 0 })],
+      igPosts: [],
+      adDaily: [],
+      creatives: [],
+      lpDaily: [],
+      leads: [],
+      goals: [],
+      updatedAt: "2026-10-08T12:00:00.000Z",
+    };
+    const goal = { metric: "followers" } as unknown as Goal;
+    expect(actualForGoal(goal, data)).toBe(1240);
   });
 });

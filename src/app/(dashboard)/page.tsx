@@ -22,6 +22,7 @@ import {
   awarenessKpis,
   dataQualityChecks,
   followerSeries,
+  pontosDoTotalDeSeguidores,
   goalProgress,
   igAccountTotals,
   previousRange,
@@ -227,7 +228,7 @@ function AwarenessOverview({
       <div className="grid gap-4 lg:grid-cols-2">
         <ChartCard title="Seguidores" description="Total de seguidores ao longo do tempo.">
           <TimeSeriesChart
-            data={series}
+            data={pontosDoTotalDeSeguidores(series)}
             series={[{ key: "followers", label: "Seguidores", color: CHART.series[0] }]}
             yFormat="int"
           />

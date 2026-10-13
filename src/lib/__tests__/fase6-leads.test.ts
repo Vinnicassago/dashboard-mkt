@@ -14,6 +14,7 @@ import {
   contarPorStatus,
   descreverFiltro,
   filtroDoPedido,
+  csvTelefone,
   montarCsvDeLeads,
   montarLinhasDeLeads,
   periodoDoRegistro,
@@ -385,6 +386,12 @@ describe("“Parece teste” não fura a máscara (LGPD)", () => {
     );
     expect(mascararNoTexto(undefined)).toBe("");
   });
+
+  it("o motivo antigo com telefone curto (7 dígitos repetidos, a regra antiga) também sai mascarado", () => {
+    expect(mascararNoTexto("teste (telefone “9999999”)")).toBe("teste (telefone “•••-9999”)");
+    expect(mascararNoTexto("teste (telefone “9999”)")).toBe("teste (telefone “•••”)");
+    expect(mascararNoTexto("teste (telefone “”)")).toBe("teste (telefone “”)");
+  });
 });
 
 describe("CSV: nada que o Excel execute", () => {
@@ -413,6 +420,20 @@ describe("CSV: nada que o Excel execute", () => {
     expect(colunas[0]).toBe("Ana-Maria Souza");
     expect(colunas[1]).toBe("ana@exemplo.com");
     expect(colunas[2]).toBe(`="${modelo.phone}"`);
+  });
+
+  it("o telefone (também do formulário público) não parte a linha nem carrega fórmula", () => {
+    for (const phone of ["11;=1+1;x", "11\r\n=1+1", '11";=HYPERLINK(1)', "(11) 9 8765-4321"]) {
+      const linha = montarCsvDeLeads([{ ...modelo, phone }]);
+      const [, dados, ...resto] = linha.split("\r\n");
+      expect(resto.filter(Boolean)).toEqual([]);
+      const tel = dados.split(";")[2];
+      expect(tel).toMatch(/^="[\d+(). -]*"$/);
+    }
+    // Só dígitos e separadores sobram: o ";", o "=" e a letra saem.
+    expect(csvTelefone("11;=1+1;x")).toBe(`="111+1"`);
+    expect(csvTelefone("(11) 9 8765-4321")).toBe(`="(11) 9 8765-4321"`);
+    expect(csvTelefone("abc")).toBe("");
   });
 });
 

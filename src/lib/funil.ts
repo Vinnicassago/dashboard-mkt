@@ -67,6 +67,11 @@ import {
 import { AMOSTRA_MIN, ATRASO_REGISTRO_HORAS, ATRASO_REGISTRO_SHARE, LOTE_JANELA_MIN, LOTE_MIN } from "./motor";
 import { formatInt, formatPercent } from "./format";
 import { segundaDaSemana, somarDias, ultimasSemanas } from "./semana";
+
+/** Dias de `de` até `ate` (AAAA-MM-DD); 0 no mesmo dia. */
+function diasEntre(de: string, ate: string): number {
+  return Math.round((Date.parse(`${ate}T00:00:00Z`) - Date.parse(`${de}T00:00:00Z`)) / 86_400_000);
+}
 import { diaCoberto, type Intervalo } from "./cobertura";
 import type { MetricaId } from "./dicionario";
 import type { DashboardData, Lead, LeadEvent, LeadStatus, MetricaComMeta } from "./types";
@@ -344,10 +349,12 @@ function etapasDaCascata(degraus: Degrau[], e: EntradaFunil): { etapas: EtapaFun
 
   // 1º contato: a etapa do comercial que o relatório pede — e um RAMO PARALELO
   // (`TRANSICOES.lead` inclui "agendado": quem agenda direto não passa por ela).
-  // Sem a mesa do atendimento, quem ainda não teve tentativa está parado aqui (a
-  // aba "Novos" da Fila) — a mesma regra da cascata; com ela, quem espera
-  // aparece no bloco (aguardando abordagem), e contar aqui também seria dobrar.
-  const semContato = comercial ? 0 : data.leads.filter((l) => l.status === "lead").length;
+  // Quem ainda não teve tentativa no painel está parado aqui (a etapa "novo" da
+  // Fila) — a mesma regra da cascata. Com a mesa do atendimento ligada, também:
+  // o "aguardando abordagem" do bloco são os TRANSFERIDOS pelo robô, outra
+  // população; esconder os do painel tirava do funil gente que a Fila lista. Quem
+  // está nos dois aparece na Fila uma vez, na etapa mais funda — a nota diz isso.
+  const semContato = data.leads.filter((l) => l.status === "lead").length;
   const contato: EtapaFunil = {
     key: "primeiro_contato",
     label: "1º contato registrado",
@@ -356,9 +363,16 @@ function etapasDaCascata(degraus: Degrau[], e: EntradaFunil): { etapas: EtapaFun
     dono: "COM",
     parados: semContato > 0 ? semContato : undefined,
     etapaFila: semContato > 0 ? "novo" : undefined,
-    nota: periodo
-      ? "tentativas de 1º contato feitas no período, pela data da 1ª tentativa"
-      : "dos leads que entraram no período, quantos já tiveram uma tentativa de contato",
+    nota: [
+      periodo
+        ? "tentativas de 1º contato feitas no período, pela data da 1ª tentativa"
+        : "dos leads que entraram no período, quantos já tiveram uma tentativa de contato",
+      comercial && semContato > 0
+        ? "parados = sem tentativa no painel; quem também foi transferido pelo robô aparece no bloco do atendimento e, na Fila, uma vez só, na etapa do atendimento"
+        : undefined,
+    ]
+      .filter(Boolean)
+      .join(" · "),
   };
   if (periodo) contato.semTaxa = SEM_TAXA_PERIODO;
   else taxaAninhada(contato, leadCount);
@@ -551,8 +565,10 @@ export interface FunilDescoberta {
   /** Dias com dado do Instagram no período; 0 = sem leitura. */
   dias: number;
   semDado: boolean;
-  /** Por que não há "vs. anterior": o período anterior sem leitura, ou com menos dias que este. */
+  /** Por que não há "vs. anterior": o período anterior sem leitura, ou com outro número de dias com dado. */
   semComparacao?: string;
+  /** Quando a comparação usa só o começo do período anterior (este ainda sem leitura nos últimos dias). */
+  notaComparacao?: string;
   investimentoDescoberta: number;
 }
 
@@ -568,16 +584,39 @@ export function funilDeDescoberta(
 ): FunilDescoberta {
   const ig = igAccountTotals(data.igAccountDaily, range);
   const semDado = ig.days === 0;
-  // Período anterior sem dia sincronizado é SEM LEITURA, não zero: contra 0 a
-  // tela imprimiria "+N vs. anterior" sobre um salto que não existiu. Com menos
-  // dias que o atual, a soma também não compara — um buraco de sync vira "alta".
-  const antBruto = range ? igAccountTotals(data.igAccountDaily, previousRange(range)) : null;
-  const ant = antBruto && antBruto.days > 0 && antBruto.days >= ig.days ? antBruto : null;
+  // Comparação só entre trechos IGUAIS. O período termina hoje e hoje ainda não
+  // tem leitura (o Instagram fecha o dia depois): 6 dias somados contra 7
+  // imprimiam uma queda que não existiu. Então o anterior é cortado no mesmo
+  // ponto em que este para de ter dado (o 1º dia dele até o dia que corresponde
+  // à última leitura deste). Depois do corte, os dois trechos precisam ter o
+  // MESMO número de dias com dado: período anterior sem dia sincronizado é sem
+  // leitura (contra 0 a tela imprimiria "+N"), e um buraco de sync no meio, de
+  // qualquer lado, também não compara.
+  const ultimaLeitura = range
+    ? data.igAccountDaily.reduce<string | undefined>(
+        (m, r) => (r.date >= range.from && r.date <= range.to && (!m || r.date > m) ? r.date : m),
+        undefined,
+      )
+    : undefined;
+  const anteriorCompleto = range ? previousRange(range) : null;
+  const trecho = anteriorCompleto && range && ultimaLeitura
+    ? {
+        from: anteriorCompleto.from,
+        to: somarDias(anteriorCompleto.from, diasEntre(range.from, ultimaLeitura)),
+      }
+    : anteriorCompleto;
+  const cortado = Boolean(trecho && anteriorCompleto && trecho.to < anteriorCompleto.to);
+  const antBruto = trecho ? igAccountTotals(data.igAccountDaily, trecho) : null;
+  const ant = antBruto && antBruto.days > 0 && antBruto.days === ig.days ? antBruto : null;
   const semComparacao =
     antBruto && !ant && !semDado
       ? antBruto.days === 0
         ? "sem comparação: o período anterior não tem leitura do Instagram"
-        : `sem comparação: o período anterior tem ${formatInt(antBruto.days)} ${antBruto.days === 1 ? "dia" : "dias"} com dado, contra ${formatInt(ig.days)} deste`
+        : `sem comparação: o período anterior tem ${formatInt(antBruto.days)} ${antBruto.days === 1 ? "dia" : "dias"} com dado, contra ${formatInt(ig.days)} deste${cortado ? " (no mesmo trecho)" : ""}`
+      : undefined;
+  const notaComparacao =
+    ant && cortado && trecho
+      ? `comparado com ${diasEntre(trecho.from, trecho.to) === 0 ? "o 1º dia" : `os mesmos ${formatInt(diasEntre(trecho.from, trecho.to) + 1)} primeiros dias`} do período anterior — os últimos deste ainda sem leitura`
       : undefined;
   const verba = kpis.investimentoDescoberta.valor;
   const v = (n: number) => (semDado ? null : n);
@@ -631,7 +670,7 @@ export function funilDeDescoberta(
     });
   }
 
-  return { etapas, extras, dias: ig.days, semDado, semComparacao, investimentoDescoberta: verba };
+  return { etapas, extras, dias: ig.days, semDado, semComparacao, notaComparacao, investimentoDescoberta: verba };
 }
 
 // ---------------------------------------------------------------- tendência semanal

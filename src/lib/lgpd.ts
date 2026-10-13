@@ -60,6 +60,13 @@ const EMAIL_NO_TEXTO = /[^\s@“”"'(),;:<>]+@[^\s@“”"'(),;:<>]+/g;
 /** 8+ dígitos com os separadores de telefone (espaço, ponto, hífen, parênteses). */
 const TELEFONE_NO_TEXTO = /\+?\(?\d[\d\s().-]{6,}\d/g;
 
+/**
+ * O formato do motivo antigo de "parece teste": `telefone “…”`. Dentro dessas
+ * aspas é sempre o telefone do lead, mesmo curto — a regra antiga marcava 7
+ * dígitos repetidos ("9999999"), abaixo do limite de 8 do caso geral.
+ */
+const TELEFONE_DO_MOTIVO = /(telefone\s*“)([^”]*)(”)/g;
+
 /** Letra, dígito, "_" ou "-" colado no número: é pedaço de id, não telefone. */
 const COLADO = /[\w-]/;
 
@@ -75,6 +82,9 @@ export function mascararNoTexto(texto?: string | null): string {
   if (!texto) return "";
   return texto
     .replace(EMAIL_NO_TEXTO, (e) => mascararEmail(e))
+    .replace(TELEFONE_DO_MOTIVO, (_m, abre: string, fone: string, fecha: string) =>
+      `${abre}${fone.trim() ? mascararTelefone(fone) : ""}${fecha}`,
+    )
     .replace(TELEFONE_NO_TEXTO, (t: string, i: number, s: string) => {
       const colado = COLADO.test(s[i - 1] ?? "") || COLADO.test(s[i + t.length] ?? "");
       return !colado && t.replace(/\D/g, "").length >= 8 ? mascararTelefone(t) : t;

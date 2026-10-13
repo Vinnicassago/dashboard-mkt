@@ -723,7 +723,11 @@ export interface SeguidoresDoPeriodo {
   variacaoPorDia: number[];
   /** Algum dia do período tem o total. Sem ele, o total é "—" e não há status contra a meta. */
   temTotal: boolean;
-  /** Todo dia do período tem ganhos E perdas: o líquido é ganhos − perdas. */
+  /**
+   * Todo dia do período, do 1º até a última leitura e SEM pular dia do
+   * calendário, tem ganhos E perdas: o líquido é ganhos − perdas. Um dia sem
+   * linha no meio não é "completa" — a soma o deixaria de fora.
+   */
   serieCompleta: boolean;
 }
 
@@ -752,7 +756,16 @@ export function seguidoresDoPeriodo(rows: IgAccountDaily[], range?: DateRange): 
   const noPeriodo = todas.filter((r) => inRange(r.date, range));
   const comTotal = noPeriodo.filter(temTotalDeSeguidores);
   const fim = comTotal.at(-1)?.followers ?? 0;
-  const serieCompleta = noPeriodo.length > 0 && noPeriodo.every(temGanhosEPerdas);
+  // Completa = dias CONTÍNUOS desde o 1º do período (o fim pode faltar: hoje
+  // ainda sem leitura) e todos com os dois lados. Contar linhas não basta: com
+  // um dia sem linha no meio, ganhos − perdas deixava a variação dele de fora.
+  const umDia = 86_400_000;
+  const continuo = noPeriodo.every((r, i) =>
+    i === 0
+      ? !range || r.date === range.from
+      : Date.parse(`${r.date}T00:00:00Z`) - Date.parse(`${noPeriodo[i - 1].date}T00:00:00Z`) === umDia,
+  );
+  const serieCompleta = noPeriodo.length > 0 && continuo && noPeriodo.every(temGanhosEPerdas);
 
   let variacaoPorDia: number[];
   if (serieCompleta) {
@@ -804,6 +817,15 @@ export function followerSeries(rows: IgAccountDaily[], range?: DateRange): Follo
     reach: r.reach,
     views: r.views,
   }));
+}
+
+/**
+ * Os pontos do gráfico do TOTAL de seguidores: só dias com o total conhecido.
+ * Um snapshot sem o campo (0) derrubava a linha a zero num dia e a subia no
+ * seguinte; sem o ponto, o dia fica como o dia sem linha — fora do gráfico.
+ */
+export function pontosDoTotalDeSeguidores(series: FollowerPoint[]): FollowerPoint[] {
+  return series.filter((p) => p.followers > 0);
 }
 
 // ---- fadiga de criativo --------------------------------------------
@@ -2277,10 +2299,9 @@ export function actualForGoal(goal: Goal, data: DashboardData, range?: DateRange
       return k.cpr;
     case "spend":
       return k.spend;
-    case "followers": {
-      const last = [...data.igAccountDaily].sort((a, b) => a.date.localeCompare(b.date)).at(-1);
-      return last?.followers ?? 0;
-    }
+    case "followers":
+      // O último total CONHECIDO — um snapshot sem o campo não zera a meta.
+      return seguidoresDoPeriodo(data.igAccountDaily).fim;
     // ---- metas orgânicas (plano de 90 dias) ----
     // As percentuais devolvem VALOR percentual (40 = 40%) — o alvo é gravado
     // na mesma unidade no GoalsForm, e a exibição usa formatPercentValue.

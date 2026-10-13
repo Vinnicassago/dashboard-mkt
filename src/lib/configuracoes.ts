@@ -222,8 +222,8 @@ export interface VisibilidadeDoPapel {
  * Administrador e Comercial veem telefone e e-mail; Marketing vê mascarado.
  * "Importa" são DUAS regras, não uma: leads é `leads:write` (Comercial importa
  * o CSV de leads e cadastra à mão); anúncios, sincronização e metas são
- * `data:write` (Marketing). Uma coluna só para as duas dizia a Comercial que
- * ele não importava — e o servidor deixava.
+ * `data:write` (Marketing). Uma coluna só para as duas dizia que o papel Comercial
+ * não importava — e o servidor deixava.
  */
 export function visibilidadePorPapel(): VisibilidadeDoPapel[] {
   return ROLES.map((papel) => ({

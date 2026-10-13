@@ -47,6 +47,7 @@ import {
   awarenessKpis,
   buildProfileClickFunnel,
   followerSeries,
+  pontosDoTotalDeSeguidores,
   goalProgress,
   igAccountTotals,
   igEngagementSeries,
@@ -513,7 +514,7 @@ export default async function ConteudoPage({
             <div className="grid gap-4 lg:grid-cols-2">
               <ChartCard title="Seguidores" description="Total de seguidores ao longo do tempo.">
                 <TimeSeriesChart
-                  data={series}
+                  data={pontosDoTotalDeSeguidores(series)}
                   series={[{ key: "followers", label: "Seguidores", color: CHART.series[0] }]}
                   yFormat="int"
                 />

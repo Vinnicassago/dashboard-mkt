@@ -25,7 +25,7 @@ export function FunilDescoberta({ funil }: { funil: Descoberta }) {
                 <p className="tabular text-xl font-semibold">
                   {e.valor == null ? "—" : e.key === "seguidores" ? formatIntComSinal(e.valor) : formatInt(e.valor)}
                   {delta !== undefined ? (
-                    <span className="ml-2 text-xs font-medium text-muted-foreground" title="Diferença contra o período anterior, de mesmo tamanho">
+                    <span className="ml-2 text-xs font-medium text-muted-foreground" title="Diferença contra o período anterior, no mesmo trecho de dias com dado">
                       {formatIntComSinal(delta)} vs. anterior
                     </span>
                   ) : null}
@@ -65,6 +65,7 @@ export function FunilDescoberta({ funil }: { funil: Descoberta }) {
         {funil.dias} {funil.dias === 1 ? "dia" : "dias"} com dado no período
         {funil.investimentoDescoberta > 0 ? ` · ${formatCurrency0(funil.investimentoDescoberta)} de verba de descoberta` : " · sem verba de descoberta"}
         {funil.semComparacao ? ` · ${funil.semComparacao}` : ""}
+        {funil.notaComparacao ? ` · ${funil.notaComparacao}` : ""}
       </p>
     </div>
   );

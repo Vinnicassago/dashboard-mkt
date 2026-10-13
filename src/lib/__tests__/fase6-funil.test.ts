@@ -319,8 +319,11 @@ describe("com robô/atendimento ligados, as vistas ainda diferem e a north star 
     expect(coorte.reunioes.meta?.metrica).toBe("taxa_lead_agendada");
     // Sem o atendimento, quem não teve tentativa está parado no 1º contato (como na cascata).
     expect(coorte.primeiro_contato).toMatchObject({ parados: 5, etapaFila: "novo" });
-    // Com ele, quem espera aparece no bloco (aguardando abordagem) — não duas vezes.
-    expect(porKey(funilCom(data, "coorte", ROBO, COMERCIAL).etapas).primeiro_contato.parados).toBeUndefined();
+    // Com ele também: o "aguardando abordagem" do bloco são os transferidos pelo
+    // robô (outra população) — a Fila lista os do painel, e o funil não os esconde.
+    const comAtendimento = porKey(funilCom(data, "coorte", ROBO, COMERCIAL).etapas).primeiro_contato;
+    expect(comAtendimento).toMatchObject({ parados: 5, etapaFila: "novo" });
+    expect(comAtendimento.nota).toContain("uma vez só, na etapa do atendimento");
   });
 });
 
@@ -558,6 +561,35 @@ describe("funil de descoberta: a conta do Instagram, rotulada com honestidade", 
     expect(g.semComparacao).toBeUndefined();
     expect(g.etapas.find((e) => e.key === "alcance")).toMatchObject({ valor: 3500, anterior: 3500 });
     expect(g.extras.find((x) => x.key === "link_bio")).toMatchObject({ valor: 28, anterior: 28 });
+  });
+
+  it("hoje ainda sem leitura: compara com o MESMO trecho do anterior, não 6 dias contra 7", () => {
+    const semana = ["2026-10-02", "2026-10-03", "2026-10-04", "2026-10-05", "2026-10-06", "2026-10-07"]; // sem 08/10
+    const anterior = ["2026-09-25", "2026-09-26", "2026-09-27", "2026-09-28", "2026-09-29", "2026-09-30", "2026-10-01"];
+    const data = base({ igAccountDaily: [...anterior, ...semana].map((d) => ig(d)) });
+    const f = funilDeDescoberta(data, SEMANA, kpisDe(data));
+    expect(f.semComparacao).toBeUndefined();
+    // 6 dias × 500 contra os 6 primeiros do anterior — não contra os 7 (3.500), que imprimia "−500".
+    expect(f.etapas.find((e) => e.key === "alcance")).toMatchObject({ valor: 3000, anterior: 3000 });
+    expect(f.notaComparacao).toContain("mesmos 6 primeiros dias");
+  });
+
+  it("1 dia agora contra 3 no anterior: compara 1 com 1 (o achado da verificação), nunca a soma de 3", () => {
+    const data = base({
+      igAccountDaily: [ig("2026-09-25"), ig("2026-09-26"), ig("2026-09-27"), ig("2026-10-02")],
+    });
+    const f = funilDeDescoberta(data, SEMANA, kpisDe(data));
+    expect(f.etapas.find((e) => e.key === "alcance")).toMatchObject({ valor: 500, anterior: 500 });
+    expect(f.notaComparacao).toContain("com o 1º dia do período anterior");
+  });
+
+  it("buraco no meio DESTE período também não compara (no mesmo trecho, contagens diferentes)", () => {
+    const anterior = ["2026-09-25", "2026-09-26", "2026-09-27", "2026-09-28", "2026-09-29", "2026-09-30", "2026-10-01"];
+    const data = base({ igAccountDaily: [...anterior.map((d) => ig(d)), ig("2026-10-02"), ig("2026-10-08")] });
+    const f = funilDeDescoberta(data, SEMANA, kpisDe(data));
+    expect(f.etapas.every((e) => e.anterior === undefined)).toBe(true);
+    expect(f.semComparacao).toBe("sem comparação: o período anterior tem 7 dias com dado, contra 2 deste");
+    expect(f.notaComparacao).toBeUndefined();
   });
 });
 
