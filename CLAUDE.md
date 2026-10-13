@@ -212,18 +212,26 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   tendência semanal, conjuntos por `adsetId` em blocos conversão × descoberta com colunas
   "Leads (painel)" e "Conversões Meta (Pixel)" (nunca "Leads" sozinho com Pixel), criativos
   por `creativeId`, rankings só com volume mínimo e o n à vista, reunião atribuída só com
-  id (nome ambíguo = "atribuição ambígua"); saúde do criativo = `computeFatigue` no
-  PERÍODO com a regra na dica (CTR 7d ≤ 75% do anterior E (freq ≥ 2 OU CPL 7d ≥ 120%),
-  ≥ 1.000 impressões por janela; "sem resultado" = gasto ≥ 2 × CPL alvo e 0 leads);
+  id do anúncio ou do conjunto — a MESMA regra em conjuntos, criativos e motor (M2/M4 leem
+  `conjuntosPorId`; nome ambíguo = "atribuição ambígua"); saúde do criativo =
+  `computeFatigue` no PERÍODO com a regra na dica (CTR 7d ≤ 75% do anterior E (freq ≥ 2 OU
+  CPL Meta (Pixel) 7d ≥ 120%), ≥ 1.000 impressões por janela; "sem resultado" = gasto ≥ 2 ×
+  CPL alvo e 0 leads; "parado" só com dia confirmado por sync, sem cobertura é "sem dados" —
+  ADR-06); a janela termina no fim do período (hoje, sem `?range=`) na tela, no motor e na IA;
   gráfico diário em barras com dias sem dado e pausados marcados; o gasto nunca aparece
   como orçamento. **Leads**: colunas da ficha (etapa máxima = `etapaMaxima`, função dos
   marcos — ADR-01), abas com contagem que somam o total, origem campanha › conjunto ›
-  anúncio, exportação só com `leads:write` e SEMPRE registrada em `audit_log`; o papel
-  Marketing vê telefone e e-mail mascarados (`lib/lgpd.ts`) em tabela, ficha e histórico.
+  anúncio, exportação só com `leads:write`, montada NO SERVIDOR (`POST /leads/exportar`
+  recalcula linhas e contagem) e SEMPRE registrada em `audit_log` antes de devolver o
+  arquivo — célula que começa com = + - @ ganha apóstrofo e o telefone só leva dígitos e
+  separadores; o papel Marketing vê telefone e e-mail mascarados (`lib/lgpd.ts`) em
+  tabela, ficha, histórico e no motivo de "parece teste".
   **Conteúdo**: 1º bloco "Contribuição para o funil"; "Alcance da conta (pago + orgânico)"
   ≠ "Alcance orgânico dos posts"; variações de anúncio (mesma legenda no mesmo dia) viram
   sugestão de teste; `postingCadence` ignora testes e impulsionados; seguidores com a série
-  parcial explicada (100+ seguidores); registros manuais na vista Registros. As métricas
+  parcial explicada (100+ seguidores) e UMA regra do líquido, `seguidoresDoPeriodo`
+  (metrics.ts: último total conhecido, o 1º dia contra a véspera) — Bússola, Funil, Conteúdo,
+  IA e metas leem dali; registros manuais na vista Registros. As métricas
   da conta estão no MESMO dicionário (`lib/dicionario.ts`). **Configurações**: uma rota
   por vista, loader compartilhado (`_carregar.ts`), `lib/configuracoes.ts` é a fonte de
   qual vista tem qual âncora (`linkDeConfiguracoes`) e das pendências; guardas de papel no
