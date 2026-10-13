@@ -2,22 +2,33 @@
  * Fase 6.3 — Mídia (relatório §7.3; S13, S20, B9, B12, B13, B17). Fixture
  * sintética (nenhum dado real). Datas em UTC; Brasília = UTC−3.
  */
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { computeFatigue, REGRA_FADIGA } from "../metrics";
+import { adsetPerformance, computeFatigue, creativePerformance, REGRA_FADIGA } from "../metrics";
 import { custoExibivel, kpisDoPeriodo, mostrar, reguaDoPeriodo } from "../kpis";
 import {
   COLUNAS_CONJUNTOS_CONVERSAO,
   COLUNAS_CRIATIVOS_CONVERSAO,
+  COLUNAS_CRIATIVOS_DESCOBERTA,
   TODAS_AS_COLUNAS,
   conjuntosPorId,
   cplAlvoDaMidia,
   criativosAgregados,
+  faixaDeSaude,
   rankingsDeCriativos,
   resumoDaMidia,
+  rotuloConjunto,
   tendenciaSemanalMidia,
   textoRegraSaude,
+  tituloDoCabecalho,
 } from "../midia";
+import { motorDeAcoes } from "../motor";
+import { dica } from "../dicionario";
+import { formatCurrency } from "../format";
 import { MIN_REUNIOES } from "../trust";
+import { CreativesTable } from "@/components/tables/creatives-table";
+import { ConjuntosTable } from "@/components/midia/conjuntos-table";
 import { buildSeedData } from "../data/seed";
 import type { AdDaily, Creative, DashboardData, Lead, Meta } from "../types";
 
@@ -318,7 +329,10 @@ describe("computeFatigue — regra explícita no período", () => {
     const cpl = [...anterior, ...janela("2026-10-08", 7, "x", { impressions: 1000, clicks: 10, reach: 800, spend: 50, leads: 1 })];
     const f2 = computeFatigue(cpl, { fim: "2026-10-08" });
     expect(f2.level).toBe("fadigado");
-    expect(f2.reason).toMatch(/CPL 7 d R\$ 50,00 vs R\$ 25,00/);
+    // O CPL da janela é o do Pixel e o motivo diz isso — nunca "CPL 7 d" cru,
+    // que o leitor compararia com o "CPL (painel)" da coluna ao lado.
+    expect(f2.reason).toMatch(/CPL Meta \(Pixel\) 7 d R\$ 50,00 vs R\$ 25,00/);
+    expect(f2.reason.replace(/CPL Meta \(Pixel\) 7 d/g, "")).not.toMatch(/CPL 7 d/);
 
     // S13: gasto sem NENHUMA conversão na janela recente é CPL sem teto — a regra dispara.
     const zero = [...anterior, ...janela("2026-10-08", 7, "x", { impressions: 1000, clicks: 10, reach: 800, spend: 50, leads: 0 })];
@@ -339,11 +353,26 @@ describe("computeFatigue — regra explícita no período", () => {
 
   it("as janelas terminam no fim do PERÍODO, não no último dia do anúncio", () => {
     const rows = [...janela("2026-09-24", 7, "x", { impressions: 1000, clicks: 20 }), ...janela("2026-10-01", 7, "x", { impressions: 1000, clicks: 10, reach: 400 })];
-    // Olhando até 01/10 o anúncio está fadigando; olhando até 08/10 a janela recente está vazia.
+    // Olhando até 01/10 o anúncio está fadigando; olhando até 08/10 a janela
+    // recente está vazia — e isso é "parado" (pausado), não "novo".
     expect(computeFatigue(rows, { fim: "2026-10-01" }).level).toBe("fadigado");
-    expect(computeFatigue(rows, { fim: "2026-10-08" }).level).toBe("novo");
+    expect(computeFatigue(rows, { fim: "2026-10-08" }).level).toBe("parado");
     // Sem `fim`, vale a última data das linhas (compatível com o chamador antigo).
     expect(computeFatigue(rows).level).toBe("fadigado");
+  });
+
+  it("parado = nenhuma impressão na janela recente com veiculação antes dela, com o motivo e a data; sem histórico continua novo", () => {
+    const rows = janela("2026-08-15", 14, "x", { impressions: 1000, clicks: 20 });
+    const f = computeFatigue(rows, { fim: "2026-10-08" });
+    expect(f.level).toBe("parado");
+    expect(f.reason).toBe("sem veiculação nos últimos 7 dias (02/10–08/10); última impressão em 15/08");
+    expect(f.janelas?.recente.impressions).toBe(0);
+    // Linhas só DEPOIS do fim (período no passado) não são "parado": não há o que julgar.
+    expect(computeFatigue(rows, { fim: "2026-08-01" }).level).toBe("novo");
+    // Linha sem impressão antes da janela (gasto zero, pausado desde sempre) também não.
+    expect(computeFatigue(janela("2026-08-15", 3, "x", { impressions: 0 }), { fim: "2026-10-08" }).level).toBe("novo");
+    // "Sem resultado" vem antes: gastou no período e não trouxe lead, parado ou não.
+    expect(computeFatigue(rows, { fim: "2026-10-08", semResultado: { gastoPeriodo: 120, leadsPainel: 0, cplAlvo: 50 } }).level).toBe("sem-resultado");
   });
 
   it("sem resultado = gasto ≥ 2 × CPL alvo com 0 leads do painel (só com alvo)", () => {
@@ -474,5 +503,266 @@ describe("a página inteira sobre o dataset de exemplo", () => {
       expect(tendenciaSemanalMidia(data, { fim: range?.to ?? hoje, hoje, kpis: { cobertura } })).toHaveLength(12);
       expect(textoRegraSaude(alvo)).toMatch(/Fadigando/);
     }
+  });
+});
+
+// ---------------------------------------------------------------- revisão da Fase 6 (6.3)
+
+const rodarMotor = (data: DashboardData) =>
+  motorDeAcoes({ data, range: PERIODO, kpis: kpisDe(data), eventos: [], agora: AGORA, hoje: HOJE, cobertura: COBERTURA });
+
+/** Reunião agendada no período (pela data do agendamento). */
+const agendou = { status: "agendado" as const, bookedAt: "2026-10-05T12:00:00.000Z", meetingFor: "2026-10-12T12:00:00.000Z" };
+
+/** Conjuntos (por id) e criativos da mesma tela, para comparar o mesmo fato. */
+function asDuasTabelas(data: DashboardData) {
+  const conjuntos = conjuntosPorId(data, PERIODO, { custoPorReuniaoExibivel: true }).conversao.flatMap((c) => c.conjuntos ?? []);
+  const criativos = criativosAgregados(data, PERIODO, { fim: PERIODO.to, cplAlvo: null, custoPorReuniaoExibivel: true }).conversao;
+  return { conjuntos, criativos };
+}
+
+describe("uma regra só para atribuir REUNIÃO: só com id (conjuntos, criativos e motor)", () => {
+  it("reunião de lead que chegou só com o NOME único do anúncio não entra no conjunto nem no criativo; o lead entra nos dois", () => {
+    const data = cenario();
+    // Três leads antigos (antes do {{ad.id}} no link): só o nome "Anúncio B", que é único.
+    for (let i = 0; i < 3; i++) data.leads.push(lead("2026-10-03", { utmContent: "Anúncio B", ...agendou }));
+    const { conjuntos, criativos } = asDuasTabelas(data);
+    const lookalike = conjuntos.find((c) => c.adsetId === "801")!;
+    const cr2 = criativos.find((c) => c.chave === "cr-2")!;
+    // O lead vale por nome único — nas duas tabelas.
+    expect(lookalike.leadsPainel).toBe(7);
+    expect(cr2.leadsPainel).toBe(7);
+    // A reunião NÃO: "3 e R$ 233" no conjunto contra "0 e —" no criativo era o furo.
+    expect(lookalike.agendadas).toBe(0);
+    expect(lookalike.custoPorAgendada).toBeNull();
+    expect(cr2.agendadas).toBe(0);
+    expect(cr2.custoPorAgendada).toBeNull();
+    // creativePerformance (o que o motor lê) e adsetPerformance seguem a mesma regra.
+    const perf = creativePerformance(data, PERIODO).find((c) => c.adId === "100002")!;
+    expect(perf.leadsPainel).toBe(7);
+    expect(perf.meetings).toBe(0);
+    expect(adsetPerformance(data, PERIODO).find((a) => a.adset === "Lookalike")!.meetings).toBe(0);
+
+    // Com o id do anúncio, a reunião entra — e é o mesmo número nas duas tabelas.
+    data.leads.push(lead("2026-10-03", { adId: "100002", ...agendou }));
+    const depois = asDuasTabelas(data);
+    expect(depois.conjuntos.find((c) => c.adsetId === "801")!.agendadas).toBe(1);
+    expect(depois.criativos.find((c) => c.chave === "cr-2")!.agendadas).toBe(1);
+    expect(creativePerformance(data, PERIODO).find((c) => c.adId === "100002")!.meetings).toBe(1);
+    // Cada criativo roda num conjunto só: a soma das agendadas bate.
+    expect(depois.conjuntos.reduce((s, c) => s + c.agendadas, 0)).toBe(depois.criativos.reduce((s, c) => s + c.agendadas, 0));
+  });
+
+  it("M6 só escala com 3 reuniões POR ID — a reunião por nome não completa a amostra que a tabela não mostra", () => {
+    const data = cenario();
+    const m6 = rodarMotor(data).find((a) => a.regra === "M6");
+    expect(m6).toMatchObject({ id: "M6:100001" });
+    expect(m6!.detalhe).toMatch(/^3 reuniões/);
+
+    // Uma das três reuniões chega só com o nome (único) do anúncio A.
+    const porNome = cenario();
+    const idx = porNome.leads.findIndex((l) => l.status === "agendado");
+    porNome.leads[idx] = { ...porNome.leads[idx], adId: undefined, adsetId: undefined, campaignId: undefined, utmContent: "Anúncio A" };
+    const kp = kpisDe(porNome);
+    // A conta continua com 3 reuniões e custo exibível: quem cala o M6 é a regra da linha.
+    expect(kp.reunioesConversao.valor).toBe(3);
+    expect(custoExibivel(kp.custoPorReuniao)).toBe(true);
+    expect(creativePerformance(porNome, PERIODO).find((c) => c.adId === "100001")!.meetings).toBe(2);
+    const { conjuntos, criativos } = asDuasTabelas(porNome);
+    expect(criativos.find((c) => c.chave === "cr-1")!.agendadas).toBe(2);
+    expect(conjuntos.find((c) => c.adsetId === "800")!.agendadas).toBe(2);
+    expect(rodarMotor(porNome).find((a) => a.regra === "M6")).toBeUndefined();
+  });
+});
+
+describe("motor M2/M4 leem as linhas de /midia#conjuntos (por id, S20)", () => {
+  /** "Interesses" em duas campanhas: 801 (R$ 300) e 802 (R$ 900). */
+  const homonimos = (leads: Lead[], metas: Meta[] = []) =>
+    base({
+      creatives: [criativo("100001", "Anúncio A"), criativo("100002", "Anúncio B")],
+      adDaily: [
+        ad("2026-10-05", "100001", { campaign: "Campanha 1", campaignId: "901", adset: "Interesses", adsetId: "801", spend: 300 }),
+        ad("2026-10-05", "100002", { campaign: "Campanha 2", campaignId: "902", adset: "Interesses", adsetId: "802", spend: 900 }),
+      ],
+      leads,
+      metas,
+    });
+
+  it("M2 cita a linha mais cara da tabela, com o número que ela imprime — nunca a soma dos homônimos", () => {
+    const leads = [
+      ...Array.from({ length: 3 }, () => lead("2026-10-05", { adId: "100001", adsetId: "801", campaignId: "901", ...agendou })),
+      lead("2026-10-05", { adId: "100002", adsetId: "802", campaignId: "902", ...agendou }),
+    ];
+    const data = homonimos(leads, [meta("custo_por_reuniao", 168)]);
+    const m2 = rodarMotor(data).find((a) => a.regra === "M2")!;
+    expect(m2).toBeDefined();
+    // A linha que /midia#conjuntos mostra para a Campanha 1.
+    const linha = conjuntosPorId(data, PERIODO).conversao.flatMap((c) => c.conjuntos ?? []).find((c) => c.adsetId === "801")!;
+    expect(linha.custoPorAgendada).toBeCloseTo(100, 6);
+    expect(m2.id).toBe(`M2:${linha.chave}`);
+    expect(m2.detalhe).toContain(`“${rotuloConjunto(linha)}” (${formatCurrency(100)} por reunião, 3 reuniões)`);
+    expect(m2.detalhe).toContain("Campanha 1 › Interesses");
+    // Agrupado por NOME seria "Interesses" a R$ 300 com 4 reuniões — número que a tela não tem.
+    expect(m2.detalhe).not.toContain(`${formatCurrency(300)} por reunião`);
+    expect(m2.detalhe).not.toMatch(/4 reuniões\)/);
+    expect(m2.href).toBe("/midia#conjuntos");
+  });
+
+  it("M4 calcula a taxa de contato inválido por linha de conjunto: 40% numa, 0% na homônima (a união daria 20% e calaria)", () => {
+    const encerrado = { status: "sem_interesse" as const, lostAt: "2026-10-05T18:00:00.000Z" };
+    const leads = [
+      ...Array.from({ length: 10 }, (_, i) =>
+        lead("2026-10-05", {
+          adId: "100001",
+          adsetId: "801",
+          ...(i < 4 ? { status: "contato_invalido" as const, lostAt: "2026-10-05T18:00:00.000Z" } : encerrado),
+        }),
+      ),
+      ...Array.from({ length: 10 }, () => lead("2026-10-05", { adId: "100002", adsetId: "802", ...encerrado })),
+    ];
+    const data = homonimos(leads);
+    const m4 = rodarMotor(data).filter((a) => a.regra === "M4");
+    expect(m4).toHaveLength(1);
+    const linha = conjuntosPorId(data, PERIODO).conversao.flatMap((c) => c.conjuntos ?? []).find((c) => c.adsetId === "801")!;
+    expect(linha.pctContatoInvalido).toBeCloseTo(0.4, 6);
+    expect(m4[0].id).toBe(`M4:${linha.chave}`);
+    expect(m4[0].titulo).toMatch(/Conjunto “Campanha 1 › Interesses”: 40% de contatos inválidos/);
+    expect(m4[0].amostra).toEqual({ n: 10, minimo: 10 });
+  });
+});
+
+describe("a regra da Saúde no ⓘ do cabeçalho; o selo com o motivo", () => {
+  /** O que o React escreve num atributo. */
+  const attr = (t: string) => t.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/'/g, "&#x27;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const cabecalhos = (html: string) => html.match(/<th\b[^>]*>[\s\S]*?<\/th>/g) ?? [];
+
+  it("tituloDoCabecalho: Saúde = a régua; coluna com verbete = o dicionário; as demais, nada", () => {
+    const regra = textoRegraSaude({ alvo: 30, origem: "meta" });
+    const col = (key: string) => COLUNAS_CRIATIVOS_CONVERSAO.find((c) => c.key === key)!;
+    expect(tituloDoCabecalho(col("saude"), regra)).toBe(regra);
+    expect(tituloDoCabecalho(COLUNAS_CRIATIVOS_DESCOBERTA.find((c) => c.key === "saude")!, regra)).toBe(regra);
+    expect(tituloDoCabecalho(col("leadsPainel"), regra)).toBe(dica("leads"));
+    expect(tituloDoCabecalho(col("nome"), regra)).toBeUndefined();
+  });
+
+  it("a tabela de criativos põe a régua no <th> “Saúde” (uma vez) e o motivo no selo", () => {
+    const data = cenario();
+    const bloco = criativosAgregados(data, PERIODO, { fim: PERIODO.to, cplAlvo: 30 });
+    const regra = textoRegraSaude({ alvo: 30, origem: "meta" });
+    const html = renderToStaticMarkup(createElement(CreativesTable, { linhas: bloco.conversao, bucket: "conversao", regraSaude: regra }));
+    const saude = cabecalhos(html).find((th) => th.includes("Saúde"));
+    expect(saude).toContain(`title="${attr(regra)}"`);
+    // A régua aparece SÓ no cabeçalho (nenhum span por fora do selo a engolir).
+    expect(html.split(attr(regra)).length - 1).toBe(1);
+    // O selo de cada linha carrega o motivo dela.
+    for (const c of bloco.conversao) expect(html).toContain(`title="${attr(c.saude.reason)}"`);
+    // Cabeçalho com verbete do dicionário também ganha o ⓘ.
+    expect(cabecalhos(html).find((th) => th.includes("Leads (painel)"))).toContain(`title="${attr(dica("leads"))}"`);
+  });
+
+  it("a tabela de conjuntos põe o verbete do dicionário no <th>, não na célula", () => {
+    const html = renderToStaticMarkup(createElement(ConjuntosTable, { linhas: conjuntosPorId(cenario(), PERIODO).conversao, bucket: "conversao" }));
+    const leads = cabecalhos(html).find((th) => th.includes("Leads (painel)"));
+    expect(leads).toContain(`title="${attr(dica("leads"))}"`);
+    expect(html.split(`title="${attr(dica("leads"))}"`).length - 1).toBe(1);
+  });
+});
+
+describe("CPL da regra de fadiga = CPL Meta (Pixel) 7 d, com o rótulo", () => {
+  it("a dica diz que o CPL da janela é do Pixel, e nunca imprime “CPL 7 d” sem o rótulo", () => {
+    const regra = textoRegraSaude({ alvo: 30, origem: "meta" });
+    expect(regra).toContain("CPL Meta (Pixel) 7 d ≥ 120% do anterior");
+    expect(regra).toMatch(/gasto ÷ conversões do Pixel na janela — não é o CPL \(painel\)/);
+    expect(regra.replace(/CPL Meta \(Pixel\) 7 d/g, "")).not.toMatch(/CPL 7 d/);
+    // "Sem resultado" continua com leads do PAINEL, e diz isso.
+    expect(regra).toMatch(/0 leads do painel/);
+  });
+});
+
+describe("criativos homônimos: o rótulo diz QUAL (faixa, rankings e coluna Nome)", () => {
+  /** CTR 2% → 1% com frequência 2,5: fadigando. */
+  const fadigando = (adId: string, extra: Partial<AdDaily>) => [
+    ...dias("2026-10-01", 7, adId, { clicks: 20, ...extra }),
+    ...dias("2026-10-08", 7, adId, { clicks: 10, reach: 400, ...extra }),
+  ];
+
+  it("dois “Carrossel -” com criativos diferentes saem com o conjunto no nome, na faixa e no ranking", () => {
+    const data = base({
+      creatives: [criativo("100011", "Carrossel -", { creativeId: "880001" }), criativo("100012", "Carrossel -", { creativeId: "880002" })],
+      adDaily: [...fadigando("100011", {}), ...fadigando("100012", { adset: "Lookalike", adsetId: "801" })],
+      leads: [lead("2026-10-03", { adId: "100011" }), lead("2026-10-03", { adId: "100011" }), lead("2026-10-03", { adId: "100012" })],
+    });
+    const bloco = criativosAgregados(data, PERIODO, { fim: PERIODO.to, cplAlvo: null });
+    const nomes = bloco.conversao.map((c) => c.nome).sort();
+    expect(nomes).toEqual(["Carrossel - · Interesses 25-45", "Carrossel - · Lookalike"]);
+    const faixa = faixaDeSaude(bloco);
+    expect(faixa.fadigando?.rotulo).toBe("2 criativos fadigando:");
+    expect(faixa.fadigando?.texto).toContain("Carrossel - · Interesses 25-45");
+    expect(faixa.fadigando?.texto).toContain("Carrossel - · Lookalike");
+    expect(faixa.fadigando?.texto).not.toContain("Carrossel -, Carrossel -");
+    const r = rankingsDeCriativos(bloco.conversao);
+    expect(r.melhorCpl?.nome).toBe("Carrossel - · Interesses 25-45");
+    expect(r.maiorCtr?.nome).toMatch(/^Carrossel - · /);
+    // A coluna Nome imprime o mesmo rótulo.
+    const html = renderToStaticMarkup(createElement(CreativesTable, { linhas: bloco.conversao, bucket: "conversao", regraSaude: "regra" }));
+    expect(html).toContain(">Carrossel - · Interesses 25-45<");
+    expect(html).toContain(">Carrossel - · Lookalike<");
+  });
+
+  it("homônimos que rodam nos MESMOS conjuntos ganham o fim do creativeId; nome sem homônimo fica como está", () => {
+    const data = base({
+      creatives: [
+        criativo("100011", "Carrossel -", { creativeId: "880001" }),
+        criativo("100013", "Carrossel -", { creativeId: "880001" }),
+        criativo("100012", "Carrossel -", { creativeId: "880002" }),
+        criativo("100014", "Carrossel -", { creativeId: "880002" }),
+        criativo("100015", "Reel único", { creativeId: "880003" }),
+      ],
+      adDaily: [
+        ...dias("2026-10-08", 3, "100011"),
+        ...dias("2026-10-08", 3, "100013", { adset: "Lookalike", adsetId: "801" }),
+        ...dias("2026-10-08", 3, "100012", { spend: 40 }),
+        ...dias("2026-10-08", 3, "100014", { adset: "Lookalike", adsetId: "801", spend: 40 }),
+        ...dias("2026-10-08", 3, "100015", { spend: 10 }),
+      ],
+    });
+    const nomes = criativosAgregados(data, PERIODO, { fim: PERIODO.to, cplAlvo: null }).conversao.map((c) => c.nome);
+    expect(nomes).toEqual([
+      "Carrossel - · Interesses 25-45, Lookalike · 0001",
+      "Carrossel - · Interesses 25-45, Lookalike · 0002",
+      "Reel único",
+    ]);
+  });
+});
+
+describe("saúde na vista padrão (sem ?range=): as janelas terminam no fim do período, e pausado é “Parado”", () => {
+  it("com fim = hoje, o anúncio pausado há dois meses sai Parado (e fora da faixa), não julgado pelos últimos dias dele", () => {
+    const data = cenario();
+    // O anúncio B parou em agosto — e os últimos 14 dias DELE parecem fadiga.
+    data.adDaily = [
+      ...data.adDaily.filter((r) => r.adId !== "100002"),
+      ...dias("2026-08-07", 7, "100002", { adset: "Lookalike", adsetId: "801", clicks: 20 }),
+      ...dias("2026-08-14", 7, "100002", { adset: "Lookalike", adsetId: "801", clicks: 10, reach: 400 }),
+    ];
+    // Sem `fim` (o que a página passava com range = undefined): julgado pelos próprios dias.
+    const semFim = criativosAgregados(data, undefined, { cplAlvo: null });
+    expect(semFim.conversao.find((c) => c.chave === "cr-2")!.saude.level).toBe("fadigado");
+    expect(faixaDeSaude(semFim).fadigando?.texto).toContain("Anúncio B");
+
+    // Com o fim do período (hoje, na vista padrão): parado, com o motivo e a data.
+    const comFim = criativosAgregados(data, undefined, { fim: HOJE, cplAlvo: null });
+    const b = comFim.conversao.find((c) => c.chave === "cr-2")!;
+    expect(b.saude.level).toBe("parado");
+    expect(b.saude.reason).toBe("sem veiculação nos últimos 7 dias (02/10–08/10); última impressão em 14/08");
+    expect(faixaDeSaude(comFim).fadigando).toBeNull();
+    // O ativo continua julgado pela regra (frequência 2,5 com CTR estável = atenção).
+    const a = comFim.conversao.find((c) => c.chave === "cr-1")!;
+    expect(a.saude.level).toBe("atencao");
+    expect(a.saude.reason).toMatch(/com CTR estável/);
+    // O selo diz "Parado (sem veiculação)", não "Novo (amostra insuficiente)".
+    const html = renderToStaticMarkup(createElement(CreativesTable, { linhas: comFim.conversao, bucket: "conversao", regraSaude: "regra" }));
+    expect(html).toContain("Parado");
+    expect(html).toContain("(sem veiculação)");
+    expect(textoRegraSaude({ alvo: null, origem: null })).toMatch(/Parado = nenhuma impressão nos últimos 7 dias do período/);
   });
 });

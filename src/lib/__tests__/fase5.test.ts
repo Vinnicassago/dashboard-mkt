@@ -389,7 +389,8 @@ describe("motor v2 — cada regra dispara pelo seu gatilho, com dono e amostra",
     const m3 = regra(rodar(data), "M3")!;
     expect(m3.id).toBe("M3:100001");
     expect(m3.titulo).toMatch(/Renove a arte de “Anúncio A”/);
-    expect(m3.detalhe).toMatch(/CTR 5,0% vs 10,0% nos 7 d anteriores \(≤ 75%\) e CPL 7 d R\$ 25,00 vs R\$ 10,00/);
+    // O CPL da janela é o do Pixel (AdDaily.leads) e o motivo diz isso (Fase 6.3).
+    expect(m3.detalhe).toMatch(/CTR 5,0% vs 10,0% nos 7 d anteriores \(≤ 75%\) e CPL Meta \(Pixel\) 7 d R\$ 25,00 vs R\$ 10,00/);
   });
 
   it("M4: conjunto com mais de 25% de contatos inválidos em 10 leads ou mais", () => {
@@ -399,7 +400,8 @@ describe("motor v2 — cada regra dispara pelo seu gatilho, com dono e amostra",
     ];
     const data = base({ adDaily: [ad("2026-10-05", "100001", 100)], leads });
     const m4 = regra(rodar(data), "M4")!;
-    expect(m4.titulo).toMatch(/Conjunto “Conjunto A”: 33% de contatos inválidos — revisar formulário e segmentação/);
+    // A linha é a de /midia#conjuntos: "campanha › conjunto" (por id, S20).
+    expect(m4.titulo).toMatch(/Conjunto “Campanha › Conjunto A”: 33% de contatos inválidos — revisar formulário e segmentação/);
     expect(m4.amostra).toEqual({ n: 12, minimo: 10 });
   });
 

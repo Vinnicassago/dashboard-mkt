@@ -20,6 +20,7 @@ import {
   cplAlvoDaMidia,
   criativosAgregados,
   descobertaDaMidia,
+  faixaDeSaude,
   moedaOuTraco,
   rankingsDeCriativos,
   resumoDaMidia,
@@ -62,11 +63,16 @@ export default async function MidiaPage({ searchParams }: { searchParams: Promis
   const tendencia = tendenciaSemanalMidia(data, { fim, hoje, kpis: { brandRules, cobertura } });
   const conjuntos = conjuntosPorId(data, range, { custoPorReuniaoExibivel: cprExibivel });
   const cplAlvo = cplAlvoDaMidia(data, kp, fim);
-  const criativos = criativosAgregados(data, range, { fim: range?.to, cplAlvo: cplAlvo.alvo, custoPorReuniaoExibivel: cprExibivel });
+  // `fim` (e não `range?.to`): sem `?range=` a Mídia olha o histórico inteiro e
+  // as janelas da saúde têm de terminar HOJE — senão cada anúncio pausado seria
+  // julgado pelos seus próprios últimos 14 dias e sairia "Saudável" ou
+  // "Fadigando" ao lado dos ativos. Com o fim certo, pausado sai "Parado".
+  const criativos = criativosAgregados(data, range, { fim, cplAlvo: cplAlvo.alvo, custoPorReuniaoExibivel: cprExibivel });
   const regraSaude = textoRegraSaude(cplAlvo);
   const ranking = rankingsDeCriativos(criativos.conversao);
-  const fadigados = [...criativos.conversao, ...criativos.descoberta].filter((c) => c.saude.level === "fadigado");
-  const semResultado = criativos.conversao.filter((c) => c.saude.level === "sem-resultado");
+  // A faixa cita cada criativo pelo rótulo desambiguado (dois "Carrossel -" não
+  // saem iguais) — o texto inteiro sai de `lib/midia.ts`.
+  const faixa = faixaDeSaude(criativos);
   const descoberta = descobertaDaMidia(kp);
 
   const serie = dailySeries(data, range, cobertura);
@@ -130,22 +136,17 @@ export default async function MidiaPage({ searchParams }: { searchParams: Promis
           </p>
         </div>
 
-        {fadigados.length > 0 || semResultado.length > 0 ? (
+        {faixa.fadigando || faixa.semResultado ? (
           <div className="flex items-start gap-2.5 rounded-xl border border-[var(--status-fora)]/30 bg-[var(--status-fora)]/[0.04] px-4 py-3 text-sm">
             <AlertTriangle className="mt-0.5 size-4 shrink-0 text-[var(--status-fora-text)]" />
             <div className="space-y-0.5 text-muted-foreground">
-              {fadigados.length > 0 ? (
-                <p>
-                  <span className="font-medium text-foreground">{fadigados.length === 1 ? "1 criativo fadigando:" : `${fadigados.length} criativos fadigando:`}</span>{" "}
-                  {fadigados.map((c) => c.nome).join(", ")}. Renove a arte antes que o custo dispare.
-                </p>
-              ) : null}
-              {semResultado.length > 0 ? (
-                <p>
-                  <span className="font-medium text-foreground">{semResultado.length === 1 ? "1 criativo sem resultado:" : `${semResultado.length} criativos sem resultado:`}</span>{" "}
-                  {semResultado.map((c) => `${c.nome} (${formatCurrency0(c.spend)})`).join(", ")} — gasto de pelo menos 2 × o CPL alvo e nenhum lead do painel.
-                </p>
-              ) : null}
+              {[faixa.fadigando, faixa.semResultado].map((f) =>
+                f ? (
+                  <p key={f.rotulo}>
+                    <span className="font-medium text-foreground">{f.rotulo}</span> {f.texto}
+                  </p>
+                ) : null,
+              )}
             </div>
           </div>
         ) : null}
@@ -162,7 +163,9 @@ export default async function MidiaPage({ searchParams }: { searchParams: Promis
                 </p>
                 {ranking.melhorCpl ? (
                   <>
-                    <p className="truncate font-semibold">{ranking.melhorCpl.nome}</p>
+                    <p className="truncate font-semibold" title={ranking.melhorCpl.nome}>
+                      {ranking.melhorCpl.nome}
+                    </p>
                     <p className="text-sm text-muted-foreground">
                       {moedaOuTraco(ranking.melhorCpl.cplPainel)} por lead · {formatInt(ranking.melhorCpl.agendadas)}{" "}
                       {ranking.melhorCpl.agendadas === 1 ? "agendada" : "agendadas"}
@@ -186,7 +189,9 @@ export default async function MidiaPage({ searchParams }: { searchParams: Promis
                 <p className="text-xs text-muted-foreground">Maior CTR</p>
                 {ranking.maiorCtr ? (
                   <>
-                    <p className="truncate font-semibold">{ranking.maiorCtr.nome}</p>
+                    <p className="truncate font-semibold" title={ranking.maiorCtr.nome}>
+                      {ranking.maiorCtr.nome}
+                    </p>
                     <p className="text-sm text-muted-foreground">{formatPercent(ranking.maiorCtr.ctr)} de cliques</p>
                     <p className="text-xs text-muted-foreground">{amostraDoRanking(ranking.maiorCtr)}</p>
                   </>
@@ -209,7 +214,7 @@ export default async function MidiaPage({ searchParams }: { searchParams: Promis
           <CardHeader>
             <CardTitle>Criativos de conversão</CardTitle>
             <CardDescription>
-              Leads e reuniões só pelo id do anúncio (o link padrão traz “{"{{ad.id}}"}”); nome que existe em mais de um anúncio aparece como atribuição ambígua e não entra em ninguém. Passe o mouse em “Saúde” para ver a regra.
+              Reuniões só pelo id do anúncio (o link padrão traz “{"{{ad.id}}"}”); leads também por nome único de anúncio. Nome que existe em mais de um anúncio aparece como atribuição ambígua e não entra em ninguém. Passe o mouse no cabeçalho “Saúde” para ver a regra; no selo, o motivo.
             </CardDescription>
           </CardHeader>
           <CardContent>

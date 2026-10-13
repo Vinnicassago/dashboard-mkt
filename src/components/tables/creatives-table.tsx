@@ -2,7 +2,6 @@
 
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { Badge } from "@/components/ui/badge";
-import { dica } from "@/lib/dicionario";
 import type { FatigueLevel, ObjectiveBucket } from "@/lib/metrics";
 import { MIN_REUNIOES } from "@/lib/trust";
 import { formatCurrency, formatCurrency0, formatDateShort, formatDecimal, formatInt, formatPercent } from "@/lib/format";
@@ -11,6 +10,7 @@ import {
   COLUNAS_CRIATIVOS_DESCOBERTA,
   moedaOuTraco,
   pctOuTraco,
+  tituloDoCabecalho,
   type ColunaMidia,
   type LinhaCriativo,
 } from "@/lib/midia";
@@ -19,19 +19,23 @@ import {
  * Criativos agregados por `creativeId` (um criativo roda em vários anúncios),
  * com miniatura, e o detalhe por anúncio/conjunto ao expandir. As colunas
  * primárias cabem no card a 1366 px; CTR, CPC, CPM, Pixel e retenção vão para
- * a linha expandida (B13). A Saúde segue a regra explícita de `computeFatigue`,
- * visível no ⓘ do cabeçalho (`regraSaude`) e no título de cada selo (o motivo).
+ * a linha expandida (B13). A Saúde segue a regra explícita de `computeFatigue`:
+ * a REGRA fica no ⓘ do cabeçalho (`headerTitle` = `regraSaude`) e na linha
+ * expandida; o selo de cada linha carrega só o MOTIVO — um `title` em volta do
+ * selo seria engolido pelo título mais interno e a regra não apareceria nunca.
  */
 
 const FORMATO: Record<LinhaCriativo["formato"], string> = { video: "Vídeo", carrossel: "Carrossel", imagem: "Imagem" };
 
 // Cor SEMPRE com texto (CLAUDE.md): os tokens --status-* e o rótulo ao lado.
-const SAUDE: Record<FatigueLevel, { ponto: string; texto: string; rotulo: string; ordem: number }> = {
-  "sem-resultado": { ponto: "var(--status-fora)", texto: "text-[var(--status-fora-text)]", rotulo: "Sem resultado", ordem: 4 },
-  fadigado: { ponto: "var(--status-fora)", texto: "text-[var(--status-fora-text)]", rotulo: "Fadigando", ordem: 3 },
-  atencao: { ponto: "var(--status-perto)", texto: "text-[var(--status-perto-text)]", rotulo: "Atenção", ordem: 2 },
-  saudavel: { ponto: "var(--status-ok)", texto: "text-[var(--status-ok-text)]", rotulo: "Saudável", ordem: 1 },
-  novo: { ponto: "var(--muted)", texto: "text-muted-foreground", rotulo: "Novo", ordem: 0 },
+const SAUDE: Record<FatigueLevel, { ponto: string; texto: string; rotulo: string; ordem: number; sufixo?: string }> = {
+  "sem-resultado": { ponto: "var(--status-fora)", texto: "text-[var(--status-fora-text)]", rotulo: "Sem resultado", ordem: 5 },
+  fadigado: { ponto: "var(--status-fora)", texto: "text-[var(--status-fora-text)]", rotulo: "Fadigando", ordem: 4 },
+  atencao: { ponto: "var(--status-perto)", texto: "text-[var(--status-perto-text)]", rotulo: "Atenção", ordem: 3 },
+  saudavel: { ponto: "var(--status-ok)", texto: "text-[var(--status-ok-text)]", rotulo: "Saudável", ordem: 2 },
+  novo: { ponto: "var(--muted)", texto: "text-muted-foreground", rotulo: "Novo", ordem: 1, sufixo: "(amostra insuficiente)" },
+  // Pausado: não é "Novo" — teve veiculação e não tem mais (o motivo diz desde quando).
+  parado: { ponto: "var(--muted)", texto: "text-muted-foreground", rotulo: "Parado", ordem: 0, sufixo: "(sem veiculação)" },
 };
 
 export function SaudeBadge({ saude }: { saude: LinhaCriativo["saude"] }) {
@@ -40,7 +44,7 @@ export function SaudeBadge({ saude }: { saude: LinhaCriativo["saude"] }) {
     <span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-sm font-medium ${s.texto}`} title={saude.reason}>
       <span aria-hidden className="size-2 shrink-0 rounded-full" style={{ background: s.ponto }} />
       {s.rotulo}
-      {saude.level === "novo" ? <span className="text-xs font-normal text-muted-foreground">(amostra insuficiente)</span> : null}
+      {s.sufixo ? <span className="text-xs font-normal text-muted-foreground">{s.sufixo}</span> : null}
     </span>
   );
 }
@@ -133,27 +137,27 @@ function colunas(defs: ColunaMidia[], regraSaude: string): Column<LinhaCriativo>
     .map((d) => ({
       key: d.key,
       header: d.header,
+      // O ⓘ no CABEÇALHO: a regra da saúde ou a definição do dicionário. A
+      // célula não ganha `title` por cima — o selo já traz o motivo, e o custo
+      // por agendada traz o "n de 3"; um título externo seria engolido por eles.
+      headerTitle: tituloDoCabecalho(d, regraSaude),
       sortable: true,
       // Cabeçalho quebra linha e célula mais estreita: cabe a 1366 px (B13).
       headerClassName: "whitespace-normal leading-tight",
       ...RENDER[d.key],
       className: `px-2 ${RENDER[d.key].className ?? ""}`.trim(),
-      render: (r: LinhaCriativo) => {
-        const titulo = d.key === "saude" ? regraSaude : d.dica ? dica(d.dica) : undefined;
-        return titulo ? <span title={titulo}>{RENDER[d.key].render(r)}</span> : RENDER[d.key].render(r);
-      },
     }));
 }
 
-/** As colunas secundárias, na linha expandida, mais as janelas da saúde. */
-function Detalhe({ r, defs }: { r: LinhaCriativo; defs: ColunaMidia[] }) {
+/** As colunas secundárias, na linha expandida, mais as janelas e a regra da saúde. */
+function Detalhe({ r, defs, regraSaude }: { r: LinhaCriativo; defs: ColunaMidia[]; regraSaude: string }) {
   const secundarias = defs.filter((d) => d.secundaria);
   const j = r.saude.janelas;
   return (
     <div className="space-y-2 text-xs">
       <dl className="flex flex-wrap gap-x-6 gap-y-1">
         {secundarias.map((d) => (
-          <div key={d.key} className="flex items-baseline gap-1.5" title={d.dica ? dica(d.dica) : undefined}>
+          <div key={d.key} className="flex items-baseline gap-1.5" title={tituloDoCabecalho(d)}>
             <dt className="text-muted-foreground">{d.header}</dt>
             <dd className="tabular font-medium text-foreground">{RENDER[d.key].render(r)}</dd>
           </div>
@@ -170,6 +174,10 @@ function Detalhe({ r, defs }: { r: LinhaCriativo; defs: ColunaMidia[] }) {
           </>
         ) : null}
       </p>
+      {/* A régua inteira, para quem não passa o mouse no cabeçalho (B17). */}
+      <p className="text-muted-foreground">
+        <span className="font-medium text-foreground">Regra:</span> {regraSaude}
+      </p>
     </div>
   );
 }
@@ -181,7 +189,7 @@ export function CreativesTable({
 }: {
   linhas: LinhaCriativo[];
   bucket: ObjectiveBucket;
-  /** A regra da saúde em palavras (`textoRegraSaude`) — vai no ⓘ do cabeçalho. */
+  /** A regra da saúde em palavras (`textoRegraSaude`) — o ⓘ do cabeçalho “Saúde” e a linha expandida. */
   regraSaude: string;
 }) {
   const defs = bucket === "conversao" ? COLUNAS_CRIATIVOS_CONVERSAO : COLUNAS_CRIATIVOS_DESCOBERTA;
@@ -193,7 +201,7 @@ export function CreativesTable({
       initialSortDir="desc"
       rowKey={(r) => r.chave}
       filhas={(r) => (r.nivel === "criativo" && (r.anunciosDetalhe?.length ?? 0) > 1 ? r.anunciosDetalhe : undefined)}
-      detalhe={(r) => <Detalhe r={r} defs={defs} />}
+      detalhe={(r) => <Detalhe r={r} defs={defs} regraSaude={regraSaude} />}
       emptyTitle="Sem criativos no período"
       emptyHint="Sincronize ou importe o relatório de anúncios em Configurações → Importar."
     />

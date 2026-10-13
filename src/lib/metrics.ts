@@ -722,20 +722,26 @@ export function followerSeries(rows: IgAccountDaily[], range?: DateRange): Follo
 
 /**
  * `sem-resultado` (B17): gastou e não trouxe lead — não é fadiga, é criativo que
- * nunca funcionou. O motor lê só `fadigado`; os outros níveis são da tela.
+ * nunca funcionou. `parado`: tinha veiculação antes e não teve nenhuma impressão
+ * na janela recente — anúncio pausado, não "amostra insuficiente". O motor lê
+ * só `fadigado`; os outros níveis são da tela.
  */
-export type FatigueLevel = "novo" | "saudavel" | "atencao" | "fadigado" | "sem-resultado";
+export type FatigueLevel = "novo" | "parado" | "saudavel" | "atencao" | "fadigado" | "sem-resultado";
 
-/** Uma das duas janelas de 7 dias que a regra compara. */
+/**
+ * Uma das duas janelas de 7 dias que a regra compara. O CPL daqui é o **CPL
+ * Meta (Pixel) 7 d**: gasto ÷ conversões do Pixel (`AdDaily.leads`), nunca os
+ * leads do painel — o texto do motivo e a dica dizem isso com todas as letras.
+ */
 export interface JanelaFadiga {
   from: string;
   to: string;
   impressions: number;
   spend: number;
-  /** Conversões do Pixel na janela (o denominador do CPL 7 d). */
+  /** Conversões do Pixel na janela (o denominador do CPL Meta (Pixel) 7 d). */
   leads: number;
   ctr: number;
-  /** Gasto ÷ conversões do Pixel; `Infinity` = gastou sem conversão; `null` = nem gasto. */
+  /** CPL Meta (Pixel) 7 d: gasto ÷ conversões do Pixel; `Infinity` = gastou sem conversão; `null` = nem gasto. */
   cpl: number | null;
   frequency: number;
 }
@@ -764,7 +770,7 @@ export const REGRA_FADIGA = {
   quedaCtr: 0.75,
   /** …E frequência ≥ 2… */
   frequenciaAlta: 2,
-  /** …OU CPL 7 d ≥ 120% do anterior. */
+  /** …OU CPL Meta (Pixel) 7 d ≥ 120% do anterior (conversões do Pixel, não leads do painel). */
   altaCpl: 1.2,
   /** Sem resultado (só conversão): gasto do período ≥ 2 × CPL alvo com 0 leads do painel. */
   multiploSemResultado: 2,
@@ -814,11 +820,15 @@ function janelaFadiga(rows: AdDaily[], from: string, to: string): JanelaFadiga {
  * PERÍODO:
  *
  *   Fadigando  = CTR dos últimos 7 dias ≤ 75% do CTR dos 7 dias anteriores
- *                E (frequência ≥ 2 OU CPL 7 d ≥ 120% do anterior),
+ *                E (frequência ≥ 2 OU CPL Meta (Pixel) 7 d ≥ 120% do anterior),
  *                com ≥ 1.000 impressões em CADA janela — senão "amostra
- *                insuficiente" (nível `novo`).
+ *                insuficiente" (nível `novo`). O CPL da janela é o do PIXEL
+ *                (`AdDaily.leads`), rotulado assim no motivo: não é o "CPL
+ *                (painel)" da coluna ao lado, e sem Pixel esse lado nunca dispara.
  *   Atenção    = só um dos lados da regra (CTR caiu sem confirmação, ou
  *                frequência/CPL subiram sem queda de CTR).
+ *   Parado     = nenhuma impressão na janela recente, com linhas antes dela:
+ *                anúncio pausado, julgado como tal — nunca "Novo".
  *   Sem resultado (só conversão, via `opts.semResultado`) = gasto do período
  *                ≥ 2 × CPL alvo E 0 leads do painel.
  *
@@ -827,6 +837,7 @@ function janelaFadiga(rows: AdDaily[], from: string, to: string): JanelaFadiga {
  */
 export function computeFatigue(rows: AdDaily[], opts: OpcoesFadiga = {}): Fatigue {
   const { janelaDias, impressoesMinimas, quedaCtr, frequenciaAlta, altaCpl, multiploSemResultado } = REGRA_FADIGA;
+  const formatDia = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
 
   // 1. Sem resultado: gastou o que dois leads custariam e não trouxe nenhum.
   const sr = opts.semResultado;
@@ -855,7 +866,24 @@ export function computeFatigue(rows: AdDaily[], opts: OpcoesFadiga = {}): Fatigu
   const anterior = janelaFadiga(rows, dia(-(2 * janelaDias - 1)), dia(-janelaDias));
   const janelas = { recente, anterior };
 
-  // 2. Piso absoluto: sem 1.000 impressões em cada janela não há leitura.
+  // 2. Parado: veiculou antes e não teve impressão nenhuma na janela recente.
+  //    Sem isto, um anúncio pausado há dois meses sairia "Novo (amostra
+  //    insuficiente)" ao lado dos ativos — e a faixa de fadiga o listaria.
+  const ultimaAntes = rows
+    .filter((r) => r.date < recente.from && r.impressions > 0)
+    .map((r) => r.date)
+    .sort()
+    .at(-1);
+  if (recente.impressions === 0 && ultimaAntes) {
+    return {
+      level: "parado",
+      frequency: 0,
+      reason: `sem veiculação nos últimos ${janelaDias} dias (${formatDia(recente.from)}–${formatDia(fim)}); última impressão em ${formatDia(ultimaAntes)}`,
+      janelas,
+    };
+  }
+
+  // 3. Piso absoluto: sem 1.000 impressões em cada janela não há leitura.
   if (recente.impressions < impressoesMinimas || anterior.impressions < impressoesMinimas) {
     return {
       level: "novo",
@@ -865,7 +893,7 @@ export function computeFatigue(rows: AdDaily[], opts: OpcoesFadiga = {}): Fatigu
     };
   }
 
-  // 3. A regra.
+  // 4. A regra.
   const ctrCaiu = anterior.ctr > 0 && recente.ctr <= anterior.ctr * quedaCtr;
   const freqAlta = recente.frequency >= frequenciaAlta;
   const cplSubiu =
@@ -875,9 +903,11 @@ export function computeFatigue(rows: AdDaily[], opts: OpcoesFadiga = {}): Fatigu
     recente.cpl >= anterior.cpl * altaCpl;
   const ctrTexto = `CTR ${formatPct1(recente.ctr)} vs ${formatPct1(anterior.ctr)} nos 7 d anteriores`;
   const freqTexto = `frequência ${formatFreq(recente.frequency)}`;
+  // O CPL da janela é o do Pixel — rotulado como na coluna "CPL Meta (Pixel)",
+  // para ninguém o comparar com o "CPL (painel)" da coluna ao lado.
   const cplTexto =
     cplSubiu && anterior.cpl != null && recente.cpl != null
-      ? `CPL 7 d ${Number.isFinite(recente.cpl) ? formatReais(recente.cpl) : "sem conversão"} vs ${formatReais(anterior.cpl)}`
+      ? `CPL Meta (Pixel) 7 d ${Number.isFinite(recente.cpl) ? formatReais(recente.cpl) : "sem conversão"} vs ${formatReais(anterior.cpl)}`
       : "";
 
   if (ctrCaiu && (freqAlta || cplSubiu)) {
@@ -989,15 +1019,19 @@ export function creativePerformance(
   }
 
   // Atribui leads, reuniões, clientes e receita ao anúncio pela junção ÚNICA
-  // (atribuicao.ts). Reuniões pela data do agendamento, como o resto do painel.
+  // (atribuicao.ts). Reuniões pela data do agendamento, como o resto do painel,
+  // e SÓ com id de anúncio (`lead.adId` ou id no utm_content — relatório §7.3):
+  // é a mesma regra de `conjuntosPorId` e `criativosAgregados`, para a reunião
+  // que o motor cita (M6) ser a que a tabela de criativos mostra. Leads seguem
+  // valendo por nome único.
   const atribuir = atribuidor(data.creatives);
   const meetingsByAd = new Map<string, number>();
   const leadsByAd = new Map<string, number>();
   const clientsByAd = new Map<string, number>();
   const revenueByAd = new Map<string, number>();
   for (const l of reunioesNoPeriodo(data.leads, range)) {
-    const key = atribuir(l).adId;
-    if (key) meetingsByAd.set(key, (meetingsByAd.get(key) ?? 0) + 1);
+    const a = atribuir(l);
+    if (a.tipo === "id" && a.adId) meetingsByAd.set(a.adId, (meetingsByAd.get(a.adId) ?? 0) + 1);
   }
   for (const l of leads) {
     const key = atribuir(l).adId;
@@ -1103,16 +1137,19 @@ export function adsetPerformance(data: DashboardData, range?: DateRange): AdsetP
   }
 
   const atribuir = atribuidor(data.creatives);
-  const conjuntoDe = (l: Lead) => {
-    const adId = atribuir(l).adId;
-    return adId ? adToAdset.get(adId) : undefined;
+  const conjuntoDe = (l: Lead, soPorId = false) => {
+    const a = atribuir(l);
+    if (!a.adId || (soPorId && a.tipo !== "id")) return undefined;
+    return adToAdset.get(a.adId);
   };
   const meetingsByAdset = new Map<string, number>();
   const leadsByAdset = new Map<string, number>();
   const clientsByAdset = new Map<string, number>();
   const revenueByAdset = new Map<string, number>();
+  // Reunião só com id de anúncio (a regra única de `conjuntosPorId`); lead
+  // continua valendo por nome único.
   for (const l of reunioesNoPeriodo(data.leads, range)) {
-    const adset = conjuntoDe(l);
+    const adset = conjuntoDe(l, true);
     if (adset) meetingsByAdset.set(adset, (meetingsByAdset.get(adset) ?? 0) + 1);
   }
   for (const l of leads) {
