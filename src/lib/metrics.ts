@@ -705,17 +705,32 @@ export interface FollowerPoint {
   views: number;
 }
 
+/**
+ * Série diária do total e da variação. `followers` é o total no FIM do dia e
+ * 0 é desconhecido (snapshot manual sem o campo): a variação de um dia é contra
+ * o último total CONHECIDO, e o dia sem total varia 0 — senão um campo em branco
+ * virava "−1.240" num dia e "+1.250" no seguinte. O 1º ponto do período varia
+ * contra a véspera (a última linha antes dele com total); sem ela, contra o
+ * próprio líquido do dia quando há os dois lados (ganhos − perdas); sem nada,
+ * 0. É a regra de `resumoSeguidores` (lib/conteudo.ts): a soma da variação é o
+ * líquido do card — zerar o 1º dia tirava da soma um dia que a nota "ganhos e
+ * perdas" inclui.
+ */
 export function followerSeries(rows: IgAccountDaily[], range?: DateRange): FollowerPoint[] {
-  const sorted = [...rows]
-    .filter((r) => inRange(r.date, range))
-    .sort((a, b) => a.date.localeCompare(b.date));
-  return sorted.map((r, i) => ({
-    date: r.date,
-    followers: r.followers,
-    gain: i === 0 ? 0 : r.followers - sorted[i - 1].followers,
-    reach: r.reach,
-    views: r.views,
-  }));
+  const todas = [...rows].sort((a, b) => a.date.localeCompare(b.date));
+  const sorted = todas.filter((r) => inRange(r.date, range));
+  let ultimo: number | undefined = range
+    ? todas.filter((r) => r.date < range.from && r.followers > 0).at(-1)?.followers
+    : undefined;
+  return sorted.map((r) => {
+    let gain = 0;
+    if (r.followers > 0) {
+      if (ultimo !== undefined) gain = r.followers - ultimo;
+      else if (r.followsDay != null && r.unfollowsDay != null) gain = r.followsDay - r.unfollowsDay;
+      ultimo = r.followers;
+    }
+    return { date: r.date, followers: r.followers, gain, reach: r.reach, views: r.views };
+  });
 }
 
 // ---- fadiga de criativo --------------------------------------------
@@ -2145,12 +2160,17 @@ export function actualForGoal(goal: Goal, data: DashboardData, range?: DateRange
  * seguidores. Mostra ONDE o perfil vaza — muito alcance e pouca visita = gancho
  * fraco; muita visita e poucos seguidores = feed/prova social fraca. (A perda
  * visita→clique no link já aparece como "Taxa de clique no link".)
+ *
+ * O alcance é o da CONTA, pago + orgânico — o rótulo diz isso (B11). A tela de
+ * Conteúdo usa `funilDoPerfil` (lib/conteudo.ts), cujo 3º degrau é o líquido
+ * de `resumoSeguidores` (os mesmos dias da nota do card); `netNew` deixa o 1º
+ * dia do período de fora.
  */
 export function buildOrganicFunnel(rows: IgAccountDaily[], range?: DateRange): FunnelStage[] {
   const t = igAccountTotals(rows, range);
   const netNew = Math.max(0, t.netNew);
   return [
-    { key: "alcance", label: "Alcance", value: t.reach },
+    { key: "alcance", label: "Alcance da conta (pago + orgânico)", value: t.reach },
     { key: "visitas", label: "Visitas ao perfil", value: t.profileViews, fromPrev: div(t.profileViews, t.reach) },
     { key: "seguidores", label: "Novos seguidores", value: netNew, fromPrev: div(netNew, t.profileViews) },
   ];

@@ -12,7 +12,13 @@
 import { diaBrt } from "./horario-util";
 import { formatDateShort, formatInt, formatIntComSinal } from "./format";
 import { DICIONARIO, dica, type Definicao } from "./dicionario";
-import { inRange, postPerformance, type DateRange } from "./metrics";
+import {
+  igAccountTotals,
+  inRange,
+  postPerformance,
+  type DateRange,
+  type FunnelStage,
+} from "./metrics";
 import { statusContraMeta, type AvaliacaoMeta } from "./metas";
 import type { Creative, Goal, IgAccountDaily, IgMediaType, IgPost } from "./types";
 
@@ -155,9 +161,17 @@ export function alcanceOrganicoDosPosts(
 export const NOTA_SERIE_100 = "a API só fornece com 100+ seguidores";
 
 export interface ResumoSeguidores {
+  /** Último total CONHECIDO do período (0 = nenhum: snapshot sem o campo). */
   fim: number;
+  /** Dia de `fim` — quando o último snapshot veio sem o total, é um dia antes do fim do período. */
+  fimEm?: string;
+  /** `fim` é do último dia com snapshot no período (não ficou para trás num campo em branco). */
+  fimNoUltimoDia: boolean;
+  /** Total no fim do dia ANTERIOR ao período — o chão de onde o líquido parte. */
   inicio: number;
-  /** fim − início. */
+  /** Algum dia do período tem o total (followers > 0). Sem ele, não há valor nem status. */
+  temTotal: boolean;
+  /** Variação no período: ganhos − perdas com a série completa; senão fim − início. */
   liquido: number;
   /** O líquido com sinal: "+12", "−5", "0" — nunca "+-12". */
   liquidoTexto: string;
@@ -175,24 +189,64 @@ export interface ResumoSeguidores {
 
 const temOsDoisLados = (r: IgAccountDaily) => r.followsDay != null && r.unfollowsDay != null;
 
+/** 0 = total desconhecido (snapshot manual sem o campo) — a regra de `reconstruirSeguidores`. */
+const temTotalConhecido = (r: IgAccountDaily) => r.followers > 0;
+
+/**
+ * O total no fim do dia ANTERIOR ao período — o chão de onde o líquido parte.
+ * `followers` é o total no FIM do dia, então "fim − total do 1º dia" deixava a
+ * variação do 1º dia de fora, e a nota "ganhos e perdas" a incluía: os dois
+ * cobriam dias diferentes. Vale, nesta ordem: a última linha antes do período
+ * com total conhecido (a véspera, com o sync diário); sem ela, o 1º total
+ * conhecido do período menos o líquido do próprio dia (exato com os dois lados:
+ * o sync reconstrói o total a partir da série); sem os dois lados, o próprio 1º
+ * total — a variação desse dia fica de fora, e a nota já diz que a série não
+ * fecha. É a MESMA regra do 1º ponto de `followerSeries` (metrics.ts): o
+ * gráfico "Variação de seguidores por dia" soma o mesmo líquido do card.
+ */
+function totalAntesDoPeriodo(
+  ordenadas: IgAccountDaily[],
+  comTotal: IgAccountDaily[],
+  range?: DateRange,
+): number {
+  if (range) {
+    const vespera = ordenadas.filter((r) => r.date < range.from && temTotalConhecido(r)).at(-1);
+    if (vespera) return vespera.followers;
+  }
+  const primeiro = comTotal[0];
+  if (!primeiro) return 0;
+  return temOsDoisLados(primeiro)
+    ? primeiro.followers - ((primeiro.followsDay ?? 0) - (primeiro.unfollowsDay ?? 0))
+    : primeiro.followers;
+}
+
 /**
  * "+N no período" e, ao lado, ganhos e perdas com a origem da série explicada:
  * a Meta só fornece `follows_and_unfollows` com 100+ seguidores, então a série
  * costuma começar depois do histórico — e dizer "0 perdas" num dia sem dado
  * seria inventar. O sinal vem SEMPRE de `formatIntComSinal` (S14).
+ *
+ * Líquido e ganhos/perdas cobrem os MESMOS dias: com a série completa, o
+ * líquido É ganhos − perdas (a série é a medição; o sync reconstrói os totais
+ * dela), e `serieCompleta` garante que os dois fecham; sem ela, fim − início,
+ * com o início no dia anterior ao período (`totalAntesDoPeriodo`). Total 0 é
+ * desconhecido: `fim` é o último total CONHECIDO e `temTotal` diz se há algum.
  */
 export function resumoSeguidores(rows: IgAccountDaily[], range?: DateRange): ResumoSeguidores {
   const ordenadas = [...rows].sort((a, b) => a.date.localeCompare(b.date));
   const serieDesde = ordenadas.find(temOsDoisLados)?.date;
   const noPeriodo = ordenadas.filter((r) => inRange(r.date, range));
-  const fim = noPeriodo.at(-1)?.followers ?? 0;
-  const inicio = noPeriodo[0]?.followers ?? 0;
-  const liquido = fim - inicio;
+  const comTotal = noPeriodo.filter(temTotalConhecido);
+  const temTotal = comTotal.length > 0;
+  const fim = comTotal.at(-1)?.followers ?? 0;
+  const fimEm = comTotal.at(-1)?.date;
+  const inicio = totalAntesDoPeriodo(ordenadas, comTotal, range);
   const dias = noPeriodo.filter(temOsDoisLados);
   const ganhos = dias.reduce((s, r) => s + (r.followsDay ?? 0), 0);
   const perdas = dias.reduce((s, r) => s + (r.unfollowsDay ?? 0), 0);
   const temSerie = dias.length > 0;
   const serieCompleta = temSerie && dias.length === noPeriodo.length;
+  const liquido = serieCompleta ? ganhos - perdas : temTotal ? fim - inicio : 0;
   const desde = serieDesde ? formatDateShort(serieDesde) : undefined;
   const brutos = `${formatIntComSinal(ganhos)} / ${formatIntComSinal(-perdas)}`;
 
@@ -213,7 +267,10 @@ export function resumoSeguidores(rows: IgAccountDaily[], range?: DateRange): Res
 
   return {
     fim,
+    fimEm,
+    fimNoUltimoDia: fimEm !== undefined && fimEm === noPeriodo.at(-1)?.date,
     inicio,
+    temTotal,
     liquido,
     liquidoTexto: formatIntComSinal(liquido),
     ganhos,
@@ -303,11 +360,48 @@ export function metaDeConversasDm(
   return { alvoTexto: `meta ${alvo}`, avaliacao: statusContraMeta(conversas, g.target, "maior") };
 }
 
-/** A meta de seguidores é um total, então compara em qualquer período. */
+/**
+ * A meta de seguidores é um total, então compara em qualquer período — mas só
+ * com um total de verdade: 0 é "desconhecido" (snapshot manual sem o campo), e
+ * cor sobre ele seria "Abaixo da meta (0%)" em vermelho por um campo em branco.
+ * Quem chama passa o último total CONHECIDO (`resumoSeguidores().fim`).
+ */
 export function metaDeSeguidores(goals: Goal[], seguidores: number, temDado: boolean): MetaDeConteudo {
   const g = goals.find((x) => x.metric === "followers");
   if (!g) return SEM_META;
   const alvoTexto = `meta ${formatInt(g.target)}`;
-  if (!temDado) return { alvoTexto };
+  if (!temDado || !(seguidores > 0)) return { alvoTexto };
   return { alvoTexto, avaliacao: statusContraMeta(seguidores, g.target, "maior") };
+}
+
+// ---------------------------------------------------------------- funil do perfil
+
+const div = (a: number, b: number) => (b > 0 ? a / b : 0);
+
+/**
+ * Funil do perfil: alcance da conta → visitas ao perfil → novos seguidores.
+ * O alcance aqui é o da CONTA, pago + orgânico (a Meta não separa; B11), e o
+ * rótulo diz isso — na mesma tela, "Alcance orgânico dos posts" separa os dois,
+ * e chamar isto de "funil orgânico" fazia 200 mil de alcance de anúncio virar
+ * "gancho fraco". Os novos seguidores são o líquido de `resumoSeguidores`: os
+ * mesmos dias da nota do card, nunca `netNew`, que deixa o 1º dia de fora.
+ */
+export function funilDoPerfil(rows: IgAccountDaily[], range?: DateRange): FunnelStage[] {
+  const t = igAccountTotals(rows, range);
+  const novos = Math.max(0, resumoSeguidores(rows, range).liquido);
+  return [
+    { key: "alcance", label: "Alcance da conta (pago + orgânico)", value: t.reach },
+    {
+      key: "visitas",
+      label: "Visitas ao perfil",
+      value: t.profileViews,
+      fromPrev: div(t.profileViews, t.reach),
+    },
+    {
+      key: "seguidores",
+      label: "Novos seguidores (líquido)",
+      value: novos,
+      fromPrev: div(novos, t.profileViews),
+    },
+  ];
 }
