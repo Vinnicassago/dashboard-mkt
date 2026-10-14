@@ -35,6 +35,33 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   `test_event_code` no TOP-LEVEL. PII em SHA-256 (sem remover acentos); `fbc`,
   `fbp`, IP e user-agent **nunca** hasheados. `event_id` + `event_name` iguais aos
   do Pixel para deduplicar (janela 48h) — gere o id UMA vez, no cliente.
+  **Caixa de saída** (Fase 7, D9, `meta/capi-envios.ts` + `lib/capi-politica.ts` pura):
+  NADA posta direto — `enviarParaMeta` grava em `capi_envios` (migração 0020; id =
+  `<evento>:<event_id>`, o mesmo fato entra uma vez) e só então tenta; NUNCA lança (o
+  fato já foi gravado; sem fila, tenta uma vez direto). Falhou → nova tentativa (5 min …
+  12 h, a última 30 min antes do fim) SÓ dentro de 48 h do fato (`JANELA_REENVIO_HORAS`:
+  depois, reenviar contaria duas vezes) → "não chegou", com o porquê. Desiste na hora
+  só com a recusa do PRÓPRIO evento (400, código 100, subcódigo 2804xxx); 100/33
+  (dataset/permissão) e 190 (token) são configuração e seguem na fila. O modo (real ou
+  teste) fica FIXADO na entrada: real nunca sai com `test_event_code`; teste nunca vira
+  produção (teste descartado NÃO é perda: fica fora de "não chegou" e dos alertas). Cada
+  linha é RESERVADA antes de postar (`reservarCapiEnvio`, atômico; o botão respeita a
+  reserva viva) e só linha pendente é atualizada — "enviado" e "expirado" são finais; a
+  desistência grava o `motivo` (janela | recusado | teste | sem-payload) e a tela lê
+  dele, nunca do horário. O payload (IP e navegador) vira null ao sair ou expirar, e
+  `expirarCapiVencidos` (que pula a linha reservada) roda em todo reenvio e ao abrir o
+  painel, MESMO com a CAPI desligada. Sem dataset e token nada é gravado. Em
+  `aplicarStatus` o envio entra na fila logo depois do status, ANTES do histórico. Reenvio:
+  `/api/capi/retentar` (CRON_SECRET, a cada 15 min; grava a última execução), o botão em
+  Integrações (força todos os pendentes da janela) e, de carona (`after`), cada lead
+  novo. Eventos do painel saem pelo MARCO, só na 1ª vez (`eventosDaMudanca`): `Schedule`
+  (agendou), `ReuniaoRealizada` (personalizado, compareceu), `Purchase` (fechou, com
+  valor) — com e-mail e telefone em hash ("Lead sem nome" não vira primeiro nome). Tela
+  lê envio com o RELÓGIO (`situacaoDoEnvio`): pendente vencido há muito = "o reenvio não
+  rodou", fora da janela = "não chegou". A ficha mostra "Enviado à Meta ✓" só com a Meta
+  confirmando (também dos cadastros mesclados); Integrações tira o selo dos envios da
+  semana + todo pendente e diz se o cron RODA; perdido = alerta "falha"; reenvio parado e
+  modo de teste em produção = aviso. GA4 continua direto (fica para depois).
 - **GA4** (`ga4/measurement-protocol.ts`): não existe evento `schedule` — use
   `generate_lead` e `qualify_lead`. Sem `client_id` real do gtag, **não envie**
   (GA4 aceitaria e criaria usuário fantasma). O endpoint de produção sempre
@@ -46,7 +73,7 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   = cookie HMAC httpOnly (Web Crypto, portável Edge/Node — `session.ts` NÃO pode ter
   import node). Senha em scrypt (`passwords.ts`, server-only). Usuários passam pelo
   store (`countUsers`/`getUser`/...). Middleware libera `/login`, `/api/track`,
-  `/api/sync`, `/api/health` (só a versão — `lib/version.ts`, atualizar a cada
+  `/api/sync`, `/api/resumo-semanal`, `/api/capi/retentar`, `/api/health` (só a versão — `lib/version.ts`, atualizar a cada
   release: é como se confere que o deploy do EasyPanel pegou o código novo).
 - **Papéis** (`auth/roles.ts`): admin/marketing/comercial + capabilities
   (`leads:write` = admin+comercial; `data:write` = admin+marketing; `leads:delete`,

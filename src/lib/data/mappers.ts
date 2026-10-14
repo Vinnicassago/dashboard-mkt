@@ -15,6 +15,10 @@ import type {
   AdDaily,
   AiAnalysis,
   AuditEntry,
+  CapiEnvio,
+  CapiEnvioStatus,
+  CapiEventName,
+  CapiMotivoFim,
   Campaign,
   CampaignStatus,
   Creative,
@@ -39,7 +43,7 @@ import type {
   SyncRun,
 } from "../types";
 import { DEFAULT_BRAND } from "../types";
-import type { PublicUser, StoredUser } from "./backend";
+import type { CapiEnvioPatch, PublicUser, StoredUser } from "./backend";
 
 export type Row = Record<string, unknown>;
 
@@ -594,3 +598,64 @@ export const fromResumoSemanal = (x: ResumoSemanal): Row => ({
   origem: x.origem,
   criado_em: x.criadoEm,
 });
+
+// ---- Envios à Meta (Fase 7) ----
+
+/** jsonb: objeto já parseado nos dois backends SQL; string só se alguém gravou texto. */
+const jsonbObj = (v: unknown): Record<string, unknown> | null =>
+  v == null ? null : ((typeof v === "string" ? JSON.parse(v) : v) as Record<string, unknown>);
+
+export const toCapiEnvio = (r: Row): CapiEnvio => ({
+  id: s(r.id),
+  brand: brandOf(r.brand),
+  leadId: s(r.lead_id),
+  eventName: s(r.event_name) as CapiEventName,
+  eventId: s(r.event_id),
+  eventTime: iso(r.event_time),
+  status: s(r.status) as CapiEnvioStatus,
+  tentativas: n(r.tentativas),
+  proximaTentativa: r.proxima_tentativa ? iso(r.proxima_tentativa) : undefined,
+  ultimoErro: r.ultimo_erro ? s(r.ultimo_erro) : undefined,
+  enviadoEm: r.enviado_em ? iso(r.enviado_em) : undefined,
+  teste: r.teste === true || r.teste === "true" || r.teste === "t",
+  fbtraceId: r.fbtrace_id ? s(r.fbtrace_id) : undefined,
+  motivo: r.motivo ? (s(r.motivo) as CapiMotivoFim) : undefined,
+  payload: jsonbObj(r.payload),
+  criadoEm: iso(r.criado_em),
+  atualizadoEm: iso(r.atualizado_em),
+});
+
+export const fromCapiEnvio = (e: CapiEnvio): Row => ({
+  id: e.id,
+  brand: e.brand,
+  lead_id: e.leadId,
+  event_name: e.eventName,
+  event_id: e.eventId,
+  event_time: e.eventTime,
+  status: e.status,
+  tentativas: e.tentativas,
+  proxima_tentativa: e.proximaTentativa ?? null,
+  ultimo_erro: e.ultimoErro ?? null,
+  enviado_em: e.enviadoEm ?? null,
+  teste: e.teste,
+  fbtrace_id: e.fbtraceId ?? null,
+  motivo: e.motivo ?? null,
+  payload: e.payload ?? null,
+  criado_em: e.criadoEm,
+  atualizado_em: e.atualizadoEm,
+});
+
+/** As colunas que um patch muda (só as presentes; `null` limpa). Os dois backends SQL usam. */
+export function capiPatchParaColunas(p: CapiEnvioPatch): Row {
+  const r: Row = { atualizado_em: p.atualizadoEm };
+  if (p.status !== undefined) r.status = p.status;
+  if (p.tentativas !== undefined) r.tentativas = p.tentativas;
+  if (p.proximaTentativa !== undefined) r.proxima_tentativa = p.proximaTentativa;
+  if (p.ultimoErro !== undefined) r.ultimo_erro = p.ultimoErro;
+  if (p.enviadoEm !== undefined) r.enviado_em = p.enviadoEm;
+  if (p.teste !== undefined) r.teste = p.teste;
+  if (p.fbtraceId !== undefined) r.fbtrace_id = p.fbtraceId;
+  if (p.motivo !== undefined) r.motivo = p.motivo;
+  if (p.payload !== undefined) r.payload = p.payload;
+  return r;
+}

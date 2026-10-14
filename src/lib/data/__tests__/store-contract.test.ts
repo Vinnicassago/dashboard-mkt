@@ -338,6 +338,129 @@ function contrato(nome: string, abrir: () => Promise<{ backend: DataBackend; fec
       expect(await b.listResumosSemanais({ brand, limit: 2 })).toHaveLength(2);
     });
 
+    it("envios à Meta: o mesmo (evento, event_id) entra uma vez; o patch muda só o que veio e null limpa", async () => {
+      const brand = `capi-${sfx}`;
+      const base = {
+        brand,
+        leadId: `L-${sfx}`,
+        eventName: "Schedule" as const,
+        eventId: `schedule-L-${sfx}`,
+        eventTime: "2031-04-01T12:00:00.000Z",
+        status: "pendente" as const,
+        tentativas: 0,
+        proximaTentativa: "2031-04-01T12:00:00.000Z",
+        teste: false,
+        payload: { event_name: "Schedule", user_data: { em: ["abc"], fbc: "fb.1.123" } },
+        criadoEm: "2031-04-01T12:00:00.000Z",
+        atualizadoEm: "2031-04-01T12:00:00.000Z",
+      };
+      const id = `Schedule:schedule-L-${sfx}`;
+      expect(await b.addCapiEnvio({ ...base, id })).toBe(true);
+      // Reenfileirar o mesmo fato não cria outra linha nem mexe na que existe.
+      expect(await b.addCapiEnvio({ ...base, id, tentativas: 9 })).toBe(false);
+      let [e] = await b.listCapiEnvios({ leadId: `L-${sfx}` });
+      expect(e).toMatchObject({ id, tentativas: 0, status: "pendente", teste: false, eventTime: "2031-04-01T12:00:00.000Z" });
+      expect(e.payload).toEqual(base.payload);
+
+      // Uma tentativa que falhou: só o que veio no patch muda.
+      await b.updateCapiEnvio(id, {
+        tentativas: 1,
+        proximaTentativa: "2031-04-01T12:05:00.000Z",
+        ultimoErro: "A Meta estava fora do ar nesta tentativa.",
+        atualizadoEm: "2031-04-01T12:00:01.000Z",
+      });
+      [e] = await b.listCapiEnvios({ leadId: `L-${sfx}` });
+      expect(e).toMatchObject({ tentativas: 1, status: "pendente", ultimoErro: "A Meta estava fora do ar nesta tentativa." });
+      expect(e.payload).toEqual(base.payload);
+      expect(Date.parse(e.proximaTentativa!)).toBe(Date.parse("2031-04-01T12:05:00.000Z"));
+
+      // A fila de reenvio: só pendentes vencidos, do mais antigo para o mais novo.
+      const outro = `Purchase:purchase-L-${sfx}`;
+      await b.addCapiEnvio({ ...base, id: outro, eventName: "Purchase", eventId: `purchase-L-${sfx}`, proximaTentativa: "2031-04-01T12:01:00.000Z", criadoEm: "2031-04-01T12:01:00.000Z" });
+      const devidos = (await b.listCapiEnvios({ devidosAte: "2031-04-01T12:06:00.000Z", limit: 0 })).filter((x) => x.brand === brand);
+      expect(devidos.map((x) => x.id)).toEqual([outro, id]);
+      expect((await b.listCapiEnvios({ devidosAte: "2031-04-01T12:04:00.000Z", limit: 0 })).filter((x) => x.brand === brand).map((x) => x.id)).toEqual([outro]);
+
+      // Enviado: o payload (com IP e navegador da visita) some; o resto fica.
+      await b.updateCapiEnvio(id, {
+        status: "enviado",
+        tentativas: 2,
+        enviadoEm: "2031-04-01T12:06:00.000Z",
+        proximaTentativa: null,
+        ultimoErro: null,
+        teste: true,
+        fbtraceId: "TRACE1",
+        payload: null,
+        atualizadoEm: "2031-04-01T12:06:00.000Z",
+      });
+      [e] = (await b.listCapiEnvios({ brand, status: "enviado", limit: 0 }));
+      expect(e).toMatchObject({ id, status: "enviado", tentativas: 2, teste: true, fbtraceId: "TRACE1" });
+      expect(e.payload ?? null).toBeNull();
+      expect(e.proximaTentativa).toBeUndefined();
+      expect(e.ultimoErro).toBeUndefined();
+      expect(Date.parse(e.enviadoEm!)).toBe(Date.parse("2031-04-01T12:06:00.000Z"));
+      // Enviado não volta para a fila de reenvio.
+      expect((await b.listCapiEnvios({ devidosAte: "2031-04-02T00:00:00.000Z", limit: 0 })).some((x) => x.id === id)).toBe(false);
+
+      // Por marca, mais novos primeiro; `desde` corta pelo criadoEm.
+      expect((await b.listCapiEnvios({ brand, limit: 0 })).map((x) => x.id)).toEqual([outro, id]);
+      expect((await b.listCapiEnvios({ brand, desde: "2031-04-01T12:00:30.000Z", limit: 0 })).map((x) => x.id)).toEqual([outro]);
+    });
+
+    it("envios à Meta: reserva atômica, só pendente muda e o vencido fecha sem payload", async () => {
+      const brand = `capi2-${sfx}`;
+      const base = {
+        brand,
+        leadId: `L2-${sfx}`,
+        eventName: "Lead" as const,
+        status: "pendente" as const,
+        tentativas: 1,
+        teste: false,
+        payload: { client_ip_address: "203.0.113.7" },
+        criadoEm: "2031-05-01T12:00:00.000Z",
+        atualizadoEm: "2031-05-01T12:00:00.000Z",
+      };
+      const vivo = `Lead:vivo-${sfx}`;
+      const velho = `Lead:velho-${sfx}`;
+      const comErro = `Lead:erro-${sfx}`;
+      await b.addCapiEnvio({ ...base, id: vivo, eventId: `vivo-${sfx}`, eventTime: "2031-05-03T12:00:00.000Z", proximaTentativa: "2031-05-03T12:05:00.000Z" });
+      await b.addCapiEnvio({ ...base, id: velho, eventId: `velho-${sfx}`, eventTime: "2031-05-01T12:00:00.000Z", proximaTentativa: "2031-05-01T12:05:00.000Z" });
+      await b.addCapiEnvio({ ...base, id: comErro, eventId: `erro-${sfx}`, eventTime: "2031-05-01T13:00:00.000Z", proximaTentativa: "2031-05-01T13:05:00.000Z", ultimoErro: "A Meta estava fora do ar nesta tentativa." });
+
+      // Reserva: só quando a vez chegou; a 2ª reserva da mesma vez perde.
+      expect(await b.reservarCapiEnvio(vivo, { ate: "2031-05-03T12:10:00.000Z", vencidoAte: "2031-05-03T12:04:00.000Z", atualizadoEm: "2031-05-03T12:04:00.000Z" })).toBe(false);
+      expect(await b.reservarCapiEnvio(vivo, { ate: "2031-05-03T12:08:00.000Z", vencidoAte: "2031-05-03T12:06:00.000Z", atualizadoEm: "2031-05-03T12:06:00.000Z" })).toBe(true);
+      expect(await b.reservarCapiEnvio(vivo, { ate: "2031-05-03T12:08:00.000Z", vencidoAte: "2031-05-03T12:06:00.000Z", atualizadoEm: "2031-05-03T12:06:00.000Z" })).toBe(false);
+      // O botão (sem `vencidoAte`) respeita a reserva VIVA: mexida depois de `livreDesde`, fica.
+      expect(await b.reservarCapiEnvio(vivo, { ate: "2031-05-03T12:09:00.000Z", livreDesde: "2031-05-03T12:05:00.000Z", atualizadoEm: "2031-05-03T12:06:30.000Z" })).toBe(false);
+      expect(await b.reservarCapiEnvio(vivo, { ate: "2031-05-03T12:09:00.000Z", livreDesde: "2031-05-03T12:06:00.000Z", atualizadoEm: "2031-05-03T12:06:30.000Z" })).toBe(true);
+
+      // Fechar os vencidos (fato antes de 2031-05-01T12:30): o payload some, o motivo entra só onde não havia erro.
+      // A limpeza vale para TODAS as marcas (pode fechar pendentes de outros testes): >= os 2 desta.
+      expect(await b.expirarCapiVencidos({ eventoAntesDe: "2031-05-01T13:30:00.000Z", motivo: "Ficou na fila além da janela.", atualizadoEm: "2031-05-03T13:30:00.000Z" })).toBeGreaterThanOrEqual(2);
+      const todos = await b.listCapiEnvios({ brand, limit: 0 });
+      const porId = new Map(todos.map((e) => [e.id, e]));
+      expect(porId.get(velho)).toMatchObject({ status: "expirado", motivo: "janela", ultimoErro: "Ficou na fila além da janela." });
+      expect(porId.get(velho)?.payload ?? null).toBeNull();
+      expect(porId.get(velho)?.proximaTentativa).toBeUndefined();
+      expect(porId.get(comErro)).toMatchObject({ status: "expirado", ultimoErro: "A Meta estava fora do ar nesta tentativa." });
+      expect(porId.get(vivo)).toMatchObject({ status: "pendente" });
+      expect(porId.get(vivo)?.payload).toEqual({ client_ip_address: "203.0.113.7" });
+      // A limpeza não fecha a linha reservada agora (próxima tentativa às 12:09, depois das 12:07),
+      // mesmo com o fato fora da janela pedida.
+      await b.expirarCapiVencidos({ eventoAntesDe: "2031-05-04T00:00:00.000Z", motivo: "x", atualizadoEm: "2031-05-03T12:07:00.000Z" });
+      expect((await b.listCapiEnvios({ brand, status: "pendente", limit: 0 })).some((e) => e.id === vivo)).toBe(true);
+
+      // Linha final não muda mais: nem patch, nem reserva.
+      expect(await b.updateCapiEnvio(velho, { status: "enviado", atualizadoEm: "2031-05-03T14:00:00.000Z" })).toBe(false);
+      expect(await b.reservarCapiEnvio(velho, { ate: "2031-05-03T14:00:00.000Z", atualizadoEm: "2031-05-03T14:00:00.000Z" })).toBe(false);
+      expect(await b.updateCapiEnvio(vivo, { status: "enviado", payload: null, atualizadoEm: "2031-05-03T14:00:00.000Z" })).toBe(true);
+      expect(await b.updateCapiEnvio(vivo, { status: "expirado", atualizadoEm: "2031-05-03T15:00:00.000Z" })).toBe(false);
+      expect((await b.listCapiEnvios({ brand, status: "enviado", limit: 0 })).map((e) => e.id)).toEqual([vivo]);
+      expect(await b.expirarCapiVencidos({ eventoAntesDe: "2031-06-01T00:00:00.000Z", motivo: "x", atualizadoEm: "2031-06-01T00:00:00.000Z" })).toBeGreaterThanOrEqual(0);
+      expect((await b.listCapiEnvios({ brand, status: "enviado", limit: 0 })).map((e) => e.id)).toEqual([vivo]);
+    });
+
     it("registro de auditoria", async () => {
       await b.addAuditEntry({ id: `AUD-${sfx}`, at: new Date().toISOString(), actor: "admin", action: "teste", detail: "x" });
       const lista = await b.listAuditEntries(5);

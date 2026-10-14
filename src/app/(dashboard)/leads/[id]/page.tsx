@@ -6,7 +6,7 @@ import { StatusBadge } from "@/components/tables/lead-status";
 import { DeletedLeads } from "@/components/leads/leads-directory";
 import { DescricaoEvento } from "@/components/leads/lead-activity";
 import { FichaAcoes } from "@/components/leads/ficha-acoes";
-import { getData, getLead, listLeadEvents } from "@/lib/data/store";
+import { getData, getLead, listCapiEnvios, listLeadEvents } from "@/lib/data/store";
 import { can } from "@/lib/auth/guard";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { mensagemWhatsapp } from "@/lib/integracoes";
@@ -21,6 +21,7 @@ import { normalizarTelefone } from "@/lib/phone";
 import { comPeriodo } from "@/lib/range";
 import { formatCurrency, formatDateTime } from "@/lib/format";
 import type { LeadEvent } from "@/lib/types";
+import { entradasDaMeta, type EntradaDaMeta } from "@/lib/capi-politica";
 
 export const dynamic = "force-dynamic";
 
@@ -74,9 +75,10 @@ export default async function FichaDoLead({
   const lead = await getLead(id);
   if (!lead) notFound();
 
-  const [dados, proprios, canEdit, canDelete, mensagem, user] = await Promise.all([
+  const [dados, proprios, enviosMeta, canEdit, canDelete, mensagem, user] = await Promise.all([
     getData(lead.brand),
     listLeadEvents({ leadId: id, limit: 0 }),
+    listCapiEnvios({ leadId: id, limit: 0 }),
     can("leads:write"),
     can("leads:delete"),
     mensagemWhatsapp(),
@@ -92,9 +94,29 @@ export default async function FichaDoLead({
       .map((e) => [e.payload!.duplicado, e.payload?.nome ?? "outro cadastro"]),
   );
   const deles = await Promise.all([...mesclados.keys()].map((m) => listLeadEvents({ leadId: m, limit: 0 })));
-  const linhaDoTempo: LeadEvent[] = [...proprios, ...deles.flat()]
-    .map((e) => (mascarar ? mascararEvento(e) : e))
-    .sort((a, b) => quando(b).localeCompare(quando(a)));
+  // Os envios à Meta dos cadastros mesclados também: o Lead da entrada duplicada saiu com o id dela.
+  const enviosDeles = await Promise.all(
+    [...mesclados.keys()].map(async (m) => ({ m, envios: await listCapiEnvios({ leadId: m, limit: 0 }) })),
+  );
+  const agoraFicha = new Date().toISOString();
+  // Eventos do painel e envios à Meta numa linha só — "Enviado à Meta ✓" ao lado
+  // do fato que o disparou (Fase 7). Ordenados pelo instante, não pelo texto da data.
+  type ItemDaLinha =
+    | { tipo: "evento"; e: LeadEvent; em: string }
+    | { tipo: "meta"; m: EntradaDaMeta; em: string; mesclado?: string };
+  const linhaDoTempo: ItemDaLinha[] = [
+    ...[...proprios, ...deles.flat()].map((e): ItemDaLinha => ({
+      tipo: "evento",
+      e: mascarar ? mascararEvento(e) : e,
+      em: quando(e),
+    })),
+    ...entradasDaMeta(enviosMeta, agoraFicha).map((m): ItemDaLinha => ({ tipo: "meta", m, em: m.quando })),
+    ...enviosDeles.flatMap(({ m: idMesclado, envios }) =>
+      entradasDaMeta(envios, agoraFicha).map(
+        (m): ItemDaLinha => ({ tipo: "meta", m, em: m.quando, mesclado: mesclados.get(idMesclado) ?? "outro cadastro" }),
+      ),
+    ),
+  ].sort((a, b) => Date.parse(b.em) - Date.parse(a.em));
 
   const contato = resumoContato(proprios);
   const origem = origemDoLead(dados)(lead);
@@ -337,24 +359,48 @@ export default async function FichaDoLead({
           <Card>
             <CardHeader>
               <CardTitle>Linha do tempo</CardTitle>
-              <CardDescription>Cada entrada, tentativa, mudança e anotação — a mais recente primeiro.</CardDescription>
+              <CardDescription>
+                Cada entrada, tentativa, mudança e anotação — e o que foi enviado à Meta — a mais recente primeiro.
+              </CardDescription>
             </CardHeader>
             <CardContent>
               {linhaDoTempo.length === 0 ? (
                 <p className="text-sm text-muted-foreground">Nada registrado ainda.</p>
               ) : (
                 <ol className="space-y-3">
-                  {linhaDoTempo.map((e) => (
-                    <li key={e.id} className="border-l-2 pl-3 text-sm">
-                      <p className="text-xs text-muted-foreground">
-                        {formatDateTime(quando(e))} · {e.actor}
-                        {e.leadId !== lead.id ? ` · cadastro mesclado (${mesclados.get(e.leadId) ?? e.leadName})` : ""}
-                      </p>
-                      <div className="mt-0.5">
-                        <DescricaoEvento e={e} />
-                      </div>
-                    </li>
-                  ))}
+                  {linhaDoTempo.map((item) =>
+                    item.tipo === "meta" ? (
+                      <li key={item.m.id} className="border-l-2 border-dashed pl-3 text-sm">
+                        <p className="text-xs text-muted-foreground">
+                          {formatDateTime(item.em)} · Meta (CAPI)
+                          {item.mesclado ? ` · cadastro mesclado (${item.mesclado})` : ""}
+                        </p>
+                        <p
+                          className={
+                            item.m.tom === "ok"
+                              ? "mt-0.5 text-[var(--success-text)]"
+                              : item.m.tom === "falha"
+                                ? "mt-0.5 text-[var(--status-fora-text)]"
+                                : "mt-0.5 text-muted-foreground"
+                          }
+                        >
+                          {item.m.texto}
+                        </p>
+                      </li>
+                    ) : (
+                      <li key={item.e.id} className="border-l-2 pl-3 text-sm">
+                        <p className="text-xs text-muted-foreground">
+                          {formatDateTime(item.em)} · {item.e.actor}
+                          {item.e.leadId !== lead.id
+                            ? ` · cadastro mesclado (${mesclados.get(item.e.leadId) ?? item.e.leadName})`
+                            : ""}
+                        </p>
+                        <div className="mt-0.5">
+                          <DescricaoEvento e={item.e} />
+                        </div>
+                      </li>
+                    ),
+                  )}
                 </ol>
               )}
             </CardContent>

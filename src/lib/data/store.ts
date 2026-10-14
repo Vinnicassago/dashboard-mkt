@@ -26,12 +26,15 @@ import type {
   ListSyncRunsOpts,
   LpDelta,
   StoredUser,
+  CapiEnvioPatch,
+  ListCapiEnviosOpts,
 } from "./backend";
 import type { Role } from "../auth/roles";
 import type {
   AcaoEstado,
   AdDaily,
   AuditEntry,
+  CapiEnvio,
   Meta,
   ResumoSemanal,
   SyncRun,
@@ -128,6 +131,19 @@ export const addAcaoEstado = (e: AcaoEstado) => backend().addAcaoEstado(e);
 export const listAcoesEstado = (opts: ListAcoesEstadoOpts) => backend().listAcoesEstado(opts);
 export const addResumoSemanal = (r: ResumoSemanal) => backend().addResumoSemanal(r);
 export const listResumosSemanais = (opts: ListResumosOpts) => backend().listResumosSemanais(opts);
+
+// ---- Envios à Meta (Fase 7) -------------------------------------------
+
+/** Enfileira um envio da CAPI; false = (evento, event_id) já estava na fila. */
+export const addCapiEnvio = (e: CapiEnvio) => backend().addCapiEnvio(e);
+export const updateCapiEnvio = (id: string, patch: CapiEnvioPatch) => backend().updateCapiEnvio(id, patch);
+export const reservarCapiEnvio = (
+  id: string,
+  opts: { ate: string; vencidoAte?: string; livreDesde?: string; atualizadoEm: string },
+) => backend().reservarCapiEnvio(id, opts);
+export const expirarCapiVencidos = (opts: { eventoAntesDe: string; motivo: string; atualizadoEm: string }) =>
+  backend().expirarCapiVencidos(opts);
+export const listCapiEnvios = (opts: ListCapiEnviosOpts) => backend().listCapiEnvios(opts);
 
 // ---- state bag (last sync, tokens) ---------------------------------
 

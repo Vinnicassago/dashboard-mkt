@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { randomUUID } from "node:crypto";
 import { addLead, addLeadEvent, bumpLpDaily, getLead, listLeads, setLeadStatus } from "@/lib/data/store";
 import { DEFAULT_BRAND, type Lead } from "@/lib/types";
@@ -9,7 +9,7 @@ import { idsDoUtm } from "@/lib/atribuicao";
 import { isLostStatus } from "@/lib/lead-status";
 import { newEventId } from "@/lib/auth/actor";
 import { avisarLeadNovo } from "@/lib/avisos";
-import { sendCapiEvent } from "@/lib/meta/capi";
+import { enviarParaMeta, reenviarPendentes } from "@/lib/meta/capi-envios";
 import { sendGa4Event } from "@/lib/ga4/measurement-protocol";
 
 export const dynamic = "force-dynamic";
@@ -255,9 +255,13 @@ export async function POST(request: Request) {
   const userAgent = request.headers.get("user-agent") ?? undefined;
 
   const [capi, ga4] = await Promise.all([
-    sendCapiEvent({
+    // Pela caixa de saída: gravado antes de postar, com nova tentativa automática.
+    enviarParaMeta({
+      brand: DEFAULT_BRAND,
+      leadId,
       eventName: "Lead",
       eventId,
+      eventTime: new Date().toISOString(),
       eventSourceUrl: body.pageUrl,
       user: {
         email: body.email,
@@ -288,8 +292,13 @@ export async function POST(request: Request) {
 
   // O detalhe de CAPI/GA4 fica no log do servidor: a resposta vai para uma
   // página pública e não deve expor erro interno.
-  if (!capi.sent || !ga4.sent) {
-    console.info(`[track] lead ${leadId} · CAPI: ${capi.detail} · GA4: ${ga4.detail}`);
+  if (capi.estado !== "enviado" || !ga4.sent) {
+    console.info(`[track] lead ${leadId} · CAPI: ${capi.estado} · GA4: ${ga4.detail}`);
   }
+  // De carona, depois da resposta: o que ficou pendente na fila da CAPI tenta de
+  // novo (o cron de /api/capi/retentar é a garantia; isto só adianta).
+  after(() =>
+    reenviarPendentes({ limit: 10 }).catch((e) => console.warn("[track] reenvio da CAPI falhou:", e)),
+  );
   return NextResponse.json({ ok: true, leadId }, { headers });
 }

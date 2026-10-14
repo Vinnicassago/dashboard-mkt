@@ -148,6 +148,17 @@ cron-job.org (ou em qualquer cron) para **segunda às 08:00 (Brasília)**:
 curl "https://SEU-APP/api/resumo-semanal?secret=SEU_CRON_SECRET"
 ```
 
+**Reenvio da CAPI.** Com a CAPI configurada e o mesmo `CRON_SECRET`, agende **a cada
+15 minutos** (sem custo além das chamadas à Meta):
+
+```bash
+curl "https://SEU-APP/api/capi/retentar?secret=SEU_CRON_SECRET"
+```
+
+Ele tenta de novo os eventos que ainda não chegaram à Meta (ver "Caixa de saída da
+CAPI", abaixo). Sem ele, a nova tentativa só acontece quando entra lead novo ou
+alguém aperta **Reenviar agora** em Configurações → Integrações.
+
 Ele lê a semana fechada anterior (segunda a domingo) — só a camada de métricas, a
 régua e as ações do motor — e grava a leitura, que aparece recolhida no rodapé da
 Bússola com as 12 anteriores. Custa cerca de US$ 0,09 por execução; `?brand=` gera
@@ -256,10 +267,34 @@ duas vezes. Por isso o `event_id` é gerado uma única vez, no cliente.
 
 ### Reunião agendada → sinal de volta
 
-Na página **Leads** (ou na **Fila de contato**), mude o status do lead para *Agendado*. Isso dispara `Schedule`
-para a CAPI (se configurada) e `qualify_lead` para o GA4 (se configurado), usando os identificadores (`fbc`/`fbp`) que
-guardamos no lead. O `event_id` é estável (`schedule-<leadId>`), então remarcar o
-mesmo lead não conta duas reuniões.
+Cada fato do comercial vira um evento na Meta, **só na primeira vez** que acontece (pelo
+marco do lead, não pelo status):
+
+| Fato | Evento na CAPI | `event_id` |
+| --- | --- | --- |
+| Agendou (1ª vez) | `Schedule` | `schedule-<leadId>` |
+| Compareceu (1ª vez) | `ReuniaoRealizada` (personalizado) | `realizada-<leadId>` |
+| Fechou (1ª vez) | `Purchase`, com o valor da carta | `purchase-<leadId>` |
+
+Os três levam e-mail e telefone em SHA-256, o nome, `fbc`/`fbp` crus e o id do lead.
+Agendar, desistir e agendar de novo não manda um 2º `Schedule`. O GA4 segue com
+`qualify_lead` (agendou) e `purchase` (fechou).
+
+### Caixa de saída da CAPI
+
+Todo evento passa pela tabela `capi_envios` (migração 0020): é gravado **antes** de
+ir à Meta e fica `pendente` até ela confirmar. Falhou? Nova tentativa em 5 min, 15 min,
+1 h, 3 h, 6 h e a cada 12 h (a última 30 min antes do fim) — **só nas 48 h depois do
+fato**, a janela em que a Meta deduplica pelo `event_id` (depois dela, reenviar poderia
+contar duas vezes). Token vencido, dataset errado ou Meta fora do ar seguem na fila:
+corrigida a configuração, **Reenviar agora** (Integrações) manda tudo que ainda está na
+janela. Só a recusa do próprio evento desiste na hora. O que não sair fica "não chegou",
+com o porquê, na ficha do lead e num alerta. O evento guardado (com IP e navegador da
+visita) é apagado assim que sai ou expira — mesmo com a CAPI desligada. A ficha do lead
+mostra "Enviado à Meta ✓" ao lado do fato; Integrações mostra o placar da semana e se o
+cron está rodando. Com `META_CAPI_TEST_EVENT_CODE` definido, os eventos NOVOS saem como
+**teste** (não contam nos relatórios) — a tela e o alerta dizem isso; o que já estava na
+fila sai no modo em que entrou.
 
 ### Status do lead
 
@@ -269,9 +304,9 @@ encerra o lead?" saem todos de lá. Status novo = uma entrada nessa tabela.
 | Status | O que significa |
 | --- | --- |
 | **Novo** | Entrou e ninguém contatou ainda. É o estoque da fila do comercial (SLA de resposta). |
-| **Agendado** | Reunião marcada — exige a data e a hora da reunião. Com CAPI/GA4 configurados, dispara `Schedule` para a Meta e `qualify_lead` para o GA4. |
-| **Reunião realizada** | Compareceu. |
-| **Cliente** | Fechou, com o valor da carta registrado. Dispara `Purchase`. |
+| **Agendado** | Reunião marcada — exige a data e a hora da reunião. Na 1ª vez, com CAPI/GA4 configurados, dispara `Schedule` para a Meta e `qualify_lead` para o GA4. |
+| **Reunião realizada** | Compareceu. Na 1ª vez, dispara `ReuniaoRealizada` para a Meta. |
+| **Cliente** | Fechou, com o valor da carta registrado. Na 1ª vez, dispara `Purchase`. |
 | **Contato inválido** | Telefone/e-mail não existe. Perda de **qualidade** — o comercial não teve chance. |
 | **Sem resposta** | Contato válido, nunca retornou. Perda de **qualidade**. |
 | **Não tem interesse** | Falou com o comercial e disse não. Perda de **decisão**. |

@@ -7,7 +7,9 @@ import { NAO_CLASSIFICADO, integrationStatus } from "@/lib/meta/config";
 import { estadoDaFonte } from "@/lib/sincronizacao";
 import { AlertasProvider } from "@/components/layout/alertas";
 import type { Alerta } from "@/lib/alertas";
-import { getData } from "@/lib/data/store";
+import { expirarCapiVencidos, getData, listCapiEnvios } from "@/lib/data/store";
+import { JANELA_REENVIO_HORAS, alertasDaCapi, resumoDosEnvios } from "@/lib/capi-politica";
+import { capiEmModoTeste } from "@/lib/meta/capi";
 import { can } from "@/lib/auth/guard";
 import { formatCurrency0, formatDateTime } from "@/lib/format";
 import { frescorDaFonte, type Frescor } from "@/lib/frescor";
@@ -78,6 +80,37 @@ export default async function DashboardLayout({
         "Sem TRACK_INGEST_KEY, /api/track aceita lead de qualquer site — um lead falso entra nos números. Defina a chave no servidor e na LP.",
       cta: { label: "Ver integrações", href: "/configuracoes/integracoes" },
     });
+  }
+
+  // LGPD: o pendente que passou da janela fecha e perde o payload (IP, navegador)
+  // mesmo sem cron, sem lead novo e com a CAPI desligada — basta alguém abrir o
+  // painel. Barato (indexado) e idempotente.
+  try {
+    await expirarCapiVencidos({
+      eventoAntesDe: new Date(agora.getTime() - JANELA_REENVIO_HORAS * 3_600_000).toISOString(),
+      motivo: `Ficou na fila além da janela de ${JANELA_REENVIO_HORAS} h sem chegar à Meta.`,
+      atualizadoEm: agora.toISOString(),
+    });
+  } catch (e) {
+    console.warn("[layout] limpeza dos envios vencidos da CAPI falhou:", e instanceof Error ? e.message : e);
+  }
+
+  // CAPI: evento que não chegou à Meta (ou modo de teste em produção) — para quem cuida dos dados.
+  if (status.capi && (await can("data:write"))) {
+    const desde = new Date(agora.getTime() - 7 * 86_400_000).toISOString();
+    // Os últimos 7 dias MAIS todo pendente de qualquer idade — o mesmo recorte de Integrações.
+    const envios = [
+      ...(await listCapiEnvios({ desde, limit: 0 })),
+      ...(await listCapiEnvios({ status: "pendente", limit: 0 })),
+    ];
+    globais.push(
+      ...alertasDaCapi({
+        configurada: true,
+        teste: capiEmModoTeste(),
+        producao: process.env.NODE_ENV === "production",
+        resumo: resumoDosEnvios(envios, agora.toISOString()),
+      }),
+    );
   }
 
   return (

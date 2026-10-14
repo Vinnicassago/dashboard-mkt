@@ -2,6 +2,9 @@ import type {
   AcaoEstado,
   AdDaily,
   AuditEntry,
+  CapiEnvio,
+  CapiEnvioStatus,
+  CapiMotivoFim,
   Creative,
   DashboardData,
   Goal,
@@ -209,6 +212,44 @@ export interface DataBackend {
   /** Por `semana` desc, depois `criadoEm` desc. `limit` 0 = sem limite. */
   listResumosSemanais(opts: ListResumosOpts): Promise<ResumoSemanal[]>;
 
+  // ---- Envios à Meta (Fase 7) ----
+  /**
+   * Põe um envio na caixa de saída da CAPI. Se (evento, event_id) já está lá,
+   * NÃO toca na linha e devolve false: o mesmo fato não entra duas vezes.
+   */
+  addCapiEnvio(e: CapiEnvio): Promise<boolean>;
+  /**
+   * Anota uma tentativa: só os campos presentes mudam; `null` limpa. Só mexe em
+   * linha AINDA PENDENTE — "enviado" e "expirado" são finais: uma desistência
+   * atrasada nunca rebaixa um envio que a Meta já confirmou. false = não mudou.
+   */
+  updateCapiEnvio(id: string, patch: CapiEnvioPatch): Promise<boolean>;
+  /**
+   * Reserva um pendente antes de postar: empurra a próxima tentativa para `ate`
+   * se a linha ainda está pendente (e, com `vencidoAte`, se a vez dela já tinha
+   * chegado). Atômico — dois processos (cron, botão, carona do /api/track) nunca
+   * postam a mesma linha ao mesmo tempo. false = outro pegou antes.
+   */
+  reservarCapiEnvio(
+    id: string,
+    opts: { ate: string; vencidoAte?: string; livreDesde?: string; atualizadoEm: string },
+  ): Promise<boolean>;
+  /**
+   * Fecha os pendentes cujo fato é anterior a `eventoAntesDe` (fora da janela de
+   * reenvio): status "expirado", motivo "janela", payload e próxima tentativa
+   * nulos; quem não tinha erro recebe `motivo` como texto. Pula a linha
+   * RESERVADA agora (próxima tentativa depois de `atualizadoEm`: alguém a está
+   * postando). Roda mesmo com a CAPI desligada — o IP e o navegador guardados não
+   * ficam sem prazo. Devolve quantos fechou.
+   */
+  expirarCapiVencidos(opts: { eventoAntesDe: string; motivo: string; atualizadoEm: string }): Promise<number>;
+  /**
+   * Por lead, marca e status. Com `devidosAte`, só os PENDENTES cuja próxima
+   * tentativa já venceu, do mais antigo para o mais novo (a fila de reenvio);
+   * sem ele, os mais novos primeiro (por `criadoEm`). `limit` padrão 200; 0 = sem limite.
+   */
+  listCapiEnvios(opts: ListCapiEnviosOpts): Promise<CapiEnvio[]>;
+
   /** Accumulate landing-page counters for a brand's day (read-modify-write). */
   bumpLpDaily(brand: string, date: string, delta: LpDelta): Promise<void>;
 
@@ -266,6 +307,47 @@ export interface ListResumosOpts {
   limit?: number;
 }
 
+export interface ListCapiEnviosOpts {
+  leadId?: string;
+  brand?: string;
+  status?: CapiEnvioStatus;
+  /** ISO: só pendentes com a próxima tentativa até aqui (a fila de reenvio). */
+  devidosAte?: string;
+  /** ISO: criados a partir daqui. */
+  desde?: string;
+  /** Padrão 200; 0 = sem limite. */
+  limit?: number;
+}
+
+/** O que uma tentativa muda num envio. Ausente = fica como está; `null` = limpa. */
+export interface CapiEnvioPatch {
+  status?: CapiEnvioStatus;
+  tentativas?: number;
+  proximaTentativa?: string | null;
+  ultimoErro?: string | null;
+  enviadoEm?: string | null;
+  teste?: boolean;
+  fbtraceId?: string | null;
+  motivo?: CapiMotivoFim | null;
+  payload?: Record<string, unknown> | null;
+  atualizadoEm: string;
+}
+
+/** O patch aplicado a um envio em memória (backend local e testes). */
+export function aplicarPatchCapi(e: CapiEnvio, p: CapiEnvioPatch): CapiEnvio {
+  const r: CapiEnvio = { ...e, atualizadoEm: p.atualizadoEm };
+  if (p.status !== undefined) r.status = p.status;
+  if (p.tentativas !== undefined) r.tentativas = p.tentativas;
+  if (p.proximaTentativa !== undefined) r.proximaTentativa = p.proximaTentativa ?? undefined;
+  if (p.ultimoErro !== undefined) r.ultimoErro = p.ultimoErro ?? undefined;
+  if (p.enviadoEm !== undefined) r.enviadoEm = p.enviadoEm ?? undefined;
+  if (p.teste !== undefined) r.teste = p.teste;
+  if (p.fbtraceId !== undefined) r.fbtraceId = p.fbtraceId ?? undefined;
+  if (p.motivo !== undefined) r.motivo = p.motivo ?? undefined;
+  if (p.payload !== undefined) r.payload = p.payload;
+  return r;
+}
+
 /** Deltas applied to a day's landing-page counters. */
 export interface LpDelta {
   visits?: number;
@@ -281,6 +363,8 @@ export const STATE_KEYS = {
   /** Regras de campanha→marca configuradas pela UI: Record<slug, string[]>.
    *  Sobrepõem o env (<SLUG>_CAMPAIGN_MATCH) quando presentes. */
   brandCampaignMatch: "brand_campaign_match",
+  /** Última execução do cron /api/capi/retentar (ISO) — Integrações diz se ele roda. */
+  capiUltimoReenvio: "capi_ultimo_reenvio",
 } as const;
 
 export interface StoredToken {

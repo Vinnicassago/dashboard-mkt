@@ -18,6 +18,9 @@ import {
   type LpDelta,
   type PublicUser,
   type StoredUser,
+  type CapiEnvioPatch,
+  type ListCapiEnviosOpts,
+  aplicarPatchCapi,
 } from "./backend";
 import { toRole } from "../auth/roles";
 import { LOST_STATUSES, normalizeLeadStatus } from "../lead-status";
@@ -26,6 +29,7 @@ import type {
   AcaoEstado,
   AdDaily,
   AuditEntry,
+  CapiEnvio,
   SyncRun,
   Creative,
   DashboardData,
@@ -66,6 +70,8 @@ interface LocalFile {
   acoesEstado: AcaoEstado[];
   /** Uma linha por geração do resumo semanal da IA (Fase 5). */
   resumosSemanais: ResumoSemanal[];
+  /** A caixa de saída da CAPI: um envio por (evento, event_id) (Fase 7). */
+  capiEnvios: CapiEnvio[];
 }
 
 let cache: LocalFile | null = null;
@@ -170,6 +176,7 @@ function load(): LocalFile {
         if (!Array.isArray(parsed.syncRuns)) parsed.syncRuns = [];
         if (!Array.isArray(parsed.acoesEstado)) parsed.acoesEstado = [];
         if (!Array.isArray(parsed.resumosSemanais)) parsed.resumosSemanais = [];
+        if (!Array.isArray(parsed.capiEnvios)) parsed.capiEnvios = [];
         if (!Array.isArray(parsed.data.metas)) parsed.data.metas = [];
         migrateBrand(parsed.data);
         migrateLeadStatus(parsed);
@@ -191,6 +198,7 @@ function load(): LocalFile {
     syncRuns: [],
     acoesEstado: [],
     resumosSemanais: [],
+    capiEnvios: [],
   };
   persist(fresh);
   return fresh;
@@ -265,6 +273,7 @@ export const localBackend: DataBackend = {
       syncRuns: file().syncRuns,
       acoesEstado: file().acoesEstado,
       resumosSemanais: file().resumosSemanais,
+      capiEnvios: file().capiEnvios,
     };
     persist(cache);
     return seed;
@@ -621,5 +630,94 @@ export const localBackend: DataBackend = {
       .map((r) => ({ ...r, periodo: { ...r.periodo }, analise: structuredClone(r.analise) }));
     const limit = opts.limit ?? 12;
     return limit > 0 ? sorted.slice(0, limit) : sorted;
+  },
+
+  // ---- Envios à Meta (Fase 7) ----
+
+  async addCapiEnvio(e: CapiEnvio) {
+    const f = file();
+    if (f.capiEnvios.some((x) => x.id === e.id)) return false;
+    f.capiEnvios = [structuredClone(e), ...f.capiEnvios];
+    persist(f);
+    cache = f;
+    return true;
+  },
+
+  async updateCapiEnvio(id: string, patch: CapiEnvioPatch) {
+    const f = file();
+    const i = f.capiEnvios.findIndex((x) => x.id === id && x.status === "pendente");
+    if (i < 0) return false;
+    f.capiEnvios[i] = aplicarPatchCapi(f.capiEnvios[i], structuredClone(patch));
+    persist(f);
+    cache = f;
+    return true;
+  },
+
+  async reservarCapiEnvio(
+    id: string,
+    opts: { ate: string; vencidoAte?: string; livreDesde?: string; atualizadoEm: string },
+  ) {
+    const f = file();
+    const i = f.capiEnvios.findIndex(
+      (x) =>
+        x.id === id &&
+        x.status === "pendente" &&
+        (!opts.vencidoAte || Date.parse(x.proximaTentativa ?? "") <= Date.parse(opts.vencidoAte)) &&
+        (!opts.livreDesde || Date.parse(x.atualizadoEm) <= Date.parse(opts.livreDesde)),
+    );
+    if (i < 0) return false;
+    f.capiEnvios[i] = { ...f.capiEnvios[i], proximaTentativa: opts.ate, atualizadoEm: opts.atualizadoEm };
+    persist(f);
+    cache = f;
+    return true;
+  },
+
+  async expirarCapiVencidos(opts: { eventoAntesDe: string; motivo: string; atualizadoEm: string }) {
+    const f = file();
+    const corte = Date.parse(opts.eventoAntesDe);
+    let n = 0;
+    const agora = Date.parse(opts.atualizadoEm);
+    f.capiEnvios = f.capiEnvios.map((x) => {
+      if (x.status !== "pendente" || !(Date.parse(x.eventTime) < corte)) return x;
+      // Reservada agora (alguém está postando): fica para a próxima limpeza.
+      if (x.proximaTentativa && Date.parse(x.proximaTentativa) > agora) return x;
+      n++;
+      return {
+        ...x,
+        status: "expirado" as const,
+        motivo: "janela" as const,
+        payload: null,
+        proximaTentativa: undefined,
+        ultimoErro: x.ultimoErro ?? opts.motivo,
+        atualizadoEm: opts.atualizadoEm,
+      };
+    });
+    if (n > 0) {
+      persist(f);
+      cache = f;
+    }
+    return n;
+  },
+
+  async listCapiEnvios(opts: ListCapiEnviosOpts) {
+    const t = (v?: string) => (v ? Date.parse(v) : NaN);
+    let list = file().capiEnvios;
+    if (opts.leadId) list = list.filter((e) => e.leadId === opts.leadId);
+    if (opts.brand) list = list.filter((e) => e.brand === opts.brand);
+    if (opts.devidosAte) {
+      const ate = t(opts.devidosAte);
+      list = list.filter((e) => e.status === "pendente" && t(e.proximaTentativa) <= ate);
+    } else if (opts.status) {
+      list = list.filter((e) => e.status === opts.status);
+    }
+    if (opts.desde) {
+      const desde = t(opts.desde);
+      list = list.filter((e) => t(e.criadoEm) >= desde);
+    }
+    const sorted = opts.devidosAte
+      ? [...list].sort((a, b) => t(a.proximaTentativa) - t(b.proximaTentativa) || t(a.criadoEm) - t(b.criadoEm))
+      : [...list].sort((a, b) => t(b.criadoEm) - t(a.criadoEm));
+    const limit = opts.limit ?? 200;
+    return (limit > 0 ? sorted.slice(0, limit) : sorted).map((e) => structuredClone(e));
   },
 };

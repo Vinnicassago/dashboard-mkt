@@ -1,5 +1,5 @@
 import { Plug } from "lucide-react";
-import { RoboToggle, SyncPanel } from "@/components/config/integracoes-forms";
+import { ReenviarCapi, RoboToggle, SyncPanel } from "@/components/config/integracoes-forms";
 import { StatusRow, estadoSimples } from "@/components/config/integracoes-status";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { isAiConfigured } from "@/lib/ai/config";
@@ -13,6 +13,10 @@ import { getTransferidos, isRoboConfigured } from "@/lib/robo/client";
 import { estadoDaFonte, type EstadoFonte } from "@/lib/sincronizacao";
 import { DEFAULT_BRAND } from "@/lib/types";
 import { VERSAO } from "@/lib/version";
+import { getState, listCapiEnvios } from "@/lib/data/store";
+import { STATE_KEYS } from "@/lib/data/backend";
+import { capiEmModoTeste } from "@/lib/meta/capi";
+import { estadoDaCapi, estadoDoCronCapi, resumoDosEnvios } from "@/lib/capi-politica";
 import { contextoDeConfiguracoes } from "../_carregar";
 
 // Estado das fontes e última sincronização refletem o banco agora, nunca o build.
@@ -52,6 +56,25 @@ export default async function IntegracoesPage({ searchParams }: { searchParams: 
     if (roboErro) console.error("[integracoes] leitura do robô falhou:", roboErro);
   }
   const robo = estadoDoRobo({ configurado: roboConfigurado, desativado: roboOff, erro: roboErro });
+
+  // CAPI: o selo sai dos ENVIOS da última semana MAIS todo pendente de qualquer
+  // idade (todas as marcas: o dataset é um só), lidos como estão AGORA.
+  const agoraCapi = new Date();
+  const desde = new Date(agoraCapi.getTime() - 7 * 86_400_000).toISOString();
+  const enviosCapi = status.capi
+    ? [
+        ...(await listCapiEnvios({ desde, limit: 0 })),
+        ...(await listCapiEnvios({ status: "pendente", limit: 0 })),
+      ]
+    : [];
+  const resumoCapi = resumoDosEnvios(enviosCapi, agoraCapi.toISOString());
+  const capi = estadoDaCapi({ configurada: status.capi, teste: capiEmModoTeste(), resumo: resumoCapi });
+  const cronCapi = estadoDoCronCapi({
+    capiConfigurada: status.capi,
+    cronSecret: status.cronSecret,
+    ultimaExecucao: await getState<string>(STATE_KEYS.capiUltimoReenvio),
+    agora: agoraCapi.toISOString(),
+  });
 
   const ingestKey = Boolean(process.env.TRACK_INGEST_KEY?.trim());
   const ia = isAiConfigured();
@@ -125,15 +148,12 @@ export default async function IntegracoesPage({ searchParams }: { searchParams: 
                 "Chave definida",
               )}
             />
-            <StatusRow
-              label="Conversions API (CAPI)"
-              estado={estadoSimples(
-                status.capi,
-                "Lead e Schedule enviados pelo servidor, deduplicados com o Pixel.",
-                "Faltam META_DATASET_ID e META_CAPI_TOKEN.",
-                "Conectado",
-              )}
-            />
+            <StatusRow label="Conversions API (CAPI)" estado={capi}>
+              {status.capi && ctx.papeis.dados && resumoCapi.pendentes > 0 ? (
+                <ReenviarCapi pendentes={resumoCapi.pendentes} />
+              ) : null}
+            </StatusRow>
+            <StatusRow label="Reenvio da CAPI por cron" estado={cronCapi} />
             <StatusRow
               label="GA4 (Measurement Protocol)"
               estado={estadoSimples(

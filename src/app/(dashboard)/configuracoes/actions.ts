@@ -36,6 +36,8 @@ import { confirmaPerigo } from "@/lib/configuracoes";
 import { diagnosticarLeads, type DiagnosticoLeads } from "@/lib/diagnostico-leads";
 import { registrarAuditoria } from "@/lib/auditoria";
 import { setMensagemWhatsapp, setRoboDesativado } from "@/lib/integracoes";
+import { reenviarPendentes } from "@/lib/meta/capi-envios";
+import { LIMITE_REENVIO_MANUAL } from "@/lib/capi-politica";
 import { randomUUID } from "node:crypto";
 import {
   type AdDaily,
@@ -684,6 +686,36 @@ export async function setRoboAtivoAction(ativo: boolean): Promise<ActionState> {
     message: ativo
       ? "Robô ativado: as etapas dele voltam para a cascata, a Fila e Leads."
       : "Robô desativado: as etapas dele saem do painel até você religar.",
+  };
+}
+
+/**
+ * "Reenviar agora" da CAPI (Fase 7): tenta de novo, na hora, TODOS os pendentes
+ * ainda dentro da janela — sem esperar a vez de cada um (é o botão de depois de
+ * trocar um token; reenviar dentro das 48 h é seguro, a Meta deduplica).
+ */
+export async function reenviarCapiAction(): Promise<ActionState> {
+  if (!(await can("data:write"))) return DENIED;
+  const r = await reenviarPendentes({ limit: LIMITE_REENVIO_MANUAL, forcar: true });
+  revalidateAll();
+  if (r.naoConfigurado) return { ok: false, message: "A CAPI não está configurada — nada a reenviar." };
+  const plural = (n: number, um: string, varios: string) => `${n} ${n === 1 ? um : varios}`;
+  if (r.tentados === 0) {
+    return {
+      ok: true,
+      message: r.vencidos
+        ? `Nada a reenviar: ${plural(r.vencidos, "envio tinha passado", "envios tinham passado")} da janela de 48 h e ${r.vencidos === 1 ? "foi fechado" : "foram fechados"}.`
+        : "Nada a reenviar: nenhum envio pendente.",
+    };
+  }
+  const partes = [
+    plural(r.enviados, "chegou", "chegaram"),
+    r.pendentes ? plural(r.pendentes, "segue na fila", "seguem na fila") : "",
+    r.naoChegaram ? plural(r.naoChegaram, "não vai mais chegar", "não vão mais chegar") : "",
+  ].filter(Boolean);
+  return {
+    ok: r.enviados > 0 || r.naoChegaram === 0,
+    message: `${plural(r.tentados, "evento tentado", "eventos tentados")}: ${partes.join(" · ")}.`,
   };
 }
 

@@ -16,12 +16,15 @@ import {
   type LpDelta,
   type PublicUser,
   type StoredUser,
+  type CapiEnvioPatch,
+  type ListCapiEnviosOpts,
 } from "./backend";
 import { toRole } from "../auth/roles";
 import type {
   AcaoEstado,
   AdDaily,
   AuditEntry,
+  CapiEnvio,
   SyncRun,
   Creative,
   DashboardData,
@@ -43,6 +46,9 @@ import {
   n,
   s,
   toAcaoEstado,
+  toCapiEnvio,
+  fromCapiEnvio,
+  capiPatchParaColunas,
   toAd,
   toAudit,
   toSyncRun,
@@ -643,5 +649,93 @@ export const supabaseBackend: DataBackend = {
     const { data, error } = await query;
     check(error, "list resumos semanais");
     return (data ?? []).map(toResumoSemanal);
+  },
+
+  // ---- Envios à Meta (Fase 7) ----
+
+  async addCapiEnvio(e: CapiEnvio) {
+    // ignoreDuplicates: a linha que já existe fica como está (o mesmo fato não entra duas vezes).
+    const { data, error } = await supabase()
+      .from("capi_envios")
+      .upsert(fromCapiEnvio(e), { onConflict: "id", ignoreDuplicates: true })
+      .select("id");
+    check(error, "add capi envio");
+    return (data ?? []).length > 0;
+  },
+
+  async updateCapiEnvio(id: string, patch: CapiEnvioPatch) {
+    // Só pendente: "enviado" e "expirado" são finais.
+    const { data, error } = await supabase()
+      .from("capi_envios")
+      .update(capiPatchParaColunas(patch))
+      .eq("id", id)
+      .eq("status", "pendente")
+      .select("id");
+    check(error, "update capi envio");
+    return (data ?? []).length > 0;
+  },
+
+  async reservarCapiEnvio(
+    id: string,
+    opts: { ate: string; vencidoAte?: string; livreDesde?: string; atualizadoEm: string },
+  ) {
+    let query = supabase()
+      .from("capi_envios")
+      .update({ proxima_tentativa: opts.ate, atualizado_em: opts.atualizadoEm })
+      .eq("id", id)
+      .eq("status", "pendente");
+    if (opts.vencidoAte) query = query.lte("proxima_tentativa", opts.vencidoAte);
+    if (opts.livreDesde) query = query.lte("atualizado_em", opts.livreDesde);
+    const { data, error } = await query.select("id");
+    check(error, "reservar capi envio");
+    return (data ?? []).length > 0;
+  },
+
+  async expirarCapiVencidos(opts: { eventoAntesDe: string; motivo: string; atualizadoEm: string }) {
+    // Sem coalesce no PostgREST: primeiro quem não tinha erro ganha o motivo; depois o resto.
+    const base = {
+      status: "expirado",
+      motivo: "janela",
+      payload: null,
+      proxima_tentativa: null,
+      atualizado_em: opts.atualizadoEm,
+    };
+    // Reservada agora (próxima tentativa no futuro): alguém está postando — fica.
+    const livre = `proxima_tentativa.is.null,proxima_tentativa.lte."${opts.atualizadoEm}"`;
+    const semErro = await supabase()
+      .from("capi_envios")
+      .update({ ...base, ultimo_erro: opts.motivo })
+      .eq("status", "pendente")
+      .lt("event_time", opts.eventoAntesDe)
+      .is("ultimo_erro", null)
+      .or(livre)
+      .select("id");
+    check(semErro.error, "expirar capi envios");
+    const comErro = await supabase()
+      .from("capi_envios")
+      .update(base)
+      .eq("status", "pendente")
+      .lt("event_time", opts.eventoAntesDe)
+      .or(livre)
+      .select("id");
+    check(comErro.error, "expirar capi envios");
+    return (semErro.data ?? []).length + (comErro.data ?? []).length;
+  },
+
+  async listCapiEnvios(opts: ListCapiEnviosOpts) {
+    let query = supabase().from("capi_envios").select("*");
+    if (opts.leadId) query = query.eq("lead_id", opts.leadId);
+    if (opts.brand) query = query.eq("brand", opts.brand);
+    if (opts.devidosAte) query = query.eq("status", "pendente").lte("proxima_tentativa", opts.devidosAte);
+    else if (opts.status) query = query.eq("status", opts.status);
+    if (opts.desde) query = query.gte("criado_em", opts.desde);
+    query = opts.devidosAte
+      ? query.order("proxima_tentativa", { ascending: true }).order("criado_em", { ascending: true })
+      : query.order("criado_em", { ascending: false });
+    const limit = opts.limit ?? 200;
+    if (limit > 0) query = query.limit(limit);
+    const { data, error } = await query;
+    check(error, "list capi envios");
+    return (data ?? []).map(toCapiEnvio);
   },
 };

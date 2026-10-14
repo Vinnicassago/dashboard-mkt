@@ -646,6 +646,60 @@ export interface ResumoSemanal {
   criadoEm: string; // ISO
 }
 
+// ------------------------- Envios à Meta (CAPI, Fase 7) ---------------
+
+/** Os eventos que o painel manda à Conversions API. `ReuniaoRealizada` é personalizado. */
+export type CapiEventName = "Lead" | "Schedule" | "ReuniaoRealizada" | "Purchase";
+
+/**
+ * pendente = ainda não chegou (aguarda a 1ª tentativa ou uma nova); enviado = a
+ * Meta respondeu que recebeu; expirado = passou da janela em que reenviar é
+ * seguro (48 h de deduplicação) e ninguém mais tenta.
+ */
+export type CapiEnvioStatus = "pendente" | "enviado" | "expirado";
+
+/**
+ * Por que um envio parou ("expirado"): `janela` = as 48 h fecharam sem chegar;
+ * `recusado` = a Meta recusou o PRÓPRIO evento (reenviar daria o mesmo erro);
+ * `teste` = era de teste e o modo de teste foi desligado (não vai para a
+ * produção — não é perda); `sem-payload` = o evento guardado sumiu.
+ */
+export type CapiMotivoFim = "janela" | "recusado" | "teste" | "sem-payload";
+
+/**
+ * Um evento a caminho da Meta — a "caixa de saída" da CAPI. Uma linha por
+ * (evento, event_id): reenviar o mesmo fato cai na mesma linha. O `payload` é o
+ * evento JÁ montado (PII em hash; fbc, fbp, IP e navegador crus, como a Meta
+ * exige) e só existe enquanto falta enviar: ao sair ou expirar, é apagado — o
+ * IP e o navegador da visita não ficam guardados sem necessidade (LGPD).
+ */
+export interface CapiEnvio {
+  /** `${eventName}:${eventId}` — a mesma chave da deduplicação da Meta. */
+  id: string;
+  brand: Brand;
+  leadId: string;
+  eventName: CapiEventName;
+  eventId: string;
+  /** Quando o fato aconteceu (ISO) — vai como `event_time` em TODA tentativa. */
+  eventTime: string;
+  status: CapiEnvioStatus;
+  tentativas: number;
+  /** Quando tentar de novo (ISO); vazio fora de "pendente". */
+  proximaTentativa?: string;
+  /** O erro da última tentativa, em texto para pessoas. */
+  ultimoErro?: string;
+  enviadoEm?: string;
+  /** Saiu com `test_event_code`: a Meta trata como evento de teste. */
+  teste: boolean;
+  /** O `fbtrace_id` da resposta — o que o suporte da Meta pede. */
+  fbtraceId?: string;
+  /** Só em "expirado": por que parou. */
+  motivo?: CapiMotivoFim;
+  payload?: Record<string, unknown> | null;
+  criadoEm: string;
+  atualizadoEm: string;
+}
+
 // ------------------------- Dataset ----------------------------------
 
 /** The full dataset the dashboard renders from. */

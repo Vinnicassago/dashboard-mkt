@@ -17,11 +17,14 @@ import {
   type LpDelta,
   type PublicUser,
   type StoredUser,
+  type CapiEnvioPatch,
+  type ListCapiEnviosOpts,
 } from "./backend";
 import type {
   AcaoEstado,
   AdDaily,
   AuditEntry,
+  CapiEnvio,
   SyncRun,
   Creative,
   DashboardData,
@@ -40,6 +43,9 @@ import {
   type Row,
   s,
   toAcaoEstado,
+  toCapiEnvio,
+  fromCapiEnvio,
+  capiPatchParaColunas,
   toAd,
   toAudit,
   toSyncRun,
@@ -96,6 +102,25 @@ const SYNC_RUN_COLS = ["id", "source", "brand", "started_at", "finished_at", "ok
 const DRAFT_COLS = ["id", "brand", "status", "created_at", "updated_at", "planned_for", "type", "pillar", "hook_text", "hook_spoken", "promise", "script", "caption", "cta_type", "cta_keyword", "duration_sec", "has_burned_captions", "score", "validated_at", "playbook_version", "published_post_id", "notes", "ai_review", "validation_failed"];
 const ACAO_ESTADO_COLS = ["id", "brand", "semana", "acao", "estado", "motivo", "titulo", "por", "em"];
 const RESUMO_COLS = ["id", "brand", "semana", "periodo_de", "periodo_ate", "analise", "origem", "criado_em"];
+const CAPI_COLS = [
+  "id",
+  "brand",
+  "lead_id",
+  "event_name",
+  "event_id",
+  "event_time",
+  "status",
+  "tentativas",
+  "proxima_tentativa",
+  "ultimo_erro",
+  "enviado_em",
+  "teste",
+  "fbtrace_id",
+  "motivo",
+  "payload",
+  "criado_em",
+  "atualizado_em",
+];
 
 const withoutPk = (cols: string[], pk: string[]) => cols.filter((c) => !pk.includes(c));
 
@@ -625,6 +650,85 @@ export const postgresBackend: DataBackend = {
 
   async addResumoSemanal(r: ResumoSemanal) {
     await insertMany("resumos_semanais", RESUMO_COLS, [fromResumoSemanal(r)]);
+  },
+
+  // ---- Envios à Meta (Fase 7) ----
+
+  async addCapiEnvio(e: CapiEnvio) {
+    const { values, tuples } = buildTuples(CAPI_COLS, [fromCapiEnvio(e)]);
+    const res = await run(
+      `insert into capi_envios (${CAPI_COLS.join(",")}) values ${tuples} on conflict (id) do nothing`,
+      values,
+    );
+    return (res.rowCount ?? 0) > 0;
+  },
+
+  async updateCapiEnvio(id: string, patch: CapiEnvioPatch) {
+    const cols = capiPatchParaColunas(patch);
+    const keys = Object.keys(cols);
+    const sets = keys.map((k, i) => `${k} = $${i + 2}`).join(", ");
+    // Só pendente: "enviado" e "expirado" são finais.
+    const res = await run(`update capi_envios set ${sets} where id = $1 and status = 'pendente'`, [
+      id,
+      ...keys.map((k) => cols[k]),
+    ]);
+    return (res.rowCount ?? 0) > 0;
+  },
+
+  async reservarCapiEnvio(
+    id: string,
+    opts: { ate: string; vencidoAte?: string; livreDesde?: string; atualizadoEm: string },
+  ) {
+    const params: unknown[] = [id, opts.ate, opts.atualizadoEm];
+    let sql = "update capi_envios set proxima_tentativa = $2, atualizado_em = $3 where id = $1 and status = 'pendente'";
+    if (opts.vencidoAte) {
+      params.push(opts.vencidoAte);
+      sql += ` and proxima_tentativa <= $${params.length}`;
+    }
+    if (opts.livreDesde) {
+      params.push(opts.livreDesde);
+      sql += ` and atualizado_em <= $${params.length}`;
+    }
+    const res = await run(sql, params);
+    return (res.rowCount ?? 0) > 0;
+  },
+
+  async expirarCapiVencidos(opts: { eventoAntesDe: string; motivo: string; atualizadoEm: string }) {
+    const res = await run(
+      `update capi_envios
+          set status = 'expirado', motivo = 'janela', payload = null, proxima_tentativa = null,
+              ultimo_erro = coalesce(ultimo_erro, $2), atualizado_em = $3
+        where status = 'pendente' and event_time < $1
+          and (proxima_tentativa is null or proxima_tentativa <= $3)`,
+      [opts.eventoAntesDe, opts.motivo, opts.atualizadoEm],
+    );
+    return res.rowCount ?? 0;
+  },
+
+  async listCapiEnvios(opts: ListCapiEnviosOpts): Promise<CapiEnvio[]> {
+    const where: string[] = [];
+    const params: unknown[] = [];
+    const cond = (sql: string, v: unknown) => {
+      params.push(v);
+      where.push(sql.replace("?", `$${params.length}`));
+    };
+    if (opts.leadId) cond("lead_id = ?", opts.leadId);
+    if (opts.brand) cond("brand = ?", opts.brand);
+    if (opts.devidosAte) {
+      where.push("status = 'pendente'");
+      cond("proxima_tentativa <= ?", opts.devidosAte);
+    } else if (opts.status) {
+      cond("status = ?", opts.status);
+    }
+    if (opts.desde) cond("criado_em >= ?", opts.desde);
+    let sql = `select * from capi_envios${where.length ? ` where ${where.join(" and ")}` : ""}`;
+    sql += opts.devidosAte ? " order by proxima_tentativa asc, criado_em asc" : " order by criado_em desc";
+    const limit = opts.limit ?? 200;
+    if (limit > 0) {
+      params.push(limit);
+      sql += ` limit $${params.length}`;
+    }
+    return (await q(sql, params)).map(toCapiEnvio);
   },
 
   async listResumosSemanais(opts: ListResumosOpts): Promise<ResumoSemanal[]> {
