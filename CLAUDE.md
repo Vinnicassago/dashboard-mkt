@@ -73,7 +73,8 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   = cookie HMAC httpOnly (Web Crypto, portável Edge/Node — `session.ts` NÃO pode ter
   import node). Senha em scrypt (`passwords.ts`, server-only). Usuários passam pelo
   store (`countUsers`/`getUser`/...). Middleware libera `/login`, `/api/track`,
-  `/api/sync`, `/api/resumo-semanal`, `/api/capi/retentar`, `/api/health` (só a versão — `lib/version.ts`, atualizar a cada
+  `/api/sync`, `/api/resumo-semanal`, `/api/capi/retentar`, `/api/n8n/*` (cada rota exige o
+  `N8N_API_TOKEN`), `/api/health` (só a versão — `lib/version.ts`, atualizar a cada
   release: é como se confere que o deploy do EasyPanel pegou o código novo).
 - **Papéis** (`auth/roles.ts`): admin/marketing/comercial + capabilities
   (`leads:write` = admin+comercial; `data:write` = admin+marketing; `leads:delete`,
@@ -318,6 +319,53 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
 - **Ícones:** lucide-react não tem mais ícones de marca (`Instagram`, etc.) — use genéricos.
 - **UI em pt-BR.** Tabelas ordenáveis usam `components/ui/data-table.tsx` com colunas
   definidas em componentes client (`components/tables/*`).
+
+## Live 01/12 (nov/2026)
+
+- **Marcas** (E1-14): o casamento token × campanha é UM só (`lib/regra-de-marca.ts`,
+  `marcaDaCampanha`: sem diferença de maiúsculas, espaços, `[ KRN ]`, colchete de largura cheia)
+  — sync, reclassificação e a prévia da tela usam a mesma função. A trava "a regra não pega nada"
+  olha a CONTA inteira (`contextoDeMarcas` → `listCampanhasDaConta`): só com as linhas da marca
+  aberta, regra que funciona parecia inerte e o "≤" nunca saía. Salvar a regra reclassifica o
+  histórico na hora (a tela mostra antes o que muda). `upsertAdDaily`: o mesmo (dia, anúncio de id
+  numérico) que chega em outra marca sai da antiga — nunca duas cópias.
+- **Ficha da live** (migração 0021, `lib/qualificacao.ts`): vocabulários das respostas (bem, faixa
+  de valor, finalidade, parcela, prazo, horário) são fonte única; a leitura em 5 estados do
+  atendimento (`statusAtendimento`) e o estado da reunião (`statusReuniao`) são DERIVADOS — não há
+  2ª máquina de estados. `updateLeadFicha`: respostas sobrescrevem, fatos da automação
+  (`FICHA_UMA_VEZ`: mensagem, aviso, escalonamento, comunidade) são gravados uma vez. Escrita de
+  ficha passa por `gravarFicha` (evento `ficha` por fato que mudou); tentativa com resultado e
+  notas por `registrarContato` (ficha, Fila e API — um caminho só).
+- **Classe** (`lib/classe.ts`, puro): X (quitar dívidas) → C (abaixo do mínimo ou parcela
+  incompatível, pela tabela de parcela) → B (bem Outro, "Preciso agora", "Mais de 3 anos") → A. A do
+  painel é GRAVADA (`comClasse` em toda escrita de resposta) e salvar a tabela (Configurações →
+  Atendimento e classe, `classe_tabela_parcela`) recalcula todos. A que vale é `classeDoLead`
+  (painel, senão n8n); as duas diferentes = alerta global e "≠ n8n" em Leads.
+- **API do n8n** (`/api/n8n/*`, `lib/n8n/*`, `docs/api-n8n.md`): token `N8N_API_TOKEN` (sem ele,
+  503 — nunca aberta). Chave = WhatsApp normalizado (55 + DDD). A inscrição e o `/api/track` rodam
+  na `comTravaDaPessoa` (fila no processo + advisory lock) — a LP manda aos dois ao mesmo tempo. O
+  mesmo cadastro pelo outro caminho em até `MESMA_INSCRICAO_MIN` não é reenvio. PATCH aplica passo
+  a passo pela régua de transição; o primeiro que não pode devolve 409 com o que já foi gravado.
+  Log de erro sem corpo (telefone e e-mail nunca).
+- **Turno e Fila da live** (`lib/turno.ts`, `lib/fila-live.ts`, `atendimento_expediente`): turno
+  por dia da semana, feriados, faixas, prazo A (1 hora do turno; com faixa escolhida, início da
+  faixa + folga), B (fim do turno do dia ou do próximo útil), cadência (2ª: horas do turno; 3ª:
+  horas corridas empurradas para o turno; janela de 48 h → "Sem resposta"). A e B vão para a Fila
+  da live, por prazo; C e X ficam só em Leads; sem classe segue a régua de sempre
+  (`horario-util.ts`, 9h–18h). `etapaDoLead` tira os leads com classe das etapas de contato (as de
+  reunião ficam); a C1 do motor recebe `filaLive`.
+- **Aba Live 01/12** (`/live`, vista da Bússola — a navegação continua com 7): régua em
+  `lib/live.ts` (`live_campanha`, padrão = briefing, editável em Metas e orçamento); conta em
+  `lib/live-painel.ts` (puro). Inscrito da live = veio com a ficha (ou `utm_campaign`, se
+  configurado). Custos seguem as travas: denominador zero é "—", reunião abaixo de `MIN_REUNIOES` é
+  fato. Verba é da linha inteira até hoje; o resto é do período. Resumo do ClickUp =
+  `resumoSemanalDaLive`.
+- **Criativos da live** (`lib/criativos-live.ts`, na Mídia): sinal é SUGESTÃO (nada é pausado no
+  Meta): cedo demais até 5 dias E R$ 60; pausar acima de 2× a média dos julgáveis; o de carro só
+  a partir de `carro.julgarDesde`, contra os de imóvel da mesma semana. Nomes das campanhas,
+  conjuntos e anúncios = trechos editáveis (proposta `[LIVE] …`, `Carro`, `C9`, `C4A/C4B`).
+- **Conferência com o Gerenciador** (`lib/conferencia.ts`, tabela `conferencias_gasto`, 0022): o
+  servidor recalcula o gasto do período (o número do card de Investimento); até 5% é verde.
 
 ## Rodar / validar
 

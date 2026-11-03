@@ -182,7 +182,7 @@ function CartaoLive({ item, canEdit, mensagemWhatsapp }: { item: ItemDaFilaLive;
                     className="inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium hover:bg-foreground/5"
                   >
                     <MessageCircle className="size-3.5 text-[var(--success-text)]" />
-                    WhatsApp
+                    Abrir WhatsApp
                   </a>
                 ) : null}
                 {(Object.keys(CANAL_LABEL) as CanalContato[]).map((c) => (
