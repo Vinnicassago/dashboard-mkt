@@ -9,9 +9,30 @@ import {
   type DadosDaTransicao,
 } from "../lead-status";
 import { currentActor, newEventId } from "../auth/actor";
-import { enviarParaMeta, notaDoEnvio, type PedidoDeEnvio } from "../meta/capi-envios";
+import { enviarParaMeta, notaDoEnvio } from "../meta/capi-envios";
+import type { CapiUser } from "../meta/capi";
 import { sendGa4Event } from "../ga4/measurement-protocol";
 import type { Lead, LeadStatus } from "../types";
+
+/** Os eventos que uma mudança de STATUS dispara (os da ficha saem de `eventosDaFicha`). */
+type EventoDoStatus = "Schedule" | "ReuniaoRealizada" | "Purchase";
+
+/**
+ * O mesmo dado de pareamento em todo evento do painel: e-mail e telefone em hash
+ * (D9 — antes iam só nome, fbc, fbp e o id), mais os cookies da visita. "Lead sem
+ * nome" (o sentinela da entrada sem nome) não é o primeiro nome de ninguém.
+ */
+export function pessoaParaMeta(lead: Lead): CapiUser {
+  const nomes = chaveNome(lead.name) ? lead.name.trim().split(/\s+/) : [];
+  return {
+    email: lead.email,
+    phone: lead.phone,
+    firstName: nomes[0] || undefined,
+    fbc: lead.fbc,
+    fbp: lead.fbp,
+    externalId: lead.id,
+  };
+}
 
 export interface StatusResult {
   ok: boolean;
@@ -38,8 +59,8 @@ const jaFechou = (l: Lead) => Boolean(l.closedAt) || l.status === "cliente";
  * novo não manda um 2º Schedule (o event_id seria o mesmo e, passadas 48 h, a
  * Meta contaria duas vezes). Pura: a ponte do robô e a tela passam por aqui.
  */
-export function eventosDaMudanca(lead: Lead, status: LeadStatus): Array<PedidoDeEnvio["eventName"]> {
-  const eventos: Array<PedidoDeEnvio["eventName"]> = [];
+export function eventosDaMudanca(lead: Lead, status: LeadStatus): EventoDoStatus[] {
+  const eventos: EventoDoStatus[] = [];
   if (isBookedStatus(status) && !everBooked(lead)) eventos.push("Schedule");
   if ((status === "reuniao_realizada" || status === "cliente") && !jaCompareceu(lead)) eventos.push("ReuniaoRealizada");
   if (status === "cliente" && !jaFechou(lead)) eventos.push("Purchase");
@@ -47,8 +68,7 @@ export function eventosDaMudanca(lead: Lead, status: LeadStatus): Array<PedidoDe
 }
 
 /** O nome que a nota da tela usa para cada evento. */
-const NOME_NA_NOTA: Record<PedidoDeEnvio["eventName"], string> = {
-  Lead: "Lead",
+const NOME_NA_NOTA: Record<EventoDoStatus, string> = {
   Schedule: "Schedule",
   ReuniaoRealizada: "Reunião realizada",
   Purchase: "Purchase",
@@ -121,26 +141,15 @@ export async function aplicarStatus(
     return { ok: true, message: "Status atualizado." };
   }
 
-  // "Lead sem nome" (o sentinela da entrada sem nome) não é o primeiro nome de ninguém.
-  const nomes = chaveNome(lead.name) ? lead.name.trim().split(/\s+/) : [];
   const notes: string[] = [];
   const amount = dados.value ?? lead.value ?? 0;
-  // O mesmo dado de pareamento em todo evento do painel: e-mail e telefone em
-  // hash (D9 — antes iam só nome, fbc, fbp e o id), mais os cookies da visita.
-  const pessoa = {
-    email: lead.email,
-    phone: lead.phone,
-    firstName: nomes[0] || undefined,
-    fbc: lead.fbc,
-    fbp: lead.fbp,
-    externalId: lead.id,
-  };
-  const CUSTOM: Record<Exclude<PedidoDeEnvio["eventName"], "Lead">, Record<string, unknown>> = {
+  const pessoa = pessoaParaMeta(lead);
+  const CUSTOM: Record<EventoDoStatus, Record<string, unknown>> = {
     Schedule: { content_name: "Reunião agendada", currency: "BRL" },
     ReuniaoRealizada: { content_name: "Reunião realizada", currency: "BRL" },
     Purchase: { content_name: "Cliente (carta de crédito)", currency: "BRL", value: amount },
   };
-  const ID: Record<Exclude<PedidoDeEnvio["eventName"], "Lead">, string> = {
+  const ID: Record<EventoDoStatus, string> = {
     Schedule: `schedule-${lead.id}`,
     ReuniaoRealizada: `realizada-${lead.id}`,
     Purchase: `purchase-${lead.id}`,
@@ -148,7 +157,6 @@ export async function aplicarStatus(
 
   const resultados = await Promise.all(
     eventos.map(async (ev) => {
-      if (ev === "Lead") return null;
       const r = await enviarParaMeta({
         brand: lead.brand,
         leadId: lead.id,

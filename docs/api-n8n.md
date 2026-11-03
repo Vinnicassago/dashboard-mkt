@@ -242,6 +242,18 @@ Num `<form data-track="lead-form">` comum, basta os campos se chamarem `bem`,
 `valor`, `finalidade`, `parcela`, `prazo` e `aceite_mensagens`. A classe NÃO vem
 da página (o painel calcula); resposta fora da lista é ignorada sem perder o lead.
 
+**Eventos na Meta (E2-19).** O Pixel da página manda só o `Lead`, com o mesmo
+`eventId` do `dashTrackLead` (o painel manda o mesmo `Lead` pela Conversions API e
+a Meta deduplica). Os outros dois saem **só pelo painel**, pela Conversions API —
+não instale no Pixel, ou a Meta conta duas vezes:
+
+| Evento (nome exato) | Quando | Detalhe |
+|---|---|---|
+| `LeadQualificado` | a classe vira A ou B pela 1ª vez | `custom_data.classe` = A ou B |
+| `EntrouNaComunidade` | o n8n grava `comunidade_em` | hora do clique como `event_time` |
+
+Cada um sai uma vez por lead; na Meta, crie conversões personalizadas com esses nomes.
+
 ---
 
 Turno, feriados, faixas de horário e a tabela de parcela da classe ficam em

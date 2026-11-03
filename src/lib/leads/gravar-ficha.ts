@@ -3,6 +3,7 @@ import { addLeadEvent, getLead, updateLeadFicha } from "../data/store";
 import type { LeadFichaPatch } from "../data/backend";
 import { newEventId } from "../auth/actor";
 import { formatDateTime } from "../format";
+import { enviarParaMeta } from "../meta/capi-envios";
 import {
   BENS,
   FAIXAS_PARCELA,
@@ -11,9 +12,12 @@ import {
   HORARIOS,
   PRAZOS_COMPRA,
   STATUS_MSG1,
+  classeDoLead,
+  ehQualificado,
   type FatoDaFicha,
 } from "../qualificacao";
 import type { Lead } from "../types";
+import { pessoaParaMeta } from "./mudar-status";
 
 /**
  * Grava a ficha da live num lead e deixa no histórico um evento `ficha` por fato
@@ -96,11 +100,47 @@ const QUANDO_ACONTECEU: Partial<Record<FatoDaFicha, (l: Lead) => string | undefi
   reuniao_remarcar: (l) => l.reuniaoRemarcarEm,
 };
 
+/**
+ * Os eventos que esta escrita da ficha dispara na Meta (E2-19): virou A ou B
+ * (`LeadQualificado`) e clicou na comunidade (`EntrouNaComunidade`). Só o
+ * painel sabe a classe, então os dois saem SÓ pela CAPI — o Pixel não os manda.
+ * Pura. O id é estável por lead: voltar a ser A depois de um C não manda outro.
+ */
+export function eventosDaFicha(antes: Lead, depois: Lead): ("LeadQualificado" | "EntrouNaComunidade")[] {
+  const eventos: ("LeadQualificado" | "EntrouNaComunidade")[] = [];
+  if (!ehQualificado(antes) && ehQualificado(depois)) eventos.push("LeadQualificado");
+  if (!antes.comunidadeEm && depois.comunidadeEm) eventos.push("EntrouNaComunidade");
+  return eventos;
+}
+
+/** Enfileira os eventos da ficha na caixa de saída da CAPI (nunca lança: o fato já foi gravado). */
+async function avisarMeta(depois: Lead, eventos: ReturnType<typeof eventosDaFicha>, agora: string): Promise<void> {
+  for (const ev of eventos) {
+    await enviarParaMeta({
+      brand: depois.brand,
+      leadId: depois.id,
+      eventName: ev,
+      eventId: ev === "LeadQualificado" ? `qualificado-${depois.id}` : `comunidade-${depois.id}`,
+      eventTime: ev === "EntrouNaComunidade" ? (depois.comunidadeEm ?? agora) : agora,
+      actionSource: "system_generated",
+      eventSourceUrl: process.env.LP_BASE_URL,
+      user: pessoaParaMeta(depois),
+      customData:
+        ev === "LeadQualificado"
+          ? { content_name: "Lead qualificado", classe: classeDoLead(depois) }
+          : { content_name: "Entrou na comunidade" },
+    });
+  }
+}
+
 export async function gravarFicha(lead: Lead, patch: LeadFichaPatch, actor: string): Promise<FichaGravada> {
   await updateLeadFicha(lead.id, patch);
   const depois = (await getLead(lead.id)) ?? lead;
   const fatos = fatosQueMudaram(lead, depois);
   const agora = new Date().toISOString();
+  // Como no status: o envio entra na fila ANTES do histórico — se o histórico
+  // falhar, o fato que acabou de ser gravado já tem o seu evento.
+  await avisarMeta(depois, eventosDaFicha(lead, depois), agora);
   for (const f of fatos) {
     await addLeadEvent({
       id: newEventId(),

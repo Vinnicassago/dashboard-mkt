@@ -124,6 +124,8 @@ export const EVENTO_CAPI_LABEL: Record<CapiEventName, string> = {
   Schedule: "Reunião agendada (Schedule)",
   ReuniaoRealizada: "Reunião realizada (ReuniaoRealizada)",
   Purchase: "Venda (Purchase)",
+  LeadQualificado: "Lead qualificado (LeadQualificado)",
+  EntrouNaComunidade: "Entrou na comunidade (EntrouNaComunidade)",
 };
 
 /**

@@ -233,6 +233,12 @@ export function classeDoLead(l: Pick<Lead, "classe" | "classeN8n">): Classe | un
   return l.classe ?? l.classeN8n;
 }
 
+/** Inscrito qualificado = classe A ou B (a que vale, `classeDoLead`). */
+export function ehQualificado(l: Pick<Lead, "classe" | "classeN8n">): boolean {
+  const c = classeDoLead(l);
+  return c === "A" || c === "B";
+}
+
 /** As duas classes existem e discordam — aviso na ficha e no painel de alertas. */
 export function classeDiverge(l: Pick<Lead, "classe" | "classeN8n">): boolean {
   return Boolean(l.classe && l.classeN8n && l.classe !== l.classeN8n);

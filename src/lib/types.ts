@@ -719,8 +719,17 @@ export interface ResumoSemanal {
 
 // ------------------------- Envios à Meta (CAPI, Fase 7) ---------------
 
-/** Os eventos que o painel manda à Conversions API. `ReuniaoRealizada` é personalizado. */
-export type CapiEventName = "Lead" | "Schedule" | "ReuniaoRealizada" | "Purchase";
+/**
+ * Os eventos que o painel manda à Conversions API. `ReuniaoRealizada`,
+ * `LeadQualificado` (classe A ou B) e `EntrouNaComunidade` são personalizados.
+ */
+export type CapiEventName =
+  | "Lead"
+  | "Schedule"
+  | "ReuniaoRealizada"
+  | "Purchase"
+  | "LeadQualificado"
+  | "EntrouNaComunidade";
 
 /**
  * pendente = ainda não chegou (aguarda a 1ª tentativa ou uma nova); enviado = a

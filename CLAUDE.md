@@ -347,6 +347,14 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   mesmo cadastro pelo outro caminho em até `MESMA_INSCRICAO_MIN` não é reenvio. PATCH aplica passo
   a passo pela régua de transição; o primeiro que não pode devolve 409 com o que já foi gravado.
   Log de erro sem corpo (telefone e e-mail nunca).
+- **Página de inscrição direto no painel** (`/api/track`): a página manda as 5 respostas e o aceite
+  com as chaves da API do n8n (`lerRespostasDoFormulario`, sem a classe — da página ela é
+  ignorada); vazio não apaga, opção fora da lista é ignorada sem perder o lead, e a ficha passa
+  pela mesma `gravarFicha` + `comClasse`. Classifica sem depender do n8n (`docs/api-n8n.md` §5).
+- **CAPI da live** (E2-19, `eventosDaFicha` em `leads/gravar-ficha.ts`): `LeadQualificado` (a
+  classe vira A ou B pela 1ª vez, `ehQualificado`) e `EntrouNaComunidade` (`comunidadeEm`),
+  personalizados, ids `qualificado-<lead>`/`comunidade-<lead>`, pela caixa de saída ANTES do
+  histórico. Só o painel sabe a classe: os dois saem SÓ pela CAPI — o Pixel manda só o `Lead`.
 - **Turno e Fila da live** (`lib/turno.ts`, `lib/fila-live.ts`, `atendimento_expediente`): turno
   por dia da semana, feriados, faixas, prazo A (1 hora do turno; com faixa escolhida, início da
   faixa + folga), B (fim do turno do dia ou do próximo útil), cadência (2ª: horas do turno; 3ª:
