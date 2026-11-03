@@ -14,6 +14,7 @@ import {
   qtdDeLeads,
 } from "@/lib/leads-vista";
 import { pageRange } from "@/lib/page-range";
+import { expedienteAtual } from "@/lib/atendimento-server";
 import { isRangeKey, rangeLabel } from "@/lib/range";
 
 export const dynamic = "force-dynamic";
@@ -63,7 +64,8 @@ export async function POST(request: Request): Promise<Response> {
   try {
     const [data, eventos] = await Promise.all([getData(brand), listLeadEvents({ brand, limit: 0 })]);
     const { range, rangeKey } = pageRange(data, rangeParam);
-    const linhas = aplicarFiltro(montarLinhasDeLeads(data, eventos, new Date().toISOString(), { range }), filtro);
+    const expediente = await expedienteAtual();
+    const linhas = aplicarFiltro(montarLinhasDeLeads(data, eventos, new Date().toISOString(), { range, expediente }), filtro);
     n = linhas.length;
     descricao = descreverFiltro(filtro, periodoDoRegistro(rangeLabel(rangeKey), range));
     csv = montarCsvDeLeads(linhas);

@@ -16,6 +16,7 @@ import { getCurrentUser } from "@/lib/auth/current-user";
 import { formatarEspera } from "@/lib/format";
 import { paraRevisar } from "@/lib/identidade";
 import { montarLinhasDeLeads } from "@/lib/leads-vista";
+import { expedienteAtual } from "@/lib/atendimento-server";
 import { mascararContato, mascararEmail, mascararNoTexto, mascararTelefone } from "@/lib/lgpd";
 import { pageRange } from "@/lib/page-range";
 import { comPeriodo, rangeLabel } from "@/lib/range";
@@ -69,10 +70,11 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   const mascarar = user?.role === "marketing";
   const agora = new Date().toISOString();
 
-  const [todosEventos, comercial, excluidos] = await Promise.all([
+  const [todosEventos, comercial, excluidos, expediente] = await Promise.all([
     listLeadEvents({ brand, limit: 0 }),
     getComercial(),
     listDeletedLeads(brand),
+    expedienteAtual(),
   ]);
   // O histórico na tela mostra os 200 mais recentes; as linhas usam todos.
   const events = todosEventos.slice(0, 200).map((e) => (mascarar ? mascararEvento(e) : e));
@@ -86,7 +88,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   }));
   const origem = rotuladorDeOrigem(data);
 
-  const linhas = montarLinhasDeLeads(data, todosEventos, agora, { range });
+  const linhas = montarLinhasDeLeads(data, todosEventos, agora, { range, expediente });
   const rows = mascarar ? linhas.map(mascararContato) : linhas;
 
   // Para o papel mascarado, a tabela do especialista (componente compartilhado,

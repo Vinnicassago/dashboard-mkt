@@ -8,6 +8,8 @@ import { montarBussola, type Bussola } from "./bussola";
 import { semanaDaAcao } from "./motor";
 import { temLpNoPeriodo } from "./gargalo";
 import { NAO_CLASSIFICADO, contextoDeMarcas, integrationStatus } from "./meta/config";
+import { montarFilaDaLive } from "./fila-live";
+import { expedienteAtual } from "./atendimento-server";
 import { coberturaDeAnuncios, estadoDaFonte } from "./sincronizacao";
 import { getComercial, getRoboLeads } from "./robo/client";
 import { dataQualityChecks, type DateRange } from "./metrics";
@@ -105,6 +107,8 @@ export async function carregarBussola(
     robo: roboLigado ? { convites: convites.rows, comercial: comercial.rows } : undefined,
     fontes: { adsFalha: ads.falha, gastoSemMarca },
     estados,
+    // Os inscritos da live (A e B) saem da Fila de sempre: a C1 os conta por aqui.
+    filaLive: montarFilaDaLive(data.leads, eventos, agora, await expedienteAtual()),
     agora,
     hoje,
   });

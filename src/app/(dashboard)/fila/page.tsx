@@ -1,6 +1,10 @@
 import { AlertTriangle, CalendarClock, PhoneCall, RotateCcw } from "lucide-react";
 import { KpiCard } from "@/components/kpi/kpi-card";
 import { FilaList } from "@/components/fila/fila-list";
+import { FilaLive } from "@/components/fila/fila-live";
+import { montarFilaDaLive } from "@/lib/fila-live";
+import { expedienteAtual } from "@/lib/atendimento-server";
+import Link from "next/link";
 import { AtualizacaoAutomatica } from "@/components/layout/atualizacao-automatica";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -57,12 +61,19 @@ export default async function FilaPage({
   const mascarar = user?.role === "marketing";
   const agora = new Date().toISOString();
 
-  const [comercial, convites, eventos, mensagem] = await Promise.all([
+  const [comercial, convites, eventos, mensagem, expediente] = await Promise.all([
     getComercial(),
     getRoboLeads(),
     listLeadEvents({ brand, limit: 0 }),
     mensagemWhatsapp(),
+    expedienteAtual(),
   ]);
+
+  // A Fila da live: A e B pelo prazo do turno. C e X não entram; quem não tem
+  // classe segue a fila de sempre, abaixo.
+  const filaLive = montarFilaDaLive(data.leads, eventos, agora, expediente);
+  const liveA = filaLive.filter((i) => i.classe === "A");
+  const liveB = filaLive.filter((i) => i.classe === "B");
 
   const fila = montarFila({
     nowIso: agora,
@@ -91,15 +102,22 @@ export default async function FilaPage({
   const tentativasHoje = meus.filter((e) => e.action === "tentativa").length;
   const agendamentosHoje = meus.filter((e) => e.action === "status_changed" && e.toStatus === "agendado").length;
 
-  const esperando = (doGrupo("novo")?.total ?? 0) + (doGrupo("aguardando-contato")?.total ?? 0);
+  const esperando =
+    (doGrupo("novo")?.total ?? 0) +
+    (doGrupo("aguardando-contato")?.total ?? 0) +
+    filaLive.filter((i) => i.etapa === "primeira").length;
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <p className="max-w-3xl text-sm text-muted-foreground">
-          Todo mundo que está esperando alguma coisa, numa lista só, do mais atrasado para o
-          menos. O prazo do 1º contato é de 1 hora útil (seg–sex, 9h–18h): quem é contatado na
-          primeira hora qualifica muito mais.
+          Primeiro os inscritos da live (A e B), na ordem do prazo da tentativa — o turno e os
+          prazos estão em{" "}
+          <Link href="/configuracoes/atendimento#turno" className="text-primary underline-offset-4 hover:underline">
+            Configurações → Atendimento
+          </Link>
+          . C e X ficam só em Leads. Abaixo, quem entrou sem as respostas, pela régua de sempre
+          (1 hora útil, seg–sex, 9h–18h).
         </p>
         <AtualizacaoAutomatica
           geradoEm={agora}
@@ -148,6 +166,33 @@ export default async function FilaPage({
         />
       </div>
 
+      <section id="live" className="scroll-mt-24 space-y-3">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-base font-semibold">Live 01/12 — A e B por prazo</h2>
+          <p className="text-xs text-muted-foreground">
+            {formatInt(filaLive.length)} na fila · A: {formatInt(liveA.length)}
+            {liveA.some((i) => i.atrasado) ? (
+              <span className="font-medium text-[var(--status-fora-text)]">
+                {" "}
+                ({formatInt(liveA.filter((i) => i.atrasado).length)} atrasados)
+              </span>
+            ) : null}{" "}
+            · B: {formatInt(liveB.length)}
+            {liveB.some((i) => i.atrasado) ? (
+              <span className="font-medium text-[var(--status-perto-text)]">
+                {" "}
+                ({formatInt(liveB.filter((i) => i.atrasado).length)} atrasados)
+              </span>
+            ) : null}
+          </p>
+        </div>
+        <FilaLive
+          itens={mascarar ? filaLive.map((i) => ({ ...i, telefone: undefined, email: undefined })) : filaLive}
+          canEdit={canEdit}
+          mensagemWhatsapp={mensagem}
+        />
+      </section>
+
       {usuario ? (
         <p className="text-xs text-muted-foreground">
           Seu dia: {formatInt(tentativasHoje)} {tentativasHoje === 1 ? "tentativa" : "tentativas"} ·{" "}
@@ -156,10 +201,17 @@ export default async function FilaPage({
       ) : null}
 
       {fila.total === 0 ? (
-        <EmptyState
-          title="Ninguém esperando"
-          hint="Todo lead novo já teve tentativa de contato, nenhum retorno venceu e nenhuma reunião está sem desfecho."
-        />
+        filaLive.length ? (
+          <p className="text-xs text-muted-foreground">
+            Fora da live, ninguém esperando: nenhum lead sem classe sem tentativa, nenhum retorno vencido, nenhuma
+            reunião sem desfecho.
+          </p>
+        ) : (
+          <EmptyState
+            title="Ninguém esperando"
+            hint="Todo lead novo já teve tentativa de contato, nenhum retorno venceu e nenhuma reunião está sem desfecho."
+          />
+        )
       ) : (
         <>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">

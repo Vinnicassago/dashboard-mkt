@@ -24,6 +24,8 @@ import {
   statusReuniao,
 } from "@/lib/qualificacao";
 import { etapaDoLead, FILA_ETAPAS } from "@/lib/fila";
+import { ETAPA_DA_LIVE, etapaDaLive } from "@/lib/fila-live";
+import { expedienteAtual } from "@/lib/atendimento-server";
 import { gruposDuplicados, pareceTeste, problemasDeContato } from "@/lib/identidade";
 import { ETAPA_MAXIMA_LABEL, etapaMaxima } from "@/lib/lead-status";
 import { mascararEmail, mascararNoTexto, mascararTelefone } from "@/lib/lgpd";
@@ -87,7 +89,7 @@ export default async function FichaDoLead({
   const lead = await getLead(id);
   if (!lead) notFound();
 
-  const [dados, proprios, enviosMeta, canEdit, canDelete, mensagem, user] = await Promise.all([
+  const [dados, proprios, enviosMeta, canEdit, canDelete, mensagem, user, expediente] = await Promise.all([
     getData(lead.brand),
     listLeadEvents({ leadId: id, limit: 0 }),
     listCapiEnvios({ leadId: id, limit: 0 }),
@@ -95,6 +97,7 @@ export default async function FichaDoLead({
     can("leads:delete"),
     mensagemWhatsapp(),
     getCurrentUser(),
+    expedienteAtual(),
   ]);
   const mascarar = user?.role === "marketing";
   const comRange = (href: string) => comPeriodo(href, range);
@@ -136,6 +139,8 @@ export default async function FichaDoLead({
   const reuniao = statusReuniao(lead);
   const origem = origemDoLead(dados)(lead);
   const naFila = lead.deletedAt ? null : etapaDoLead(lead, proprios, new Date().toISOString());
+  // A e B da ficha da live: a etapa e o prazo vêm da Fila da live (pelo turno).
+  const naFilaLive = lead.deletedAt || naFila ? null : etapaDaLive(lead, proprios, expediente);
   const teste = pareceTeste(lead);
   const problemas = problemasDeContato(lead);
   const grupo = gruposDuplicados(dados.leads).find((g) =>
@@ -179,6 +184,15 @@ export default async function FichaDoLead({
                 Fila de contato
               </Link>{" "}
               como “{FILA_ETAPAS[naFila.nome].label}”
+            </>
+          ) : naFilaLive ? (
+            <>
+              {" "}
+              · na{" "}
+              <Link href={comRange("/fila#live")} className="text-primary underline-offset-4 hover:underline">
+                Fila da live
+              </Link>{" "}
+              como “{ETAPA_DA_LIVE[naFilaLive.etapa].label}”, prazo {formatDateTime(naFilaLive.prazo)}
             </>
           ) : null}
         </p>

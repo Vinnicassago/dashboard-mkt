@@ -302,9 +302,9 @@ function montarColunas(opts: {
       sortValue: (r) => (r.proximaAcao === "—" ? 0 : r.acaoAtrasada ? 2 : 1),
       className: "max-w-[130px]",
       render: (r) =>
-        r.etapaDaFila ? (
+        r.etapaDaFila || r.naFilaDaLive ? (
           <Link
-            href={comPeriodo(`/fila?etapa=${r.etapaDaFila}`)}
+            href={comPeriodo(r.etapaDaFila ? `/fila?etapa=${r.etapaDaFila}` : "/fila#live")}
             title={r.acaoPorque}
             className="underline-offset-4 hover:underline"
           >

@@ -1,5 +1,7 @@
-import { Scale } from "lucide-react";
+import { Clock, Scale } from "lucide-react";
 import { TabelaDeParcelaForm } from "@/components/config/atendimento-forms";
+import { ExpedienteForm } from "@/components/config/expediente-form";
+import { expedienteAtual } from "@/lib/atendimento-server";
 import { SemPermissao } from "@/components/config/sem-permissao";
 import { RolarParaAncora } from "@/components/ui/rolar-para-ancora";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,7 +24,7 @@ export default async function AtendimentoPage({ searchParams }: { searchParams: 
       </div>
     );
   }
-  const tabela = await tabelaDeParcela();
+  const [tabela, expediente] = await Promise.all([tabelaDeParcela(), expedienteAtual()]);
 
   return (
     <div className="max-w-4xl space-y-6">
@@ -30,6 +32,23 @@ export default async function AtendimentoPage({ searchParams }: { searchParams: 
       <p className="text-sm text-muted-foreground">
         A régua do atendimento: quem é A, B, C ou X e, por isso, quem entra na Fila de contato e com que prazo.
       </p>
+
+      <Card className="scroll-mt-24">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Clock className="size-4 text-primary" />
+            Turno, feriados e prazos
+          </CardTitle>
+          <CardDescription>
+            A “hora útil” da Fila da live: o turno de quem liga, os dias sem expediente, as faixas que o inscrito
+            escolhe e a cadência das tentativas. Vale para os inscritos com classe; quem entrou sem as respostas
+            segue a régua de sempre (seg–sex, 9h–18h).
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ExpedienteForm atual={expediente} podeEditar={ctx.papeis.dados} />
+        </CardContent>
+      </Card>
 
       <Card id="tabela-parcela" className="scroll-mt-24">
         <CardHeader>

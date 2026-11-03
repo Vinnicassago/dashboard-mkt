@@ -27,6 +27,7 @@
 
 import type { Dono } from "./dono";
 import { montarFila, type EntradaComercial, type EntradaConvite, type FilaResult } from "./fila";
+import type { ItemDaFilaLive } from "./fila-live";
 import { custoExibivel, kpisDoPeriodo, periodoDaRegua, reguaDoPeriodo, type KpisDoPeriodo } from "./kpis";
 import { metaVigente, taxasObservadas } from "./metas";
 import {
@@ -122,6 +123,11 @@ export interface EntradaMotor {
   estados?: AcaoEstado[];
   /** Dias cobertos por syncs de anúncio bem-sucedidos (ADR-06) — D1 separa "parado" de "sem dado". */
   cobertura?: Intervalo[];
+  /**
+   * A Fila da live (A e B pelo prazo do turno, `montarFilaDaLive`) — os inscritos
+   * com classe saem da Fila de sempre, e a C1 os conta daqui.
+   */
+  filaLive?: ItemDaFilaLive[];
   /** ISO. */
   agora: string;
   /** AAAA-MM-DD (Brasília). */
@@ -225,20 +231,38 @@ function regraC1(c: Contexto): Acao | null {
     (i) => i.etapa === "novo" || i.etapa === "aguardando-contato" || i.etapa === "convite-pendente",
   );
   const esperando = naEtapa.filter((i) => i.atraso > 1);
-  if (esperando.length === 0) return null;
+  // Os inscritos da live (A e B) sem a 1ª tentativa e com o prazo do turno vencido.
+  const liveEsperando = (c.filaLive ?? []).filter((i) => i.etapa === "primeira" && i.atrasado);
+  if (esperando.length === 0 && liveEsperando.length === 0) return null;
   const painel = esperando.filter((i) => i.etapa === "novo").length;
   const noRobo = esperando.length - painel;
-  const total = esperando.length;
-  const maisAntigo = Math.max(...esperando.map((i) => i.horasEsperando ?? 0));
+  const live = liveEsperando.length;
+  const liveA = liveEsperando.filter((i) => i.classe === "A").length;
+  const total = esperando.length + live;
+  const maisAntigo = Math.max(
+    0,
+    ...esperando.map((i) => i.horasEsperando ?? 0),
+    ...liveEsperando.map((i) => (Date.parse(c.agora) - Date.parse(i.desde)) / 3_600_000),
+  );
   // Mídia já paga por essas pessoas: o CPL do painel por cabeça (o custo de um
   // lead; quem passou pelo robô custou ao menos isso).
   const cpl = custoExibivel(c.kpis.cpl) ? c.kpis.cpl.valor : 0;
   const midia = total * cpl;
 
-  const href = painel > 0 && noRobo > 0 ? "/fila" : painel > 0 ? "/fila?etapa=novo" : "/fila?etapa=quentes";
+  const href =
+    live > 0
+      ? "/fila#live"
+      : painel > 0 && noRobo > 0
+        ? "/fila"
+        : painel > 0
+          ? "/fila?etapa=novo"
+          : "/fila?etapa=quentes";
   const taxa = c.taxaAgendada;
   const recuperaveis = taxa != null ? Math.round(total * taxa) : 0;
   const partes = [
+    live > 0
+      ? `${formatInt(live)} ${plural(live, "inscrito", "inscritos")} da live (${formatInt(liveA)} classe A) sem a 1ª tentativa no prazo do turno`
+      : "",
     painel > 0 ? `${formatInt(painel)} do painel sem nenhuma tentativa além de 1 hora útil` : "",
     noRobo > 0 ? `${formatInt(noRobo)} ${plural(noRobo, "pessoa", "pessoas")} do robô além do prazo da etapa` : "",
   ].filter(Boolean);
@@ -246,13 +270,13 @@ function regraC1(c: Contexto): Acao | null {
     // O id carrega QUEM está esperando: "feita" vale para estas pessoas. Se
     // outras passarem do prazo (ou estas continuarem), a ação volta ao topo —
     // senão um "Feito" de segunda escondia cinco pessoas novas até domingo.
-    id: `C1:${assinatura(esperando.map((i) => i.id))}`,
+    id: `C1:${assinatura([...esperando.map((i) => i.id), ...liveEsperando.map((i) => `live:${i.leadId}`)])}`,
     regra: "C1",
     dono: "COM",
     severidade: "agora",
     titulo: `${formatInt(total)} ${plural(total, "lead", "leads")} sem 1º contato além do prazo — o mais antigo há ${formatarEspera(maisAntigo)}`,
     detalhe:
-      `A Fila mostra ${formatInt(naEtapa.length)} esperando o 1º contato; ${formatInt(total)} já ${total === 1 ? "passou" : "passaram"} do prazo da etapa. ` +
+      `A Fila mostra ${formatInt(naEtapa.length + (c.filaLive ?? []).filter((i) => i.etapa === "primeira").length)} esperando o 1º contato; ${formatInt(total)} já ${total === 1 ? "passou" : "passaram"} do prazo da etapa. ` +
       `${partes.join("; ")}. ` +
       (midia > 0 ? `${formatCurrency0(midia)} de mídia já paga esperando um contato. ` : "") +
       "Não custa verba nova: ligue primeiro para quem está há mais tempo.",

@@ -28,6 +28,7 @@ import { everBooked } from "./metrics";
 import { chaveTelefone } from "./phone";
 import { horasUteisEntre, somarHorasUteis } from "./horario-util";
 import { eventosPorLead, resumoContato, type ResumoContato } from "./contato";
+import { classeDoLead } from "./qualificacao";
 import type { Lead, LeadEvent, LeadStatus } from "./types";
 
 // ---------------------------------------------------------------- vocabulário
@@ -402,6 +403,11 @@ export function etapaDoLead(l: Lead, eventos: LeadEvent[], nowIso: string): Etap
     .sort()
     .at(-1);
   const desdeReaberto = (base: string) => (reaberto && reaberto > base ? reaberto : base);
+
+  // Lead da ficha da live (com classe): A e B estão na Fila da live, pelo prazo do
+  // turno (`lib/fila-live.ts`); C e X ficam fora da Fila. As reuniões (confirmar,
+  // registrar desfecho) continuam aqui, para todo mundo.
+  if (classeDoLead(l) && (l.status === "lead" || l.status === "em_contato")) return null;
 
   if (l.status === "lead") {
     const desde = desdeReaberto(l.createdAt);

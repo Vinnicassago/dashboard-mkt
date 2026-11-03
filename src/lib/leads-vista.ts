@@ -27,9 +27,12 @@ import {
 } from "./lead-status";
 import { everBooked, filterLeads, type DateRange } from "./metrics";
 import { origemDoLead, type Origem } from "./origem";
+import { ETAPA_DA_LIVE, etapaDaLive, type EtapaDaLive } from "./fila-live";
+import type { Expediente } from "./turno";
 import {
   BENS,
   CLASSES,
+  CLASSES_NA_FILA,
   FAIXAS_PARCELA,
   FAIXAS_VALOR,
   FINALIDADES,
@@ -55,6 +58,14 @@ import type { DashboardData, Lead, LeadEvent, LeadStatus } from "./types";
 
 /** O que fazer com o lead AGORA, nas palavras da Fila. "—" = nada neste momento. */
 export type ProximaAcao = "ligar agora" | "retornar" | "confirmar reunião" | "registrar desfecho" | "—";
+
+/** Cada etapa da Fila da live, no mesmo vocabulário. */
+const ACAO_DA_LIVE: Record<EtapaDaLive, ProximaAcao> = {
+  primeira: "ligar agora",
+  cadencia: "retornar",
+  retornar: "retornar",
+  encerrar: "registrar desfecho",
+};
 
 /** Cada etapa da Fila, no verbo de quem vai agir. */
 export const ACAO_DA_ETAPA: Record<FilaEtapa, ProximaAcao> = {
@@ -109,6 +120,8 @@ export interface LinhaDeLead {
   proximaAcao: ProximaAcao;
   /** Etapa da Fila de onde a ação vem — o link abre a Fila nela. */
   etapaDaFila?: FilaEtapa;
+  /** A ação vem da Fila da live (A e B, pelo prazo do turno). */
+  naFilaDaLive: boolean;
   /** A ação já estourou o prazo da etapa. */
   acaoAtrasada: boolean;
   /** Por que não há ação agora (quando `proximaAcao` é "—"), ou desde quando há. */
@@ -197,7 +210,11 @@ export function montarLinhasDeLeads(
   data: DashboardData,
   eventos: LeadEvent[],
   agora: string,
-  opts: { range?: DateRange } = {},
+  opts: {
+    range?: DateRange;
+    /** O turno da live: a próxima ação dos A e B sai da Fila da live (`etapaDaLive`). */
+    expediente?: Expediente;
+  } = {},
 ): LinhaDeLead[] {
   const origem = origemDoLead(data);
   const porLead = eventosPorLead(eventos);
@@ -214,6 +231,10 @@ export function montarLinhasDeLeads(
     const proprios = porLead.get(l.id) ?? [];
     const contato = resumoContato(proprios);
     const etapa = etapaDoLead(l, proprios, agora);
+    // Da ficha da live: A e B têm a próxima ação na Fila da live; C e X, nenhuma.
+    const classe = classeDoLead(l);
+    const live = classe && opts.expediente && !etapa ? etapaDaLive(l, proprios, opts.expediente) : null;
+    const foraDaFila = classe && !CLASSES_NA_FILA.includes(classe) && !etapa && (l.status === "lead" || l.status === "em_contato");
     const horas = l.firstContactAt ? horasUteisEntre(l.createdAt, l.firstContactAt) : null;
     const grupo = grupoDe.get(l.id);
     const atrasada = etapa
@@ -238,14 +259,19 @@ export function montarLinhasDeLeads(
       falou: contato.falou,
       ultimaTentativa: contato.ultima,
       proximaTentativa: contato.proxima,
-      proximaAcao: etapa ? ACAO_DA_ETAPA[etapa.nome] : "—",
+      proximaAcao: etapa ? ACAO_DA_ETAPA[etapa.nome] : live ? ACAO_DA_LIVE[live.etapa] : "—",
       etapaDaFila: etapa?.nome,
-      acaoAtrasada: atrasada,
+      naFilaDaLive: Boolean(live),
+      acaoAtrasada: live ? live.prazo < agora : atrasada,
       acaoPorque: etapa
         ? etapa.venceEm
           ? `${FILA_ETAPAS[etapa.nome].hint} Vence ${formatDateTime(etapa.venceEm)}.`
           : `${FILA_ETAPAS[etapa.nome].hint} Desde ${formatDateTime(etapa.desde)}.`
-        : porqueSemAcao(l, contato),
+        : live
+          ? `Fila da live (classe ${classe}): ${ETAPA_DA_LIVE[live.etapa].label.toLowerCase()} — prazo ${formatDateTime(live.prazo)}.`
+          : foraDaFila
+            ? `Classe ${classe}: fica fora da Fila de contato (só em Leads).`
+            : porqueSemAcao(l, contato),
       origem: origem(l),
       dono: donoDoLead(l, etapa?.nome),
       sinalizadores: {
