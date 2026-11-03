@@ -237,6 +237,30 @@ function contrato(nome: string, abrir: () => Promise<{ backend: DataBackend; fec
       expect(livre).toBe("ok");
     });
 
+    it("conferências com o Gerenciador: só se insere, por marca, mais recente primeiro", async () => {
+      const conf = (id: string, brand: string, criadaEm: string, diferenca: number | null) => ({
+        id: `${id}-${sfx}`,
+        brand,
+        periodoDe: "2026-10-01",
+        periodoAte: "2026-10-31",
+        gastoPainel: 3607.16,
+        gastoGerenciador: 3612.4,
+        diferenca,
+        ultimoSync: "2026-11-03T09:00:00.000Z",
+        criadaEm,
+        criadaPor: "ana",
+      });
+      await b.addConferencia(conf("c1", `marca-${sfx}`, "2026-11-03T10:00:00.000Z", -0.00145));
+      await b.addConferencia(conf("c2", `marca-${sfx}`, "2026-11-03T11:00:00.000Z", null));
+      await b.addConferencia(conf("c3", `outra-${sfx}`, "2026-11-03T12:00:00.000Z", 0.2));
+      const lista = await b.listConferencias({ brand: `marca-${sfx}` });
+      expect(lista.map((c) => c.id)).toEqual([`c2-${sfx}`, `c1-${sfx}`]);
+      expect(lista[1]).toMatchObject({ periodoDe: "2026-10-01", periodoAte: "2026-10-31", gastoPainel: 3607.16, gastoGerenciador: 3612.4, criadaPor: "ana" });
+      expect(lista[1].diferenca).toBeCloseTo(-0.00145);
+      expect(lista[0].diferenca).toBeNull();
+      expect(await b.listConferencias({ brand: `marca-${sfx}`, limit: 1 })).toHaveLength(1);
+    });
+
     it("upsertAdDaily: o mesmo (dia, anúncio) que muda de marca não fica nas duas", async () => {
       await b.replaceAdData(
         [

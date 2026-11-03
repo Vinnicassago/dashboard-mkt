@@ -35,6 +35,7 @@ import type {
   AdDaily,
   AuditEntry,
   CapiEnvio,
+  ConferenciaGasto,
   SyncRun,
   Creative,
   DashboardData,
@@ -77,6 +78,8 @@ interface LocalFile {
   resumosSemanais: ResumoSemanal[];
   /** A caixa de saída da CAPI: um envio por (evento, event_id) (Fase 7). */
   capiEnvios: CapiEnvio[];
+  /** Conferências do gasto com o Gerenciador — só se insere (E2-23). */
+  conferencias: ConferenciaGasto[];
 }
 
 let cache: LocalFile | null = null;
@@ -182,6 +185,7 @@ function load(): LocalFile {
         if (!Array.isArray(parsed.acoesEstado)) parsed.acoesEstado = [];
         if (!Array.isArray(parsed.resumosSemanais)) parsed.resumosSemanais = [];
         if (!Array.isArray(parsed.capiEnvios)) parsed.capiEnvios = [];
+        if (!Array.isArray(parsed.conferencias)) parsed.conferencias = [];
         if (!Array.isArray(parsed.data.metas)) parsed.data.metas = [];
         migrateBrand(parsed.data);
         migrateLeadStatus(parsed);
@@ -204,6 +208,7 @@ function load(): LocalFile {
     acoesEstado: [],
     resumosSemanais: [],
     capiEnvios: [],
+    conferencias: [],
   };
   persist(fresh);
   return fresh;
@@ -279,6 +284,7 @@ export const localBackend: DataBackend = {
       acoesEstado: file().acoesEstado,
       resumosSemanais: file().resumosSemanais,
       capiEnvios: file().capiEnvios,
+      conferencias: file().conferencias,
     };
     persist(cache);
     return seed;
@@ -627,6 +633,24 @@ export const localBackend: DataBackend = {
     const sorted = [...list].sort((a, b) => b.finishedAt.localeCompare(a.finishedAt)).map((r) => ({ ...r }));
     const limit = opts?.limit ?? 50;
     return limit > 0 ? sorted.slice(0, limit) : sorted;
+  },
+
+  // ---- Conferência com o Gerenciador (E2-23) ----
+
+  async addConferencia(c: ConferenciaGasto) {
+    const f = file();
+    f.conferencias = [c, ...f.conferencias.filter((x) => x.id !== c.id)];
+    persist(f);
+    cache = f;
+  },
+
+  async listConferencias(opts: { brand: string; limit?: number }) {
+    const lista = file()
+      .conferencias.filter((c) => c.brand === opts.brand)
+      .sort((a, b) => b.criadaEm.localeCompare(a.criadaEm))
+      .map((c) => ({ ...c }));
+    const limit = opts.limit ?? 20;
+    return limit > 0 ? lista.slice(0, limit) : lista;
   },
 
   // ---- Bússola (Fase 5) ----

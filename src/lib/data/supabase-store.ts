@@ -30,6 +30,7 @@ import type {
   AdDaily,
   AuditEntry,
   CapiEnvio,
+  ConferenciaGasto,
   SyncRun,
   Creative,
   DashboardData,
@@ -51,6 +52,8 @@ import {
   n,
   s,
   toAcaoEstado,
+  toConferencia,
+  fromConferencia,
   toCapiEnvio,
   fromCapiEnvio,
   capiPatchParaColunas,
@@ -645,6 +648,20 @@ export const supabaseBackend: DataBackend = {
   async addSyncRun(run: SyncRun) {
     const { error } = await supabase().from("sync_runs").insert(fromSyncRun(run));
     check(error, "add sync run");
+  },
+
+  async addConferencia(c: ConferenciaGasto) {
+    const { error } = await supabase().from("conferencias_gasto").insert(fromConferencia(c));
+    check(error, "add conferencia");
+  },
+
+  async listConferencias(opts: { brand: string; limit?: number }) {
+    let query = supabase().from("conferencias_gasto").select("*").eq("brand", opts.brand).order("criada_em", { ascending: false });
+    const limit = opts.limit ?? 20;
+    if (limit > 0) query = query.limit(limit);
+    const { data, error } = await query;
+    check(error, "list conferencias");
+    return (data ?? []).map(toConferencia);
   },
 
   async listSyncRuns(opts?: ListSyncRunsOpts) {

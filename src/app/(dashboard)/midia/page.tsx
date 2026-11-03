@@ -7,7 +7,7 @@ import { CreativesTable } from "@/components/tables/creatives-table";
 import { BarrasDiarias } from "@/components/charts/barras-diarias";
 import { ChartCard } from "@/components/ui/chart-card";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { getData } from "@/lib/data/store";
+import { getData, listConferencias } from "@/lib/data/store";
 import { activeBrandSlug } from "@/lib/active-brand";
 import { pageRange } from "@/lib/page-range";
 import { dailySeries, trechosSemDado, trechosSemVeiculacao } from "@/lib/metrics";
@@ -31,14 +31,16 @@ import {
   VOLUME_MINIMO_RANKING,
   type NaoAtribuidos,
 } from "@/lib/midia";
-import { comPeriodo, hojeEmBrasilia } from "@/lib/range";
+import { comPeriodo, hojeEmBrasilia, parseCustomRange, rangeLabel } from "@/lib/range";
 import { dica } from "@/lib/dicionario";
-import { coberturaDeAnuncios } from "@/lib/sincronizacao";
+import { coberturaDeAnuncios, estadoDaFonte } from "@/lib/sincronizacao";
 import { alertasDeAtribuicao, alertasDeConfianca } from "@/lib/alertas";
 import { RegistrarAlertas } from "@/components/layout/alertas";
 import { MIN_REUNIOES } from "@/lib/trust";
 import { formatCurrency0, formatInt, formatIntComSinal, formatPercent } from "@/lib/format";
 import { CriativosDaLiveCard } from "@/components/midia/criativos-live";
+import { ConferenciaGerenciador } from "@/components/midia/conferencia-gerenciador";
+import { can } from "@/lib/auth/guard";
 import { criativosDaLive } from "@/lib/criativos-live";
 import { campanhaDaLive } from "@/lib/live-server";
 import { isAwareness } from "@/lib/brands";
@@ -57,7 +59,13 @@ export default async function MidiaPage({ searchParams }: { searchParams: Promis
   const brand = await activeBrandSlug();
   const data = await getData(brand);
   const { range, rangeKey } = pageRange(data, (await searchParams).range);
-  const [cobertura, { brandRules, campanhasDaConta }] = await Promise.all([coberturaDeAnuncios(brand), contextoDeMarcas()]);
+  const [cobertura, { brandRules, campanhasDaConta }, syncAds, conferencias, podeConferir] = await Promise.all([
+    coberturaDeAnuncios(brand),
+    contextoDeMarcas(),
+    estadoDaFonte("ads", brand),
+    listConferencias({ brand, limit: 10 }),
+    can("data:write"),
+  ]);
   const hoje = hojeEmBrasilia();
   const fim = range?.to ?? hoje;
 
@@ -105,6 +113,32 @@ export default async function MidiaPage({ searchParams }: { searchParams: Promis
 
       {/* 1. RESUMO — a resposta, no primeiro viewport. */}
       <ResumoMidiaCard resumo={resumo} rangeKey={rangeKey} />
+
+      {/* 1b. CONFERIR COM O GERENCIADOR — o investimento acima contra o que a Meta cobra (E2-23). */}
+      <Card id="conferir" className="scroll-mt-24">
+        <CardHeader>
+          <CardTitle>Conferir com o Gerenciador</CardTitle>
+          <CardDescription>
+            Digite o gasto que o Gerenciador de Anúncios mostra para o mesmo período: até 5% de diferença é normal (a
+            Meta revisa os números por até 48 h); acima disso, vale olhar o sync e as marcas. Cada conferência fica
+            guardada.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ConferenciaGerenciador
+            gastoPainel={kp.investimento.valor}
+            periodo={
+              range
+                ? `${parseCustomRange(rangeKey) ? "" : `${rangeLabel(rangeKey)}, `}${range.from.split("-").reverse().join("/")} a ${range.to.split("-").reverse().join("/")}`
+                : "campanha inteira"
+            }
+            ultimoSync={syncAds.ultimoOk}
+            rangeKey={rangeKey}
+            historico={conferencias}
+            podeEditar={podeConferir}
+          />
+        </CardContent>
+      </Card>
 
       {/* 2. TENDÊNCIA SEMANAL — gasto, leads e CPL por semana. */}
       <ChartCard

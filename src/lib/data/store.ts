@@ -36,6 +36,7 @@ import type {
   AdDaily,
   AuditEntry,
   CapiEnvio,
+  ConferenciaGasto,
   Meta,
   ResumoSemanal,
   SyncRun,
@@ -131,6 +132,11 @@ export const listAuditEntries = (limit = 20) => backend().listAuditEntries(limit
 
 export const addSyncRun = (run: SyncRun) => backend().addSyncRun(run);
 export const listSyncRuns = (opts?: ListSyncRunsOpts) => backend().listSyncRuns(opts);
+
+// ---- Conferência com o Gerenciador (E2-23) ------------------------------
+
+export const addConferencia = (c: ConferenciaGasto) => backend().addConferencia(c);
+export const listConferencias = (opts: { brand: string; limit?: number }) => backend().listConferencias(opts);
 
 // ---- Bússola (Fase 5) -----------------------------------------------
 

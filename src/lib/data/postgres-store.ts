@@ -30,6 +30,7 @@ import type {
   AdDaily,
   AuditEntry,
   CapiEnvio,
+  ConferenciaGasto,
   SyncRun,
   Creative,
   DashboardData,
@@ -48,6 +49,8 @@ import {
   type Row,
   s,
   toAcaoEstado,
+  toConferencia,
+  fromConferencia,
   toCapiEnvio,
   fromCapiEnvio,
   capiPatchParaColunas,
@@ -105,6 +108,7 @@ const EVENT_COLS = ["id", "lead_id", "brand", "lead_name", "actor", "action", "f
 const AUDIT_COLS = ["id", "at", "actor", "action", "detail"];
 const SYNC_RUN_COLS = ["id", "source", "brand", "started_at", "finished_at", "ok", "date_from", "date_to", "rows", "error"];
 const DRAFT_COLS = ["id", "brand", "status", "created_at", "updated_at", "planned_for", "type", "pillar", "hook_text", "hook_spoken", "promise", "script", "caption", "cta_type", "cta_keyword", "duration_sec", "has_burned_captions", "score", "validated_at", "playbook_version", "published_post_id", "notes", "ai_review", "validation_failed"];
+const CONFERENCIA_COLS = ["id", "brand", "periodo_de", "periodo_ate", "gasto_painel", "gasto_gerenciador", "diferenca", "ultimo_sync", "criada_em", "criada_por"];
 const ACAO_ESTADO_COLS = ["id", "brand", "semana", "acao", "estado", "motivo", "titulo", "por", "em"];
 const RESUMO_COLS = ["id", "brand", "semana", "periodo_de", "periodo_ate", "analise", "origem", "criado_em"];
 const CAPI_COLS = [
@@ -680,6 +684,19 @@ export const postgresBackend: DataBackend = {
 
   async addSyncRun(run: SyncRun) {
     await insertMany("sync_runs", SYNC_RUN_COLS, [fromSyncRun(run)]);
+  },
+
+  async addConferencia(c: ConferenciaGasto) {
+    await insertMany("conferencias_gasto", CONFERENCIA_COLS, [fromConferencia(c)]);
+  },
+
+  async listConferencias(opts: { brand: string; limit?: number }) {
+    const limit = opts.limit ?? 20;
+    const rows = await q(
+      `select * from conferencias_gasto where brand = $1 order by criada_em desc${limit > 0 ? " limit $2" : ""}`,
+      limit > 0 ? [opts.brand, limit] : [opts.brand],
+    );
+    return rows.map(toConferencia);
   },
 
   async listSyncRuns(opts?: ListSyncRunsOpts): Promise<SyncRun[]> {

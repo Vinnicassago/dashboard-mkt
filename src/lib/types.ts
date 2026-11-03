@@ -567,6 +567,31 @@ export interface SyncRun {
   error?: string;
 }
 
+// ------------------------- Conferência com o Gerenciador (E2-23) ------
+
+/**
+ * Uma conferência do gasto do painel contra o que o Gerenciador de Anúncios
+ * mostra, para o mesmo período. Só se insere: o histórico é a prova de que o
+ * número foi conferido (e de quando divergiu).
+ */
+export interface ConferenciaGasto {
+  id: string;
+  brand: Brand;
+  /** O período conferido (AAAA-MM-DD, inclusivo). */
+  periodoDe: string;
+  periodoAte: string;
+  /** O investimento do painel no período, na hora da conferência. */
+  gastoPainel: number;
+  /** O que a pessoa digitou do Gerenciador. */
+  gastoGerenciador: number;
+  /** (painel − Gerenciador) ÷ Gerenciador; null quando o Gerenciador é 0 e o painel não. */
+  diferenca: number | null;
+  /** O último sync de anúncios que deu certo, na hora da conferência. */
+  ultimoSync?: string;
+  criadaEm: string;
+  criadaPor: string;
+}
+
 // ------------------------- Goals ------------------------------------
 
 export type GoalMetric =

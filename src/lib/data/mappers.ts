@@ -21,6 +21,7 @@ import {
   type Diagnostico,
 } from "../qualificacao";
 import type {
+  ConferenciaGasto,
   AcaoEstado,
   AcaoEstadoValor,
   AdDaily,
@@ -403,6 +404,32 @@ export const fromLead = (l: Lead): Row => ({
   diagnostico: l.diagnostico ?? null,
   reuniao_confirmada_em: l.reuniaoConfirmadaEm ?? null,
   reuniao_remarcar_em: l.reuniaoRemarcarEm ?? null,
+});
+
+export const toConferencia = (r: Row): ConferenciaGasto => ({
+  id: s(r.id),
+  brand: brandOf(r.brand),
+  periodoDe: day(r.periodo_de),
+  periodoAte: day(r.periodo_ate),
+  gastoPainel: n(r.gasto_painel),
+  gastoGerenciador: n(r.gasto_gerenciador),
+  diferenca: r.diferenca == null ? null : n(r.diferenca),
+  ultimoSync: r.ultimo_sync ? iso(r.ultimo_sync) : undefined,
+  criadaEm: iso(r.criada_em),
+  criadaPor: s(r.criada_por),
+});
+
+export const fromConferencia = (c: ConferenciaGasto): Row => ({
+  id: c.id,
+  brand: c.brand,
+  periodo_de: c.periodoDe,
+  periodo_ate: c.periodoAte,
+  gasto_painel: c.gastoPainel,
+  gasto_gerenciador: c.gastoGerenciador,
+  diferenca: c.diferenca,
+  ultimo_sync: c.ultimoSync ?? null,
+  criada_em: c.criadaEm,
+  criada_por: c.criadaPor,
 });
 
 export const toGoal = (r: Row): Goal => ({

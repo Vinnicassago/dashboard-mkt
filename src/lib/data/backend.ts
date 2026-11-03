@@ -5,6 +5,7 @@ import type {
   CapiEnvio,
   CapiEnvioStatus,
   CapiMotivoFim,
+  ConferenciaGasto,
   Creative,
   DashboardData,
   Goal,
@@ -360,6 +361,12 @@ export interface DataBackend {
   addSyncRun(run: SyncRun): Promise<void>;
   /** Mais recentes primeiro (por `finishedAt`). `limit` 0 = sem limite. */
   listSyncRuns(opts?: ListSyncRunsOpts): Promise<SyncRun[]>;
+
+  // ---- Conferência com o Gerenciador (E2-23) ----
+  /** Grava uma conferência (só insere — o histórico fica). */
+  addConferencia(c: ConferenciaGasto): Promise<void>;
+  /** Da marca, mais recentes primeiro. `limit` padrão 20; 0 = sem limite. */
+  listConferencias(opts: { brand: string; limit?: number }): Promise<ConferenciaGasto[]>;
 
   // ---- Bússola (Fase 5) ----
   /**
