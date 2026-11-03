@@ -534,6 +534,8 @@ export const STATE_KEYS = {
   tabelaDeParcela: "classe_tabela_parcela",
   /** Turno, feriados, faixas e cadência do atendimento da live (`lib/turno.ts`). */
   expediente: "atendimento_expediente",
+  /** A campanha da live de 01/12: períodos, verba, metas, tokens e os números manuais (`lib/live.ts`). */
+  campanhaDaLive: "live_campanha",
 } as const;
 
 export interface StoredToken {

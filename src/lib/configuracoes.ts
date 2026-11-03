@@ -35,6 +35,7 @@ export type VistaConfig = keyof typeof VISTA_CONFIG;
 /** Em qual vista cada âncora mora. */
 export const VISTA_DA_ANCORA: Record<string, VistaConfig> = {
   pendencias: "metas",
+  "campanha-live": "metas",
   orcamento: "metas",
   metas: "metas",
   "metas-conteudo": "metas",

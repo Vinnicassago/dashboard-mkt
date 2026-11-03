@@ -1,4 +1,6 @@
-import { Target, Wallet } from "lucide-react";
+import { Radio, Target, Wallet } from "lucide-react";
+import { LiveConfigForm } from "@/components/config/live-config-form";
+import { campanhaDaLive } from "@/lib/live-server";
 import { BudgetForm, CalculadoraDeMetas, GoalsForm, MetaManualForm } from "@/components/config/metas-forms";
 import { PendenciasCard } from "@/components/config/pendencias-card";
 import { SemPermissao } from "@/components/config/sem-permissao";
@@ -66,6 +68,24 @@ export default async function MetasPage({ searchParams }: { searchParams: Promis
         <SemPermissao quem="Administrador e Marketing" oque="cadastram orçamento e metas" />
       ) : (
         <>
+          {ctx.brand.type !== "awareness" ? (
+            <Card id="campanha-live" className="scroll-mt-24">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Radio className="size-4 text-primary" />
+                  Campanha da live 01/12
+                </CardTitle>
+                <CardDescription>
+                  Os números do briefing, já cadastrados: períodos, verba por linha, metas e como reconhecer o que é da
+                  live no Gerenciador. A aba Live da Bússola lê daqui.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <LiveConfigForm atual={await campanhaDaLive()} podeEditar={ctx.papeis.dados} />
+              </CardContent>
+            </Card>
+          ) : null}
+
           <Card id="orcamento" className="scroll-mt-24">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
