@@ -14,6 +14,7 @@ import { RESULTADOS_VALIDOS, classeDoLead, statusReuniao, type StatusReuniao } f
 import { resultadoDaReuniao } from "./reuniao";
 import { eventosPorLead, tentativasDoLead } from "./contato";
 import { MIN_REUNIOES } from "./trust";
+import { everBooked } from "./metrics";
 import { formatCurrency0, formatInt } from "./format";
 import { fimDaJanelaDeContato, prazoDaPrimeiraTentativa, type Expediente } from "./turno";
 import { ehDoCarro, ehInscritoDaLive, linhaDaCampanha, type CampanhaDaLive, type IdDaLinha } from "./live";
@@ -112,6 +113,11 @@ export interface PainelLive {
     /** Foram à reunião e disseram não ("Não tem interesse" ou desistência). */
     disseramNao: number;
   };
+  /**
+   * As ligações do pós-live (E5-03): os A e B sem reunião quando o pós-live
+   * começou, quantos o comercial ligou desde então, quantos atenderam e quantos marcaram.
+   */
+  ligacoesPosLive: { semReuniao: number; ligados: number; atenderam: number; marcaram: number };
   diagnosticos: number;
   /** Nenhuma linha de anúncio casou com os trechos das campanhas da live. */
   semCampanhas: boolean;
@@ -380,9 +386,34 @@ export function montarPainelLive(e: EntradaPainelLive): PainelLive {
       ).length,
       disseramNao: inscritos.filter((l) => l.attendedAt && (l.status === "sem_interesse" || l.status === "desistencia")).length,
     },
+    ligacoesPosLive: ligacoesDoPosLive(qualificados, porLead, cfg),
     diagnosticos: inscritos.filter((l) => l.diagnostico).length,
     semCampanhas: linhasDaLive.length === 0,
   };
+}
+
+/**
+ * Base = A e B que não tinham reunião marcada quando o pós-live começou (meia-noite
+ * de Brasília) — a mesma lista que Leads dá com "A e B" + "Nunca agendou" naquela
+ * manhã. Ligado = alguma tentativa desde então; atendeu = falou ou deu resultado válido.
+ */
+function ligacoesDoPosLive(
+  qualificados: Lead[],
+  porLead: Map<string, LeadEvent[]>,
+  cfg: CampanhaDaLive,
+): PainelLive["ligacoesPosLive"] {
+  const inicio = new Date(`${cfg.posLive.de}T00:00:00-03:00`).toISOString();
+  // Sem o marco (registro antigo), o status que já é de reunião conta como agendado antes.
+  const agendouAntes = (l: Lead) => (l.bookedAt ? l.bookedAt < inicio : everBooked(l));
+  const base = qualificados.filter((l) => !agendouAntes(l));
+  let ligados = 0;
+  let atenderam = 0;
+  for (const l of base) {
+    const desde = tentativasDoLead(porLead.get(l.id) ?? []).filter((t) => t.em >= inicio);
+    if (desde.length) ligados += 1;
+    if (desde.some((t) => (t.resultado ? RESULTADOS_VALIDOS.includes(t.resultado) : t.falou))) atenderam += 1;
+  }
+  return { semReuniao: base.length, ligados, atenderam, marcaram: base.filter((l) => l.bookedAt && l.bookedAt >= inicio).length };
 }
 
 /** "87%" sem casas; sem base, "—". */
@@ -398,7 +429,7 @@ export function resumoSemanalDaLive(p: PainelLive, cfg: CampanhaDaLive, ate: str
 
 /** Um texto pronto para colar no comentário de uma tarefa do ClickUp. */
 export interface RelatorioDaLive {
-  id: "semana" | "atendimento" | "live" | "pos_live" | "fechamento";
+  id: "semana" | "atendimento" | "live" | "ligacoes" | "pos_live" | "fechamento";
   /** A tarefa e quando ela pede o texto. */
   rotulo: string;
   quando: string;
@@ -415,9 +446,20 @@ export function relatoriosDaLive(p: PainelLive, cfg: CampanhaDaLive, hoje: strin
     { id: "semana", rotulo: "Resumo da semana (E3-13)", quando: "toda semana", texto: resumoSemanalDaLive(p, cfg, hoje) },
     { id: "atendimento", rotulo: "Atendimento da semana (E3-07)", quando: "toda segunda", texto: semNbsp(textoDoAtendimento(p, cfg, hoje)) },
     { id: "live", rotulo: "Números da live (E4-05)", quando: "02/12", texto: semNbsp(textoDaNoiteDaLive(p, cfg, hoje)) },
+    { id: "ligacoes", rotulo: "Ligações do pós-live (E5-03)", quando: "até 05/12", texto: semNbsp(textoDasLigacoes(p, cfg, hoje)) },
     { id: "pos_live", rotulo: "Primeiro relatório (E5-08)", quando: "07 e 08/12", texto: semNbsp(textoDoPosLive(p, cfg)) },
     { id: "fechamento", rotulo: "Reuniões e vendas (E5-05)", quando: diaMes(cfg.posLive.ate), texto: semNbsp(textoDoFechamento(p, cfg)) },
   ];
+}
+
+function textoDasLigacoes(p: PainelLive, cfg: CampanhaDaLive, hoje: string): string {
+  const l = p.ligacoesPosLive;
+  return [
+    `Leads A e B sem reunião em ${diaMes(cfg.posLive.de)}: ${formatInt(l.semReuniao)}`,
+    `Ligados até ${diaMes(hoje)}: ${formatInt(l.ligados)}`,
+    `Atenderam: ${formatInt(l.atenderam)}`,
+    `Reuniões marcadas por essas ligações: ${formatInt(l.marcaram)}`,
+  ].join("\n");
 }
 
 function textoDoFechamento(p: PainelLive, cfg: CampanhaDaLive): string {

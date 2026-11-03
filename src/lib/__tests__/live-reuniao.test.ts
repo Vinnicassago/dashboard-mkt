@@ -63,6 +63,64 @@ describe("E5-05 — a véspera", () => {
   });
 });
 
+describe("E5-03 — as ligações do pós-live", () => {
+  it("base = A e B sem reunião quando o pós-live começou; ligados, atenderam e marcaram desde então", () => {
+    const t = (leadId: string, em: string, resultado: string): LeadEvent => ({
+      id: `t-${leadId}-${em}`,
+      leadId,
+      leadName: "P",
+      actor: "eduardo",
+      action: "tentativa",
+      payload: { canal: "ligacao", falou: resultado === "nao_atendeu" ? "nao" : "sim", resultado },
+      occurredAt: em,
+      createdAt: em,
+    });
+    const leads = [
+      lead({ id: "Q1", classe: "A", status: "em_contato" }),
+      lead({ id: "Q2", classe: "B", status: "em_contato" }),
+      lead({ id: "Q3", classe: "A", status: "agendado", bookedAt: "2026-12-04T15:00:00.000Z", meetingFor: "2026-12-08T22:00:00.000Z" }),
+      lead({ id: "Q4", classe: "A", status: "agendado", bookedAt: "2026-11-25T15:00:00.000Z", meetingFor: "2026-12-03T22:00:00.000Z" }),
+      lead({ id: "Q5", classe: "C", status: "lead" }),
+    ];
+    const eventos = [
+      t("Q1", "2026-12-03T14:00:00.000Z", "falou"),
+      t("Q2", "2026-12-03T14:10:00.000Z", "nao_atendeu"),
+      t("Q2", "2026-11-28T14:10:00.000Z", "falou"), // antes do pós-live: não conta
+      t("Q3", "2026-12-04T14:50:00.000Z", "agendou"),
+    ];
+    const data: DashboardData = {
+      campaign: { id: "c", brand: "consorcio", name: "C", objective: "L", status: "ativa", startDate: "2026-11-16", budgetTotal: 5000 },
+      igAccountDaily: [],
+      igPosts: [],
+      adDaily: [],
+      creatives: [],
+      lpDaily: [],
+      leads,
+      goals: [],
+      metas: [],
+      updatedAt: "2026-12-05T20:00:00.000Z",
+    };
+    const p = montarPainelLive({
+      data,
+      eventos,
+      cfg: LIVE_PADRAO,
+      expediente: EXPEDIENTE_PADRAO,
+      range: { de: LIVE_PADRAO.periodo.de, ate: "2026-12-05" },
+      hoje: "2026-12-05",
+      agora: "2026-12-05T20:00:00.000Z",
+    });
+    expect(p.ligacoesPosLive).toEqual({ semReuniao: 3, ligados: 3, atenderam: 2, marcaram: 1 });
+    expect(relatoriosDaLive(p, LIVE_PADRAO, "2026-12-05").find((r) => r.id === "ligacoes")!.texto).toBe(
+      [
+        "Leads A e B sem reunião em 02/12: 3",
+        "Ligados até 05/12: 3",
+        "Atenderam: 2",
+        "Reuniões marcadas por essas ligações: 1",
+      ].join("\n"),
+    );
+  });
+});
+
 describe("E5-05 — o resultado da reunião", () => {
   it("o último registrado vale; outros fatos da ficha não contam", () => {
     const eventos = [

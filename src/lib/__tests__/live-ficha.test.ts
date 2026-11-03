@@ -165,6 +165,23 @@ describe("Leads — filtros e CSV da ficha", () => {
     expect(ids({ atendimento: "novo" })).toEqual(["1", "2", "3", "4"]);
   });
 
+  it("E5-03: 'A e B' junta as duas classes e 'Nunca agendou' é o fato — quem desistiu já agendou", () => {
+    const comReuniao = [
+      ...leads,
+      lead("5", "2026-11-19T19:00:00.000Z", { classe: "A", status: "desistencia", bookedAt: "2026-11-20T15:00:00.000Z" }),
+      lead("6", "2026-11-19T20:00:00.000Z", { classe: "B", status: "agendado", bookedAt: "2026-11-21T15:00:00.000Z", meetingFor: "2026-11-25T22:00:00.000Z" }),
+    ];
+    const l = montarLinhasDeLeads(base(comReuniao), [], AGORA, { range: CAPTACAO });
+    const ids = (f: Partial<typeof FILTRO_VAZIO>) => aplicarFiltro(l, { ...FILTRO_VAZIO, ...f }).map((r) => r.id).sort();
+    expect(ids({ classe: "ab" })).toEqual(["1", "2", "5", "6"]);
+    expect(ids({ classe: "ab", reuniao: "nunca" })).toEqual(["1", "2"]);
+    // Pela URL e pelo pedido de exportação também (o vocabulário é a fonte).
+    expect(filtroDoPedido({ classe: "ab", reuniao: "nunca" })).toMatchObject({ classe: "ab", reuniao: "nunca" });
+    expect(descreverFiltro(filtroDoPedido({ classe: "ab", reuniao: "nunca" }), "Campanha")).toContain(
+      "classe: A e B (qualificados) · reunião: Nunca agendou",
+    );
+  });
+
   it("o pedido de exportação só aceita valores do vocabulário — e o registro diz o filtro", () => {
     const f = filtroDoPedido({ classe: "A", bem: "barco", comunidade: "sim", status: "todos" });
     expect(f.classe).toBe("A");

@@ -317,15 +317,16 @@ export interface FiltroDeLeads {
   /** Nome, e-mail ou telefone. */
   busca: string;
   // ---- ficha da live ----
-  /** "sem" = sem classe (faltam respostas e o n8n não mandou). */
-  classe?: Classe | "sem";
+  /** "ab" = qualificados (A ou B); "sem" = sem classe (faltam respostas e o n8n não mandou). */
+  classe?: Classe | "ab" | "sem";
   bem?: Bem;
   faixaValor?: FaixaValor;
   finalidade?: Finalidade;
   faixaParcela?: FaixaParcela;
   prazoCompra?: PrazoCompra;
   atendimento?: StatusAtendimento;
-  reuniao?: StatusReuniao;
+  /** "nunca" = nunca agendou (o fato, `everBooked`) — quem desistiu já agendou. */
+  reuniao?: StatusReuniao | "nunca";
   comunidade?: "sim" | "nao";
   msg1?: Msg1Situacao;
 }
@@ -336,14 +337,14 @@ export interface FiltroDeLeads {
  * tela, a URL, a exportação e `descreverFiltro`.
  */
 export const FILTROS_DA_FICHA = {
-  classe: { rotulo: "Classe", vocab: { ...CLASSES, sem: "Sem classe" } },
+  classe: { rotulo: "Classe", vocab: { ...CLASSES, ab: "A e B (qualificados)", sem: "Sem classe" } },
   bem: { rotulo: "Bem", vocab: BENS },
   faixaValor: { rotulo: "Valor", vocab: FAIXAS_VALOR },
   finalidade: { rotulo: "Finalidade", vocab: FINALIDADES },
   faixaParcela: { rotulo: "Parcela", vocab: FAIXAS_PARCELA },
   prazoCompra: { rotulo: "Prazo", vocab: PRAZOS_COMPRA },
   atendimento: { rotulo: "Atendimento", vocab: STATUS_ATENDIMENTO },
-  reuniao: { rotulo: "Reunião", vocab: STATUS_REUNIAO },
+  reuniao: { rotulo: "Reunião", vocab: { ...STATUS_REUNIAO, nunca: "Nunca agendou" } },
   comunidade: { rotulo: "Comunidade", vocab: { sim: "Clicou", nao: "Não clicou" } },
   msg1: { rotulo: "Mensagem automática", vocab: MSG1_SITUACAO_LABEL },
 } as const satisfies Record<string, { rotulo: string; vocab: Record<string, string> }>;
@@ -360,6 +361,13 @@ function valorNaLinha(r: LinhaDeLead, k: FiltroDaFicha): string | undefined {
     default:
       return r[k];
   }
+}
+
+/** A linha passa no filtro da ficha? Os dois grupos (A e B, nunca agendou) não são um valor só. */
+function casaFiltroDaFicha(r: LinhaDeLead, k: FiltroDaFicha, v: string): boolean {
+  if (k === "classe" && v === "ab") return r.classe === "A" || r.classe === "B";
+  if (k === "reuniao" && v === "nunca") return !r.jaAgendou;
+  return valorNaLinha(r, k) === v;
 }
 
 export const FILTRO_VAZIO: FiltroDeLeads = { status: "todos", sinalizadores: [], busca: "" };
@@ -380,7 +388,8 @@ export function aplicarFiltroSemStatus(linhas: LinhaDeLead[], f: FiltroDeLeads):
     if (f.dono && r.dono !== f.dono) return false;
     if (f.sinalizadores.length && !f.sinalizadores.some((s) => temSinal(r, s))) return false;
     for (const k of CHAVES_FILTRO_FICHA) {
-      if (f[k] && valorNaLinha(r, k) !== f[k]) return false;
+      const v = f[k];
+      if (v && !casaFiltroDaFicha(r, k, v)) return false;
     }
     if (!q) return true;
     const noTexto = r.name.toLowerCase().includes(q) || (r.email ?? "").toLowerCase().includes(q);
