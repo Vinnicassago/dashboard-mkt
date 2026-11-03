@@ -5,6 +5,10 @@ import { DEFAULT_BRAND, type Lead } from "@/lib/types";
 import { candidatosIdLead, resolverIdLead } from "@/lib/lead-id";
 import { mesmoTelefone, normalizarTelefone } from "@/lib/phone";
 import { MESMA_INSCRICAO_MIN } from "@/lib/n8n/servico";
+import { lerRespostasDoFormulario } from "@/lib/n8n/entrada";
+import { comClasse } from "@/lib/classe-server";
+import { gravarFicha } from "@/lib/leads/gravar-ficha";
+import type { LeadFichaPatch } from "@/lib/data/backend";
 import { acharMesmaPessoa } from "@/lib/identidade";
 import { idsDoUtm } from "@/lib/atribuicao";
 import { isLostStatus } from "@/lib/lead-status";
@@ -54,6 +58,26 @@ interface TrackBody {
   email?: string;
   phone?: string;
   label?: string;
+  // As respostas do formulário da live (as mesmas chaves da API do n8n).
+  bem?: unknown;
+  valor?: unknown;
+  finalidade?: unknown;
+  parcela?: unknown;
+  prazo?: unknown;
+  aceite_mensagens?: unknown;
+  horario_preferido?: unknown;
+}
+
+/**
+ * As respostas que a página mandou. Da página, vazio é "não respondeu", nunca
+ * "apague" (no n8n, null limpa). Resposta fora do vocabulário é ignorada: o lead
+ * nunca se perde por causa dela, e o log leva só o nome do campo.
+ */
+function respostasDaPagina(body: TrackBody): LeadFichaPatch {
+  const erros: string[] = [];
+  const lidas = lerRespostasDoFormulario(body as unknown as Record<string, unknown>, erros);
+  if (erros.length) console.warn("[track] respostas ignoradas:", erros.map((e) => e.split(":")[0]).join(", "));
+  return Object.fromEntries(Object.entries(lidas).filter(([, v]) => v !== null)) as LeadFichaPatch;
 }
 
 function corsHeaders(origin: string | null): Record<string, string> {
@@ -143,6 +167,7 @@ export async function POST(request: Request) {
   const name = (body.name ?? "").trim() || "Lead sem nome";
   const email = (body.email ?? "").trim() || undefined;
   const phone = (body.phone ?? "").trim() || undefined;
+  const respostas = respostasDaPagina(body);
 
   // A identificação e a gravação rodam na TRAVA DA PESSOA (telefone, senão
   // e-mail): a página manda o mesmo cadastro ao painel e ao n8n ao mesmo tempo, e
@@ -250,6 +275,13 @@ export async function POST(request: Request) {
       });
       const voltou = await getLead(leadId);
       if (voltou) await avisarLeadNovo(voltou, "lead_voltou");
+    }
+
+    // A página da live manda as 5 respostas: o painel classifica na entrada, sem
+    // esperar o n8n (o mesmo caminho da ficha: histórico e classe do painel).
+    if (Object.keys(respostas).length) {
+      const atual = await getLead(leadId);
+      if (atual) await gravarFicha(atual, await comClasse(atual, respostas), "Landing page");
     }
     return { leadId, created };
   });

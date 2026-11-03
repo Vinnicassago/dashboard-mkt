@@ -206,5 +206,43 @@ e não houve desfecho).
 
 ---
 
+## 5. A página de inscrição direto no painel (sem token)
+
+A página manda a inscrição ao painel pelo `lp-tracking.js` (o mesmo de hoje), **com
+as 5 respostas**: o lead entra já classificado e na Fila, mesmo que o n8n atrase
+ou esteja fora do ar. O n8n continua gravando o resto da ficha pela API acima — a
+mesma pessoa pelos dois caminhos é um lead só.
+
+Instalação (antes do `</body>`, depois do Pixel):
+
+```html
+<script>
+  window.__DASH_CONFIG = {
+    endpoint: "https://<seu-painel>/api/track",
+    ingestKey: "<TRACK_INGEST_KEY>"
+  };
+</script>
+<script src="https://<seu-painel>/lp-tracking.js"></script>
+```
+
+No envio do formulário (quiz ou formulário em JavaScript), com o texto das opções
+como aparece na página:
+
+```js
+window.dashTrackLead({
+  name: nome, email: email, phone: whatsapp,
+  eventId: codigo,            // o mesmo id do Pixel (deduplica o Lead)
+  bem: "Imóvel", valor: "R$300 mil a R$500 mil", finalidade: "Morar",
+  parcela: "R$1.500 a R$3.000", prazo: "Em até 1 ano",
+  aceite_mensagens: true      // a caixa do aceite: marcada ou não
+});
+```
+
+Num `<form data-track="lead-form">` comum, basta os campos se chamarem `bem`,
+`valor`, `finalidade`, `parcela`, `prazo` e `aceite_mensagens`. A classe NÃO vem
+da página (o painel calcula); resposta fora da lista é ignorada sem perder o lead.
+
+---
+
 Turno, feriados, faixas de horário e a tabela de parcela da classe ficam em
 **Configurações → Atendimento e classe**. Telefone e e-mail nunca vão para o log.

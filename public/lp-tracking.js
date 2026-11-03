@@ -183,6 +183,10 @@
   }
 
   /* ---------------- lead (disparo único, reutilizável) ---------------- */
+  // As respostas do formulário da live, com os nomes que o painel lê. O valor é o
+  // texto da opção como aparece na página ("Imóvel", "R$300 mil a R$500 mil"…).
+  var RESPOSTAS = ["bem", "valor", "finalidade", "parcela", "prazo", "aceite_mensagens", "horario_preferido"];
+
   // Gera/usa um event_id ÚNICO e dispara o MESMO evento pelo navegador
   // (Pixel/GA4) e pelo servidor (CAPI) — é assim que a Meta deduplica.
   function fireLead(info) {
@@ -196,13 +200,17 @@
       if (window.gtag) window.gtag("event", "generate_lead", { event_id: eventId });
     } catch (err) {}
 
-    post({
+    var payload = {
       type: "lead",
       eventId: eventId,
       name: info.name || "",
       email: info.email || "",
       phone: info.phone || "",
+    };
+    RESPOSTAS.forEach(function (k) {
+      if (info[k] !== undefined && info[k] !== null && info[k] !== "") payload[k] = info[k];
     });
+    post(payload);
     return eventId;
   }
 
@@ -211,6 +219,10 @@
    * JavaScript (sem <form> nativo, como um quiz). Chame no momento em que o
    * contato é concluído, passando os dados que você já tem em mãos:
    *   window.dashTrackLead({ name: nome, email: email, phone: whats, eventId: codigo });
+   * Na página da live, mande também as respostas (o painel classifica na hora):
+   *   window.dashTrackLead({ name, email, phone, eventId,
+   *     bem: "Imóvel", valor: "R$300 mil a R$500 mil", finalidade: "Morar",
+   *     parcela: "R$1.500 a R$3.000", prazo: "Em até 1 ano", aceite_mensagens: true });
    * O eventId é opcional; se a página já tem um código de correlação, reutilize-o
    * (ele deduplica com o Pixel). Respeita requireConsent como qualquer outro evento.
    */
@@ -243,11 +255,18 @@
         return "";
       };
 
-      fireLead({
+      var info = {
         name: get(["name", "nome", "full_name"]),
         email: get(["email", "e-mail"]),
         phone: get(["phone", "telefone", "whatsapp", "celular"]),
+      };
+      // Campos com o nome das respostas (bem, valor…); a caixa do aceite vale marcada ou não.
+      RESPOSTAS.forEach(function (k) {
+        var campo = form.querySelector('[name="' + k + '"]');
+        if (!campo) return;
+        info[k] = campo.type === "checkbox" ? campo.checked : get([k]);
       });
+      fireLead(info);
     },
     true,
   );

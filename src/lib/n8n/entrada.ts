@@ -5,7 +5,8 @@
  *
  * As chaves do JSON são as do briefing, em snake_case (whatsapp, bem, valor,
  * finalidade, parcela, prazo, classe, aceite_mensagens, msg1_enviada_em…). Ver
- * docs/api-n8n.md.
+ * docs/api-n8n.md. As respostas do formulário chegam com as MESMAS chaves quando
+ * a página de inscrição manda direto ao painel (/api/track).
  */
 import type { LeadFichaPatch } from "../data/backend";
 import type { CanalContato } from "../contato";
@@ -77,8 +78,11 @@ function opcao<K extends string>(
   return k ?? undefined;
 }
 
-/** Respostas do formulário e classe do n8n — comuns à inscrição e à atualização. */
-function lerRespostas(body: Corpo, erros: string[]): LeadFichaPatch {
+/**
+ * As respostas do formulário (as 5 perguntas, o aceite e o horário), que a página
+ * e o n8n mandam igual. A classe NÃO está aqui: só o n8n manda a dele.
+ */
+export function lerRespostasDoFormulario(body: Corpo, erros: string[]): LeadFichaPatch {
   const p: LeadFichaPatch = {};
   const set = <K extends keyof LeadFichaPatch>(k: K, v: LeadFichaPatch[K] | undefined) => {
     if (v !== undefined) p[k] = v;
@@ -88,7 +92,6 @@ function lerRespostas(body: Corpo, erros: string[]): LeadFichaPatch {
   set("finalidade", opcao(FINALIDADES, body, "finalidade", erros));
   set("faixaParcela", opcao(FAIXAS_PARCELA, body, "parcela", erros));
   set("prazoCompra", opcao(PRAZOS_COMPRA, body, "prazo", erros));
-  set("classeN8n", opcao(CLASSES, body, "classe", erros));
   set("horarioPreferido", opcao(HORARIOS, body, "horario_preferido", erros));
   if ("aceite_mensagens" in body) {
     const v = body.aceite_mensagens;
@@ -96,6 +99,14 @@ function lerRespostas(body: Corpo, erros: string[]): LeadFichaPatch {
     if (b === undefined) erros.push("aceite_mensagens: use true/false (ou sim/não).");
     else p.aceiteMensagens = b;
   }
+  return p;
+}
+
+/** Respostas do formulário e classe do n8n — comuns à inscrição e à atualização. */
+function lerRespostas(body: Corpo, erros: string[]): LeadFichaPatch {
+  const p = lerRespostasDoFormulario(body, erros);
+  const classe = opcao(CLASSES, body, "classe", erros);
+  if (classe !== undefined) p.classeN8n = classe;
   return p;
 }
 
