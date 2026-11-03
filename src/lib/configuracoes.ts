@@ -21,6 +21,7 @@ import type { Trava } from "./trust";
 
 export const VISTA_CONFIG = {
   metas: "/configuracoes",
+  atendimento: "/configuracoes/atendimento",
   integracoes: "/configuracoes/integracoes",
   marcas: "/configuracoes/marcas",
   usuarios: "/configuracoes/usuarios",
@@ -37,6 +38,10 @@ export const VISTA_DA_ANCORA: Record<string, VistaConfig> = {
   orcamento: "metas",
   metas: "metas",
   "metas-conteudo": "metas",
+  "tabela-parcela": "atendimento",
+  turno: "atendimento",
+  feriados: "atendimento",
+  "faixas-horario": "atendimento",
   integracoes: "integracoes",
   sync: "integracoes",
   robo: "integracoes",

@@ -530,6 +530,8 @@ export const STATE_KEYS = {
   brandCampaignMatch: "brand_campaign_match",
   /** Última execução do cron /api/capi/retentar (ISO) — Integrações diz se ele roda. */
   capiUltimoReenvio: "capi_ultimo_reenvio",
+  /** A tabela de parcela da classe A/B/C/X (`lib/classe.ts`) — Configurações → Atendimento. */
+  tabelaDeParcela: "classe_tabela_parcela",
 } as const;
 
 export interface StoredToken {

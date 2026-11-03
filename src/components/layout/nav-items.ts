@@ -115,6 +115,7 @@ export const NAV: NavItem[] = [
     pergunta: "O que falta preencher para o painel parar de mostrar “—”?",
     vistas: [
       { label: "Metas e orçamento", href: "/configuracoes" },
+      { label: "Atendimento e classe", href: "/configuracoes/atendimento" },
       { label: "Integrações e saúde", href: "/configuracoes/integracoes" },
       { label: "Marcas e atribuição", href: "/configuracoes/marcas" },
       { label: "Usuários", href: "/configuracoes/usuarios" },

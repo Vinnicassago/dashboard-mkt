@@ -13,7 +13,9 @@ import type { Trava } from "./trust";
 import type { DataWarning, DateRange } from "./metrics";
 import { filterLeads } from "./metrics";
 import { atribuidor } from "./atribuicao";
-import type { DashboardData } from "./types";
+import { encerrado } from "./lead-status";
+import { classeDiverge } from "./qualificacao";
+import type { DashboardData, Lead } from "./types";
 
 export type NivelAlerta = "falha" | "quarentena" | "teto" | "piso" | "aviso" | "config";
 
@@ -87,6 +89,26 @@ export function alertasDeAtribuicao(data: DashboardData, range?: DateRange): Ale
     });
   }
   return out;
+}
+
+/**
+ * Leads em aberto cuja classe do n8n é diferente da do painel. A Fila usa a do
+ * painel; o n8n mandou a mensagem e o aviso pela dele — um dos dois está com a
+ * régua errada (a tabela de parcela aqui, ou o fluxo lá).
+ */
+export function alertaDeClasse(leads: Pick<Lead, "classe" | "classeN8n" | "status">[]): Alerta[] {
+  const n = leads.filter((l) => classeDiverge(l) && !encerrado(l.status)).length;
+  if (n === 0) return [];
+  return [
+    {
+      id: "classe-diverge",
+      nivel: "aviso",
+      titulo: `${n} ${n === 1 ? "lead tem" : "leads têm"} a classe do n8n diferente da do painel`,
+      detalhe:
+        "O painel calcula a classe pelas respostas e pela tabela de parcela; o n8n manda a dele. A Fila segue a do painel, mas a mensagem e o aviso ao atendimento saíram pela do n8n. Confira a tabela de parcela e o fluxo — a coluna Classe de Leads marca quem diverge (≠ n8n).",
+      cta: { label: "Ver a tabela de parcela", href: "/configuracoes/atendimento#tabela-parcela" },
+    },
+  ];
 }
 
 /** Junta, tira repetidos (mesmo id) e ordena do mais grave. */

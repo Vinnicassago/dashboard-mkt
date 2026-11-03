@@ -6,8 +6,8 @@ import { SubNav } from "@/components/layout/sub-nav";
 import { NAO_CLASSIFICADO, integrationStatus } from "@/lib/meta/config";
 import { estadoDaFonte } from "@/lib/sincronizacao";
 import { AlertasProvider } from "@/components/layout/alertas";
-import type { Alerta } from "@/lib/alertas";
-import { expirarCapiVencidos, getData, listCapiEnvios } from "@/lib/data/store";
+import { alertaDeClasse, type Alerta } from "@/lib/alertas";
+import { expirarCapiVencidos, getData, listCapiEnvios, listLeads } from "@/lib/data/store";
 import { JANELA_REENVIO_HORAS, alertasDaCapi, resumoDosEnvios } from "@/lib/capi-politica";
 import { capiEmModoTeste } from "@/lib/meta/capi";
 import { can } from "@/lib/auth/guard";
@@ -67,6 +67,15 @@ export default async function DashboardLayout({
           "Nenhuma regra de marca reivindica essas campanhas: o gasto delas está fora do investimento, do CPL e do custo por reunião de todas as marcas. Diga de quem são em Configurações → Marcas e reclassifique.",
         cta: { label: "Classificar as campanhas", href: "/configuracoes/marcas" },
       });
+    }
+  }
+
+  // Classe do n8n diferente da do painel (ficha da live): vale em qualquer tela.
+  if (brand.type !== "awareness") {
+    try {
+      globais.push(...alertaDeClasse(await listLeads(brand.slug)));
+    } catch (e) {
+      console.warn("[layout] leitura das classes falhou:", e instanceof Error ? e.message : e);
     }
   }
 
