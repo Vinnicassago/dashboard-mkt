@@ -4,4 +4,4 @@
  * constante, atualizada em todo commit que vai para produção. É o jeito de saber,
  * sem login, se a produção está rodando o código novo: GET /api/health.
  */
-export const VERSAO = "2026-11-03b · live 01/12 (marcas [KRN], ficha, classe, API do n8n, Fila por turno, aba Live, criativos, conferência) · Krone sem o falso \"nunca configurada\"";
+export const VERSAO = "2026-11-03c · live 01/12 · página manda as respostas, CAPI de qualificado e comunidade, textos das tarefas, reunião na ficha, A e B sem reunião";
