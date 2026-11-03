@@ -2,13 +2,13 @@ import Link from "next/link";
 import { CalendarClock, Coins, Gauge, Headset, Radio, ShieldCheck, Wallet } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { RitmoBar, RITMO_LABEL } from "@/components/live/ritmo-bar";
-import { CopiarResumo, ManuaisForm } from "@/components/live/live-forms";
+import { ManuaisForm, RelatoriosParaCopiar } from "@/components/live/live-forms";
 import { getData, listLeadEvents } from "@/lib/data/store";
 import { activeBrand } from "@/lib/active-brand";
 import { can } from "@/lib/auth/guard";
 import { expedienteAtual } from "@/lib/atendimento-server";
 import { campanhaDaLive } from "@/lib/live-server";
-import { montarPainelLive, resumoSemanalDaLive, type Ritmo, type Taxa } from "@/lib/live-painel";
+import { montarPainelLive, relatoriosDaLive, type Ritmo, type Taxa } from "@/lib/live-painel";
 import { dica } from "@/lib/dicionario";
 import { formatCurrency0, formatDateShort, formatDateTime, formatInt } from "@/lib/format";
 import { STATUS_REUNIAO, type StatusReuniao } from "@/lib/qualificacao";
@@ -83,7 +83,7 @@ export default async function LivePage({ searchParams }: { searchParams: Promise
   const range = naoComecou ? { de, ate: de } : { de, ate };
 
   const p = montarPainelLive({ data, eventos, cfg, expediente, range, hoje, agora });
-  const resumo = resumoSemanalDaLive(p, cfg, hoje);
+  const relatorios = relatoriosDaLive(p, cfg, hoje);
 
   return (
     <div className="space-y-6">
@@ -311,11 +311,14 @@ export default async function LivePage({ searchParams }: { searchParams: Promise
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>Resumo da semana (ClickUp)</CardTitle>
-            <CardDescription>Os mesmos números desta tela, no formato combinado — acumulados do período escolhido.</CardDescription>
+            <CardTitle>Relatórios para o ClickUp</CardTitle>
+            <CardDescription>
+              Os mesmos números desta tela, no formato que cada tarefa pede — acumulados do período escolhido. O que o
+              painel não sabe fica “__” para você completar.
+            </CardDescription>
           </CardHeader>
           <CardContent>
-            <CopiarResumo texto={resumo} />
+            <RelatoriosParaCopiar relatorios={relatorios} />
           </CardContent>
         </Card>
       </div>

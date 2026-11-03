@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Check, Copy } from "lucide-react";
 import { salvarManuaisDaLive } from "@/app/(dashboard)/configuracoes/live-actions";
+import type { RelatorioDaLive } from "@/lib/live-painel";
 import { cn } from "@/lib/utils";
 
 const numCls = "h-8 w-28 rounded-md border bg-background px-2 text-xs tabular-nums disabled:opacity-70";
@@ -83,8 +84,37 @@ export function ManuaisForm({
   );
 }
 
-/** Copia o resumo da semana (o texto do ClickUp); mostra o texto junto, para conferir e copiar à mão. */
-export function CopiarResumo({ texto }: { texto: string }) {
+/** Os textos que as tarefas da live pedem: escolhe qual, copia e mostra junto. */
+export function RelatoriosParaCopiar({ relatorios }: { relatorios: RelatorioDaLive[] }) {
+  const [id, setId] = useState(relatorios[0]?.id);
+  const atual = relatorios.find((r) => r.id === id) ?? relatorios[0];
+  if (!atual) return null;
+  return (
+    <div className="space-y-3">
+      <div role="tablist" aria-label="Relatório" className="flex flex-wrap gap-1.5">
+        {relatorios.map((r) => (
+          <button
+            key={r.id}
+            type="button"
+            role="tab"
+            aria-selected={r.id === atual.id}
+            onClick={() => setId(r.id)}
+            className={cn(
+              "rounded-md border px-2.5 py-1 text-xs",
+              r.id === atual.id ? "border-primary/40 bg-primary/10 font-medium" : "text-muted-foreground hover:bg-foreground/5",
+            )}
+          >
+            {r.rotulo} <span className="text-muted-foreground">· {r.quando}</span>
+          </button>
+        ))}
+      </div>
+      <CopiarResumo key={atual.id} texto={atual.texto} rotulo={`Copiar ${atual.rotulo.split(" (")[0].toLowerCase()}`} />
+    </div>
+  );
+}
+
+/** Copia um texto para o ClickUp; mostra o texto junto, para conferir e copiar à mão. */
+export function CopiarResumo({ texto, rotulo = "Copiar resumo semanal" }: { texto: string; rotulo?: string }) {
   const [copiado, setCopiado] = useState(false);
   return (
     <div className="space-y-2">
@@ -102,7 +132,7 @@ export function CopiarResumo({ texto }: { texto: string }) {
         className="inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-medium hover:bg-foreground/5"
       >
         {copiado ? <Check className="size-4 text-[var(--success-text)]" /> : <Copy className="size-4" />}
-        {copiado ? "Copiado" : "Copiar resumo semanal"}
+        {copiado ? "Copiado" : rotulo}
       </button>
       <pre className="whitespace-pre-wrap rounded-lg border bg-foreground/[0.03] p-3 font-mono text-xs leading-relaxed">{texto}</pre>
     </div>

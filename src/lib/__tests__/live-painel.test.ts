@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { LIVE_PADRAO, ehDoCarro, ehInscritoDaLive, lerCampanhaDaLive, linhaDaCampanha } from "../live";
-import { montarPainelLive, resumoSemanalDaLive } from "../live-painel";
+import { montarPainelLive, relatoriosDaLive, resumoSemanalDaLive } from "../live-painel";
 import { EXPEDIENTE_PADRAO } from "../turno";
 import type { AdDaily, DashboardData, Lead, LeadEvent } from "../types";
 
@@ -178,6 +178,67 @@ describe("aba Live — metas, atendimento, verba, custos e qualidade", () => {
         "Gasto: R$ 455 · Custo por qualificado: R$ 152 (meta até R$ 50)",
       ].join("\n"),
     );
+  });
+
+  it("os textos das tarefas (E3-07, E4-05, E5-08), com os números da aba", () => {
+    const r = Object.fromEntries(relatoriosDaLive(p, cfgComManuais, HOJE).map((x) => [x.id, x.texto]));
+    expect(r.semana).toBe(resumoSemanalDaLive(p, cfgComManuais, HOJE));
+    expect(r.atendimento).toBe(
+      [
+        "Semana até 24/11:",
+        "Classe A: 2 inscritos · 1 chamado em até 1 h útil (50%, meta 90%)",
+        "Classe B: 1 inscrito · 1 chamado no mesmo dia",
+        "Contato válido em 48 h: 67% (meta 60%)",
+        "Reuniões já agendadas: 1",
+        "Problemas: 1 classe A sem tentativa com o prazo vencido",
+      ].join("\n"),
+    );
+    expect(r.live).toBe(
+      [
+        "| Indicador | Resultado | Meta |",
+        "| Inscritos | 5 | 200 |",
+        "| Qualificados (A e B) | 3 | 80 |",
+        "| Na comunidade | 1 | 140 |",
+        "| Assistiram ao vivo (únicos) | 12 | 50 |",
+        "| Pico simultâneo | 9 | — |",
+        "| Reuniões marcadas até 24/11 | 1 | 15 |",
+      ].join("\n"),
+    );
+    expect(r.pos_live).toBe(
+      [
+        "| Indicador | Resultado | Meta |",
+        "| Inscrições | 5 | 200 |",
+        "| Qualificados (A e B) | 3 | 80 |",
+        "| Na comunidade | 1 | 140 |",
+        "| Presentes ao vivo | 12 | 50 |",
+        "| Reuniões agendadas | 1 | 15 |",
+        "| Reuniões realizadas | 0 | 11 |",
+        "| Vendas | 1 | — |",
+        "| Gasto total | R$ 455 | R$ 5.000 |",
+        "| Custo por inscrito | R$ 91 | R$ 20 |",
+        "| Custo por reunião agendada | R$ 455 investidos · 1 reunião | — |",
+        "",
+        "Funcionou: __",
+        "Não funcionou: __",
+        "Até 15/12: __",
+      ].join("\n"),
+    );
+  });
+
+  it("o que o painel não sabe (presentes, vendas) fica __ para quem cola", () => {
+    const semManuais = montarPainelLive({
+      data: base([a1, a2, b1, c1, x1, fora], ads),
+      eventos,
+      cfg,
+      expediente: EXPEDIENTE_PADRAO,
+      range: { de: cfg.periodo.de, ate: HOJE },
+      hoje: HOJE,
+      agora: AGORA,
+    });
+    const r = Object.fromEntries(relatoriosDaLive(semManuais, cfg, HOJE).map((x) => [x.id, x.texto]));
+    expect(r.live).toContain("| Assistiram ao vivo (únicos) | __ | 50 |");
+    expect(r.live).toContain("| Pico simultâneo | __ | — |");
+    expect(r.pos_live).toContain("| Vendas | __ | — |");
   });
 
   it("sem campanha da live no Gerenciador: custo é —, não R$ 0", () => {

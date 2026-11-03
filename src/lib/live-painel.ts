@@ -86,6 +86,8 @@ export interface PainelLive {
   diasParaLive: number;
   metas: LinhaDeMeta[];
   atendimento: Taxa[];
+  /** A e B do período: quantos entraram e quantos tiveram a 1ª tentativa no prazo da classe. */
+  porClasse: Record<"A" | "B", { inscritos: number; noPrazo: number }>;
   /** A sem nenhuma tentativa com o prazo vencido — a meta é zero. */
   aSemTentativa: number;
   reunioes: Record<StatusReuniao, number>;
@@ -340,6 +342,10 @@ export function montarPainelLive(e: EntradaPainelLive): PainelLive {
     diasParaLive: Math.max(0, Math.ceil((Date.parse(cfg.dataDaLive) - ms) / DIA_MS)),
     metas,
     atendimento,
+    porClasse: {
+      A: { inscritos: daClasse("A").length, noPrazo: a.ok },
+      B: { inscritos: daClasse("B").length, noPrazo: b.ok },
+    },
     aSemTentativa,
     reunioes,
     verba,
@@ -360,6 +366,84 @@ const pctTexto = (v: number | null) => (v == null ? "—" : `${Math.round(v * 10
  */
 export function resumoSemanalDaLive(p: PainelLive, cfg: CampanhaDaLive, ate: string): string {
   return montarResumo(p, cfg, ate).replace(/ /g, " ");
+}
+
+/** Um texto pronto para colar no comentário de uma tarefa do ClickUp. */
+export interface RelatorioDaLive {
+  id: "semana" | "atendimento" | "live" | "pos_live";
+  /** A tarefa e quando ela pede o texto. */
+  rotulo: string;
+  quando: string;
+  texto: string;
+}
+
+/**
+ * Os textos que as tarefas da live pedem (E3-13, E3-07, E4-05, E5-08), com os
+ * mesmos números da aba. O que o painel não sabe fica "__" para quem cola.
+ */
+export function relatoriosDaLive(p: PainelLive, cfg: CampanhaDaLive, hoje: string): RelatorioDaLive[] {
+  const semNbsp = (s: string) => s.replace(/ /g, " ");
+  return [
+    { id: "semana", rotulo: "Resumo da semana (E3-13)", quando: "toda semana", texto: resumoSemanalDaLive(p, cfg, hoje) },
+    { id: "atendimento", rotulo: "Atendimento da semana (E3-07)", quando: "toda segunda", texto: semNbsp(textoDoAtendimento(p, cfg, hoje)) },
+    { id: "live", rotulo: "Números da live (E4-05)", quando: "02/12", texto: semNbsp(textoDaNoiteDaLive(p, cfg, hoje)) },
+    { id: "pos_live", rotulo: "Primeiro relatório (E5-08)", quando: "07 e 08/12", texto: semNbsp(textoDoPosLive(p, cfg)) },
+  ];
+}
+
+const diaMes = (dia: string) => `${dia.slice(8, 10)}/${dia.slice(5, 7)}`;
+const plural = (n: number, um: string, varios: string) => `${formatInt(n)} ${n === 1 ? um : varios}`;
+const ou = (v: number | null | undefined) => (v == null ? "__" : formatInt(v));
+const valorDaMeta = (p: PainelLive, id: string) => p.metas.find((m) => m.id === id)?.valor ?? null;
+
+function textoDoAtendimento(p: PainelLive, cfg: CampanhaDaLive, hoje: string): string {
+  const t = (id: string) => pctTexto(p.atendimento.find((x) => x.id === id)?.valor ?? null);
+  const { A, B } = p.porClasse;
+  return [
+    `Semana até ${diaMes(hoje)}:`,
+    `Classe A: ${plural(A.inscritos, "inscrito", "inscritos")} · ${plural(A.noPrazo, "chamado", "chamados")} em até 1 h útil (${t("a1h")}, meta ${pctTexto(cfg.atendimento.aNoPrazo)})`,
+    `Classe B: ${plural(B.inscritos, "inscrito", "inscritos")} · ${plural(B.noPrazo, "chamado", "chamados")} no mesmo dia`,
+    `Contato válido em 48 h: ${t("c48")} (meta ${pctTexto(cfg.atendimento.contatoValido48h)})`,
+    `Reuniões já agendadas: ${ou(valorDaMeta(p, "agendadas"))}`,
+    `Problemas: ${p.aSemTentativa > 0 ? `${formatInt(p.aSemTentativa)} classe A sem tentativa com o prazo vencido` : "__"}`,
+  ].join("\n");
+}
+
+function textoDaNoiteDaLive(p: PainelLive, cfg: CampanhaDaLive, hoje: string): string {
+  const m = cfg.manuais;
+  return [
+    "| Indicador | Resultado | Meta |",
+    `| Inscritos | ${ou(valorDaMeta(p, "inscricoes"))} | ${formatInt(cfg.metas.inscricoes)} |`,
+    `| Qualificados (A e B) | ${ou(valorDaMeta(p, "qualificados"))} | ${formatInt(cfg.metas.qualificados)} |`,
+    `| Na comunidade | ${ou(valorDaMeta(p, "comunidade"))} | ${formatInt(cfg.metas.comunidade)} |`,
+    `| Assistiram ao vivo (únicos) | ${ou(m.presentesTotal)} | ${formatInt(cfg.metas.presentes)} |`,
+    `| Pico simultâneo | ${ou(m.presentesPico)} | — |`,
+    `| Reuniões marcadas até ${diaMes(hoje)} | ${ou(valorDaMeta(p, "agendadas"))} | ${formatInt(cfg.metas.agendadas)} |`,
+  ].join("\n");
+}
+
+function textoDoPosLive(p: PainelLive, cfg: CampanhaDaLive): string {
+  const gastoTotal = p.verba.reduce((s, l) => s + l.gasto, 0);
+  const verbaTotal = p.verba.reduce((s, l) => s + l.verba, 0);
+  const porInscrito = p.custos.porInscrito.valor != null ? formatCurrency0(p.custos.porInscrito.valor) : "—";
+  return [
+    "| Indicador | Resultado | Meta |",
+    `| Inscrições | ${ou(valorDaMeta(p, "inscricoes"))} | ${formatInt(cfg.metas.inscricoes)} |`,
+    `| Qualificados (A e B) | ${ou(valorDaMeta(p, "qualificados"))} | ${formatInt(cfg.metas.qualificados)} |`,
+    `| Na comunidade | ${ou(valorDaMeta(p, "comunidade"))} | ${formatInt(cfg.metas.comunidade)} |`,
+    `| Presentes ao vivo | ${ou(valorDaMeta(p, "presentes"))} | ${formatInt(cfg.metas.presentes)} |`,
+    `| Reuniões agendadas | ${ou(valorDaMeta(p, "agendadas"))} | ${formatInt(cfg.metas.agendadas)} |`,
+    `| Reuniões realizadas | ${ou(valorDaMeta(p, "realizadas"))} | ${formatInt(cfg.metas.realizadas)} |`,
+    `| Vendas | ${ou(valorDaMeta(p, "vendas"))} | ${cfg.metas.vendas == null ? "—" : formatInt(cfg.metas.vendas)} |`,
+    `| Gasto total | ${formatCurrency0(gastoTotal)} | ${formatCurrency0(verbaTotal)} |`,
+    `| Custo por inscrito | ${porInscrito} | ${formatCurrency0(cfg.custos.porInscrito)} |`,
+    // Abaixo da régua única, o custo por reunião vai como FATO (o texto da aba).
+    `| Custo por reunião agendada | ${p.custos.porReuniao.texto} | — |`,
+    "",
+    "Funcionou: __",
+    "Não funcionou: __",
+    `Até ${diaMes(cfg.posLive.ate)}: __`,
+  ].join("\n");
 }
 
 function montarResumo(p: PainelLive, cfg: CampanhaDaLive, ate: string): string {
