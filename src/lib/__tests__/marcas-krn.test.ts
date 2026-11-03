@@ -137,6 +137,19 @@ describe("E1-14 — o '≤' do investimento sai quando a regra está aplicada", 
     expect(soma(conta.filter((r) => r.brand === "krone"))).toBe(735);
   });
 
+  it("DEPOIS, na Krone: a Consórcio sem regra (recebe o resto) não é 'separação nunca configurada'", () => {
+    const conta = reclassificar(CONTA, regraNova);
+    const krone = dataset("krone", conta.filter((r) => r.brand === "krone"));
+    const t = travasDe(krone, undefined, regraNova, conta);
+    expect(t.travas.filter((x) => x.id.startsWith("marca-"))).toEqual([]);
+    expect(t.porMetrica.spend).toBeUndefined();
+  });
+
+  it("sem regra em marca nenhuma, o aviso de separação nunca configurada continua", () => {
+    const t = travasDe(dataset("consorcio", CONTA), undefined, [m("consorcio", []), m("krone", [])], CONTA);
+    expect(t.travas.map((x) => x.id)).toContain("marca-sem-regra");
+  });
+
   it("o bug de antes: só com as linhas da própria marca, a regra que FUNCIONA parecia não pegar nada", () => {
     const conta = reclassificar(CONTA, regraNova);
     const consorcio = dataset("consorcio", conta.filter((r) => r.brand === "consorcio"));

@@ -363,9 +363,9 @@ export function assessTrust(input: TrustInput): TrustReport {
     const orfaos = prefixosOrfaos(input).filter((o) => o.valor / kpis.spendTotal > 0.05);
     const tokensDeclarados = tokensDeOutrasMarcas(input);
     const regraInerte = regraNaoPegaNada(input);
-    const semRegra = input.brandRules
-      .filter((b) => b.slug !== data.campaign.brand)
-      .every((b) => b.campaignMatch.length === 0);
+    // "Nunca configurada" é NENHUMA marca ter regra. Olhar só as outras marcas
+    // acusava a Krone, que tem a regra, porque a Consórcio (o resto) não tem.
+    const semRegra = input.brandRules.every((b) => b.campaignMatch.length === 0);
 
     if (semRegra) {
       travas.push({
