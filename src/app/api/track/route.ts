@@ -1,9 +1,10 @@
 import { NextResponse, after } from "next/server";
 import { randomUUID } from "node:crypto";
-import { addLead, addLeadEvent, bumpLpDaily, getLead, listLeads, setLeadStatus } from "@/lib/data/store";
+import { addLead, addLeadEvent, bumpLpDaily, comTravaDaPessoa, getLead, listLeads, setLeadStatus } from "@/lib/data/store";
 import { DEFAULT_BRAND, type Lead } from "@/lib/types";
 import { candidatosIdLead, resolverIdLead } from "@/lib/lead-id";
-import { mesmoTelefone } from "@/lib/phone";
+import { mesmoTelefone, normalizarTelefone } from "@/lib/phone";
+import { MESMA_INSCRICAO_MIN } from "@/lib/n8n/servico";
 import { acharMesmaPessoa } from "@/lib/identidade";
 import { idsDoUtm } from "@/lib/atribuicao";
 import { isLostStatus } from "@/lib/lead-status";
@@ -143,104 +144,115 @@ export async function POST(request: Request) {
   const email = (body.email ?? "").trim() || undefined;
   const phone = (body.phone ?? "").trim() || undefined;
 
-  // O id sai do event_id: a mesma pessoa reenviando o formulário cai no MESMO
-  // lead (reenvio), nunca num lead novo nem num lead zerado. Ver lib/lead-id.ts.
-  const candidatos = new Map<string, Lead | null>();
-  for (const id of candidatosIdLead(eventId)) candidatos.set(id, await getLead(id));
-  const resolucao = resolverIdLead(
-    eventId,
-    { name, email, phone },
-    (id) => candidatos.get(id),
-    () => randomUUID().slice(0, 8),
-  );
-  let leadId = resolucao.id;
+  // A identificação e a gravação rodam na TRAVA DA PESSOA (telefone, senão
+  // e-mail): a página manda o mesmo cadastro ao painel e ao n8n ao mesmo tempo, e
+  // o n8n grava a ficha pela API — sem a trava, os dois criavam dois leads.
+  const chaveDaPessoa = (phone && normalizarTelefone(phone)) || email?.toLowerCase() || eventId;
+  const { leadId, created } = await comTravaDaPessoa(chaveDaPessoa, async () => {
+    // O id sai do event_id: a mesma pessoa reenviando o formulário cai no MESMO
+    // lead (reenvio), nunca num lead novo nem num lead zerado. Ver lib/lead-id.ts.
+    const candidatos = new Map<string, Lead | null>();
+    for (const id of candidatosIdLead(eventId)) candidatos.set(id, await getLead(id));
+    const resolucao = resolverIdLead(
+      eventId,
+      { name, email, phone },
+      (id) => candidatos.get(id),
+      () => randomUUID().slice(0, 8),
+    );
+    let leadId = resolucao.id;
 
-  // A mesma pessoa com OUTRO event_id (outro dia, outra LP, outro anúncio): o
-  // contato identifica. Vira reenvio no lead que já existe — dois leads da mesma
-  // pessoa contavam em dobro no custo por lead e caíam duas vezes na fila (D2).
-  let jaCadastrado: Lead | undefined;
-  if (resolucao.tipo !== "reenvio") {
-    jaCadastrado = acharMesmaPessoa({ phone, email }, await listLeads(DEFAULT_BRAND), DEFAULT_BRAND);
-    if (jaCadastrado) leadId = jaCadastrado.id;
-  }
+    // A mesma pessoa com OUTRO event_id (outro dia, outra LP, outro anúncio): o
+    // contato identifica. Vira reenvio no lead que já existe — dois leads da mesma
+    // pessoa contavam em dobro no custo por lead e caíam duas vezes na fila (D2).
+    let jaCadastrado: Lead | undefined;
+    if (resolucao.tipo !== "reenvio") {
+      jaCadastrado = acharMesmaPessoa({ phone, email }, await listLeads(DEFAULT_BRAND), DEFAULT_BRAND);
+      if (jaCadastrado) leadId = jaCadastrado.id;
+    }
 
-  // Envio de formulário é EVENTO (conta reenvios); lead é PESSOA.
-  await bumpLpDaily(date, { formSubmits: 1 });
-  const { created } = await addLead({
-    id: leadId,
-    brand: DEFAULT_BRAND,
-    createdAt: new Date().toISOString(),
-    name,
-    email,
-    phone,
-    utmSource: attr.utm_source,
-    utmCampaign: attr.utm_campaign,
-    // utm_content carries the ad id — this is what ties the lead to a creative
-    utmContent: attr.utm_content,
-    // Antes descartados: o meio diz se é mídia paga (o gerador emitia
-    // source=instagram + medium=paid_social) e o fbclid prova o clique.
-    utmMedium: attr.utm_medium,
-    utmTerm: attr.utm_term,
-    fbclid: attr.fbclid,
-    // Os ids que o UTM padrão traz ({{campaign.id}}, {{adset.id}}, {{ad.id}}):
-    // guardados resolvidos, para a atribuição não depender de nome (D6).
-    ...idsDoUtm(attr),
-    status: "lead",
-    // kept so the later Schedule event can still be matched to this person
-    fbc: body.fbc || attr.fbc,
-    fbp: body.fbp,
-    gaClientId: body.gaClientId,
-    gaSessionId: body.gaSessionId,
-  });
+    // Envio de formulário é EVENTO (conta reenvios); lead é PESSOA.
+    await bumpLpDaily(date, { formSubmits: 1 });
+    const { created } = await addLead({
+      id: leadId,
+      brand: DEFAULT_BRAND,
+      createdAt: new Date().toISOString(),
+      name,
+      email,
+      phone,
+      utmSource: attr.utm_source,
+      utmCampaign: attr.utm_campaign,
+      // utm_content carries the ad id — this is what ties the lead to a creative
+      utmContent: attr.utm_content,
+      // Antes descartados: o meio diz se é mídia paga (o gerador emitia
+      // source=instagram + medium=paid_social) e o fbclid prova o clique.
+      utmMedium: attr.utm_medium,
+      utmTerm: attr.utm_term,
+      fbclid: attr.fbclid,
+      // Os ids que o UTM padrão traz ({{campaign.id}}, {{adset.id}}, {{ad.id}}):
+      // guardados resolvidos, para a atribuição não depender de nome (D6).
+      ...idsDoUtm(attr),
+      status: "lead",
+      // kept so the later Schedule event can still be matched to this person
+      fbc: body.fbc || attr.fbc,
+      fbp: body.fbp,
+      gaClientId: body.gaClientId,
+      gaSessionId: body.gaSessionId,
+    });
 
-  // No reenvio, o contato que chegou diferente do gravado fica no histórico
-  // (o lead não é sobrescrito — quem atende decide qual vale).
-  const anterior = jaCadastrado ?? candidatos.get(leadId);
-  const payload: Record<string, string> = {};
-  if (!created && anterior) {
-    if (phone && anterior.phone && !mesmoTelefone(phone, anterior.phone)) payload.telefoneNovo = phone;
-    if (email && anterior.email && email.toLowerCase() !== anterior.email.toLowerCase()) payload.emailNovo = email;
-  }
-  if (jaCadastrado) {
-    payload.pelo = phone && jaCadastrado.phone && mesmoTelefone(phone, jaCadastrado.phone) ? "telefone" : "e-mail";
-    // O anúncio que trouxe a pessoa DE VOLTA (a origem gravada é a da 1ª entrada).
-    if (attr.utm_content && attr.utm_content !== jaCadastrado.utmContent) payload.origemNova = attr.utm_content;
-  } else if (resolucao.tipo === "colisao") {
-    payload.idOcupado = resolucao.idOcupado;
-  }
+    // No reenvio, o contato que chegou diferente do gravado fica no histórico
+    // (o lead não é sobrescrito — quem atende decide qual vale).
+    const anterior = jaCadastrado ?? candidatos.get(leadId);
+    const payload: Record<string, string> = {};
+    if (!created && anterior) {
+      if (phone && anterior.phone && !mesmoTelefone(phone, anterior.phone)) payload.telefoneNovo = phone;
+      if (email && anterior.email && email.toLowerCase() !== anterior.email.toLowerCase()) payload.emailNovo = email;
+    }
+    if (jaCadastrado) {
+      payload.pelo = phone && jaCadastrado.phone && mesmoTelefone(phone, jaCadastrado.phone) ? "telefone" : "e-mail";
+      // O anúncio que trouxe a pessoa DE VOLTA (a origem gravada é a da 1ª entrada).
+      if (attr.utm_content && attr.utm_content !== jaCadastrado.utmContent) payload.origemNova = attr.utm_content;
+    } else if (resolucao.tipo === "colisao") {
+      payload.idOcupado = resolucao.idOcupado;
+    }
+    // O mesmo cadastro que o n8n (ou um clique duplo) gravou há pouco: não é um reenvio do formulário.
+    const mesmaInscricao =
+      !created && anterior && Date.now() - Date.parse(anterior.createdAt) < MESMA_INSCRICAO_MIN * 60_000;
+    if (mesmaInscricao) payload.mesmaInscricao = "sim";
 
-  await addLeadEvent({
-    id: newEventId(),
-    leadId,
-    brand: DEFAULT_BRAND,
-    leadName: name,
-    actor: "Landing page",
-    action: created ? "created" : "reenvio",
-    toStatus: created ? "lead" : undefined,
-    payload: Object.keys(payload).length ? payload : undefined,
-    createdAt: new Date().toISOString(),
-  });
-
-  // Quem foi dado como perdido e preencheu o formulário DE NOVO (envio novo, não
-  // o mesmo reenviado) quer conversa: volta para a fila como novo, com aviso.
-  // O mesmo event_id reenviado (retentativa, relay) nunca reabre nada.
-  if (!created && jaCadastrado && isLostStatus(jaCadastrado.status)) {
-    await setLeadStatus(leadId, "lead", { lostAt: null, lostReasonDetail: null });
     await addLeadEvent({
       id: newEventId(),
       leadId,
       brand: DEFAULT_BRAND,
-      leadName: jaCadastrado.name,
+      leadName: name,
       actor: "Landing page",
-      action: "reaberto",
-      fromStatus: jaCadastrado.status,
-      toStatus: "lead",
-      payload: { motivo: "Preencheu o formulário de novo" },
+      action: created ? "created" : "reenvio",
+      toStatus: created ? "lead" : undefined,
+      payload: Object.keys(payload).length ? payload : undefined,
       createdAt: new Date().toISOString(),
     });
-    const voltou = await getLead(leadId);
-    if (voltou) await avisarLeadNovo(voltou, "lead_voltou");
-  }
+
+    // Quem foi dado como perdido e preencheu o formulário DE NOVO (envio novo, não
+    // o mesmo reenviado) quer conversa: volta para a fila como novo, com aviso.
+    // O mesmo event_id reenviado (retentativa, relay) nunca reabre nada.
+    if (!created && !mesmaInscricao && jaCadastrado && isLostStatus(jaCadastrado.status)) {
+      await setLeadStatus(leadId, "lead", { lostAt: null, lostReasonDetail: null });
+      await addLeadEvent({
+        id: newEventId(),
+        leadId,
+        brand: DEFAULT_BRAND,
+        leadName: jaCadastrado.name,
+        actor: "Landing page",
+        action: "reaberto",
+        fromStatus: jaCadastrado.status,
+        toStatus: "lead",
+        payload: { motivo: "Preencheu o formulário de novo" },
+        createdAt: new Date().toISOString(),
+      });
+      const voltou = await getLead(leadId);
+      if (voltou) await avisarLeadNovo(voltou, "lead_voltou");
+    }
+    return { leadId, created };
+  });
 
   // Reenvio não é conversão nova: a Meta deduplicaria pelo event_id, mas o GA4
   // contaria duas vezes. Nada sai.

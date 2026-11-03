@@ -19,7 +19,6 @@ import { can } from "@/lib/auth/guard";
 import { currentActor, newEventId } from "@/lib/auth/actor";
 import { aplicarStatus, type StatusResult } from "@/lib/leads/mudar-status";
 import { registrarContato } from "@/lib/leads/registrar-contato";
-import { cadenciaDoAtendimento } from "@/lib/atendimento-server";
 import {
   BENS,
   FAIXAS_PARCELA,
@@ -165,7 +164,7 @@ export async function registrarResultadoDoContato(
   if (!(await can("leads:write"))) {
     return { ok: false, message: "Você não tem permissão para alterar leads." };
   }
-  const feito = await registrarContato(leadId, { ...r, actor: await currentActor(), proxima: await cadenciaDoAtendimento() });
+  const feito = await registrarContato(leadId, { ...r, actor: await currentActor() });
   if (feito.ok) revalidatePath("/", "layout");
   return feito;
 }

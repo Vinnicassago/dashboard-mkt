@@ -13,9 +13,10 @@ import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth/session";
  *  - /api/resumo-semanal (cron de segunda; mesma chave CRON_SECRET)
  *  - /api/capi/retentar (cron da CAPI, a cada 15 min; mesma chave CRON_SECRET)
  *  - /api/health       (só a versão no ar, sem dado)
+ *  - /api/n8n          (a automação da live; cada rota exige o N8N_API_TOKEN)
  * Auth is skipped entirely when AUTH_SECRET is not set.
  */
-const OPEN_API = ["/api/track", "/api/sync", "/api/resumo-semanal", "/api/capi/retentar", "/api/health"];
+const OPEN_API = ["/api/track", "/api/sync", "/api/resumo-semanal", "/api/capi/retentar", "/api/health", "/api/n8n"];
 
 export async function middleware(request: NextRequest) {
   const secret = process.env.AUTH_SECRET?.trim();

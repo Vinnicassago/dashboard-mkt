@@ -64,6 +64,14 @@ export function DescricaoEvento({ e }: { e: LeadEvent }) {
       </span>
     );
   }
+  if (e.action === "reenvio" && e.payload?.mesmaInscricao === "sim") {
+    return (
+      <span className="text-muted-foreground">
+        A mesma inscrição chegou também pela {e.actor === "n8n" ? "automação (n8n)" : "landing page"} — o cadastro não
+        foi duplicado
+      </span>
+    );
+  }
   if (e.action === "reenvio") {
     const novo = [e.payload?.telefoneNovo, e.payload?.emailNovo].filter(Boolean).join(" · ");
     return (

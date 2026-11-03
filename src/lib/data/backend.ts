@@ -532,6 +532,8 @@ export const STATE_KEYS = {
   capiUltimoReenvio: "capi_ultimo_reenvio",
   /** A tabela de parcela da classe A/B/C/X (`lib/classe.ts`) — Configurações → Atendimento. */
   tabelaDeParcela: "classe_tabela_parcela",
+  /** Turno, feriados, faixas e cadência do atendimento da live (`lib/turno.ts`). */
+  expediente: "atendimento_expediente",
 } as const;
 
 export interface StoredToken {

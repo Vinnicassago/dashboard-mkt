@@ -1,7 +1,8 @@
 import "server-only";
 import { addLeadEvent, getLead, listLeadEvents, setLeadStatus } from "../data/store";
 import { newEventId } from "../auth/actor";
-import { proximaPelaCadencia, resumoContato, type CanalContato } from "../contato";
+import { resumoContato, type CanalContato } from "../contato";
+import { cadenciaPara } from "../atendimento-server";
 import { formatDateTime } from "../format";
 import { encerrado, podeTransitar, statusLabel } from "../lead-status";
 import { everBooked } from "../metrics";
@@ -27,11 +28,6 @@ export interface RegistroDeContato {
   reuniaoEm?: string;
   /** Quem registra. A tela passa o usuário logado; a API, "n8n". */
   actor: string;
-  /**
-   * Quando tentar de novo depois de uma tentativa sem conversa (a cadência).
-   * Padrão: `proximaPelaCadencia`.
-   */
-  proxima?: (ocorreuEm: string, n: number) => string | undefined;
 }
 
 export interface ContatoRegistrado extends StatusResult {
@@ -102,7 +98,8 @@ export async function registrarContato(leadId: string, r: RegistroDeContato): Pr
 
   const falou = FALOU.includes(r.resultado);
   const n = antes.tentativas + 1;
-  const proxima = falou ? undefined : (r.proxima ?? proximaPelaCadencia)(quando, n);
+  // A cadência do lead: a do turno para os da live (com classe), a de sempre para os outros.
+  const proxima = falou ? undefined : (await cadenciaPara(lead))(quando, n);
   const nota = r.nota?.trim().slice(0, TETO_NOTA) || undefined;
   const eventoId = newEventId();
 
