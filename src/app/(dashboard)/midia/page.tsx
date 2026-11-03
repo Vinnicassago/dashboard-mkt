@@ -38,6 +38,10 @@ import { alertasDeAtribuicao, alertasDeConfianca } from "@/lib/alertas";
 import { RegistrarAlertas } from "@/components/layout/alertas";
 import { MIN_REUNIOES } from "@/lib/trust";
 import { formatCurrency0, formatInt, formatIntComSinal, formatPercent } from "@/lib/format";
+import { CriativosDaLiveCard } from "@/components/midia/criativos-live";
+import { criativosDaLive } from "@/lib/criativos-live";
+import { campanhaDaLive } from "@/lib/live-server";
+import { isAwareness } from "@/lib/brands";
 
 export const dynamic = "force-dynamic";
 
@@ -79,6 +83,15 @@ export default async function MidiaPage({ searchParams }: { searchParams: Promis
   // saem iguais) — o texto inteiro sai de `lib/midia.ts`.
   const faixa = faixaDeSaude(criativos);
   const descoberta = descobertaDaMidia(kp);
+
+  // Criativos da live: o período da página dentro da campanha da live (sem `?range=`, a campanha da live até hoje).
+  const cfgLive = await campanhaDaLive();
+  const rangeLive = {
+    de: range?.from && range.from > cfgLive.periodo.de ? range.from : cfgLive.periodo.de,
+    ate: [range?.to ?? hoje, cfgLive.periodo.ate, hoje].sort()[0],
+  };
+  const criativosLive =
+    !isAwareness(brand) && rangeLive.de <= rangeLive.ate ? criativosDaLive(data, cfgLive, rangeLive, hoje) : null;
 
   const serie = dailySeries(data, range, cobertura);
   const faixas = [
@@ -239,6 +252,23 @@ export default async function MidiaPage({ searchParams }: { searchParams: Promis
           </Card>
         ) : null}
       </section>
+
+      {/* 4b. CRIATIVOS DA LIVE — os anúncios das campanhas da live (E3-02). */}
+      {criativosLive ? (
+        <Card id="criativos-live" className="scroll-mt-24">
+          <CardHeader>
+            <CardTitle>Criativos da live 01/12</CardTitle>
+            <CardDescription>
+              Os anúncios das campanhas da live, por criativo, no período ({rangeLive.de.split("-").reverse().slice(0, 2).join("/")} a{" "}
+              {rangeLive.ate.split("-").reverse().slice(0, 2).join("/")}). Qualificado = classe A ou B; inscrito ligado ao anúncio pela
+              mesma junção da Mídia.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <CriativosDaLiveCard r={criativosLive} />
+          </CardContent>
+        </Card>
+      ) : null}
 
       {/* 5. DESCOBERTA — alcance, CPM, custo por mil alcançados, seguidores estimados. */}
       <Card>
