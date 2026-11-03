@@ -27,6 +27,7 @@ import type {
   LpDelta,
   StoredUser,
   CapiEnvioPatch,
+  LeadFichaPatch,
   ListCapiEnviosOpts,
 } from "./backend";
 import type { Role } from "../auth/roles";
@@ -96,6 +97,10 @@ export const deleteDraft = (id: string) => backend().deleteDraft(id);
 /** Lead novo; se o id já existe, só preenche contato vazio (ver DataBackend). */
 export const addLead = (lead: Lead) => backend().addLead(lead);
 export const getLead = (id: string) => backend().getLead(id);
+/** Ficha da live: respostas e fatos da automação (ver LeadFichaPatch). */
+export const updateLeadFicha = (id: string, patch: LeadFichaPatch) => backend().updateLeadFicha(id, patch);
+/** Trava da pessoa (telefone/e-mail): duas entradas simultâneas não criam dois leads. */
+export const comTravaDaPessoa = <T,>(chave: string, fn: () => Promise<T>) => backend().comTravaDaPessoa(chave, fn);
 
 export const setLeadStatus = (id: string, status: LeadStatus, patch?: LeadStatusPatch) =>
   backend().setLeadStatus(id, status, patch);

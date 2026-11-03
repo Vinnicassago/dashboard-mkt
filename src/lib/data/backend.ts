@@ -20,6 +20,16 @@ import type {
   SyncRun,
 } from "../types";
 import type { Role } from "../auth/roles";
+import type {
+  Bem,
+  Classe,
+  Diagnostico,
+  FaixaParcela,
+  FaixaValor,
+  Finalidade,
+  HorarioPreferido,
+  PrazoCompra,
+} from "../qualificacao";
 
 /**
  * The contract every storage backend implements. The app only ever talks to
@@ -58,6 +68,93 @@ export interface LeadStatusPatch {
   /** `null` limpa a marca (lead voltou ao caminho feliz). */
   lostAt?: string | null;
   roboSessionId?: string;
+}
+
+/**
+ * O que a ficha da live muda num lead (a API do n8n ou a pessoa na ficha).
+ * Ausente = fica como está; `null` = limpa. Os FATOS da automação
+ * (`FICHA_UMA_VEZ`) são gravados uma vez, como os marcos: o 2º aviso não apaga
+ * quando foi o 1º. Status, marcos, reunião e contato NÃO passam por aqui.
+ */
+export interface LeadFichaPatch {
+  bem?: Bem | null;
+  faixaValor?: FaixaValor | null;
+  finalidade?: Finalidade | null;
+  faixaParcela?: FaixaParcela | null;
+  prazoCompra?: PrazoCompra | null;
+  classe?: Classe | null;
+  classeN8n?: Classe | null;
+  aceiteMensagens?: boolean | null;
+  msg1Status?: string | null;
+  horarioPreferido?: HorarioPreferido | null;
+  diagnostico?: Diagnostico | null;
+  reuniaoConfirmadaEm?: string | null;
+  reuniaoRemarcarEm?: string | null;
+  msg1EnviadaEm?: string;
+  atendimentoAvisadoEm?: string;
+  escaladoEm?: string;
+  comunidadeEm?: string;
+}
+
+/** Campos da ficha que a escrita SOBRESCREVE (a resposta mais nova vale). */
+export const FICHA_SOBRESCREVE = [
+  "bem",
+  "faixaValor",
+  "finalidade",
+  "faixaParcela",
+  "prazoCompra",
+  "classe",
+  "classeN8n",
+  "aceiteMensagens",
+  "msg1Status",
+  "horarioPreferido",
+  "diagnostico",
+  "reuniaoConfirmadaEm",
+  "reuniaoRemarcarEm",
+] as const satisfies readonly (keyof LeadFichaPatch)[];
+
+/** Fatos da automação: gravados na 1ª vez, nunca sobrescritos. */
+export const FICHA_UMA_VEZ = [
+  "msg1EnviadaEm",
+  "atendimentoAvisadoEm",
+  "escaladoEm",
+  "comunidadeEm",
+] as const satisfies readonly (keyof LeadFichaPatch)[];
+
+/** O patch aplicado a um lead em memória (backend local e testes). */
+export function aplicarFicha(l: Lead, p: LeadFichaPatch): void {
+  const alvo = l as unknown as Record<string, unknown>;
+  for (const f of FICHA_SOBRESCREVE) {
+    const v = p[f];
+    if (v === undefined) continue;
+    if (v === null) delete alvo[f];
+    else alvo[f] = v;
+  }
+  for (const f of FICHA_UMA_VEZ) {
+    if (p[f] !== undefined && alvo[f] == null) alvo[f] = p[f];
+  }
+}
+
+const filasLocais = new Map<string, Promise<void>>();
+
+/**
+ * Trava em memória do processo: quem chega com a mesma chave espera quem chegou
+ * antes. Basta para o JSON local (um processo só); o Postgres usa um advisory
+ * lock, que vale entre processos.
+ */
+export async function emFilaNoProcesso<T>(chave: string, fn: () => Promise<T>): Promise<T> {
+  const antes = filasLocais.get(chave) ?? Promise.resolve();
+  let liberar!: () => void;
+  const minha = new Promise<void>((r) => (liberar = r));
+  const cadeia = antes.then(() => minha);
+  filasLocais.set(chave, cadeia);
+  try {
+    await antes;
+    return await fn();
+  } finally {
+    liberar();
+    if (filasLocais.get(chave) === cadeia) filasLocais.delete(chave);
+  }
 }
 
 /** Recorte de linhas de anúncio substituído por `replaceAdData`. */
@@ -216,6 +313,15 @@ export interface DataBackend {
   addLead(lead: Lead): Promise<{ created: boolean }>;
   /** Um lead pelo id, inclusive excluído. */
   getLead(id: string): Promise<Lead | null>;
+  /** Grava a ficha da live (`LeadFichaPatch`): sobrescreve respostas, grava fatos uma vez. */
+  updateLeadFicha(id: string, patch: LeadFichaPatch): Promise<void>;
+  /**
+   * Roda `fn` com a trava da PESSOA (chave do telefone ou do e-mail): duas
+   * entradas da mesma pessoa ao mesmo tempo (a LP e o n8n mandam juntos) esperam
+   * uma pela outra — a segunda acha o lead que a primeira criou, em vez de criar
+   * outro.
+   */
+  comTravaDaPessoa<T>(chave: string, fn: () => Promise<T>): Promise<T>;
   setLeadStatus(id: string, status: LeadStatus, patch?: LeadStatusPatch): Promise<void>;
   /** Corrige a data de entrada (reparo de leads zerados por reenvio). */
   setLeadCreatedAt(id: string, createdAt: string): Promise<void>;

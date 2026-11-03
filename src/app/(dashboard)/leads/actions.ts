@@ -14,11 +14,25 @@ import {
 import { everBooked } from "@/lib/metrics";
 import { gruposDuplicados } from "@/lib/identidade";
 import { encerrado, podeTransitar, statusLabel, type DadosDaTransicao } from "@/lib/lead-status";
-import { proximaPelaCadencia, resumoContato, type CanalContato } from "@/lib/contato";
-import { formatDateTime } from "@/lib/format";
+import { resumoContato, type CanalContato } from "@/lib/contato";
 import { can } from "@/lib/auth/guard";
 import { currentActor, newEventId } from "@/lib/auth/actor";
 import { aplicarStatus, type StatusResult } from "@/lib/leads/mudar-status";
+import { registrarContato } from "@/lib/leads/registrar-contato";
+import { cadenciaDoAtendimento } from "@/lib/atendimento-server";
+import {
+  BENS,
+  FAIXAS_PARCELA,
+  FAIXAS_VALOR,
+  FINALIDADES,
+  HORARIOS,
+  PRAZOS_COMPRA,
+  lerOpcao,
+  type ResultadoContato,
+} from "@/lib/qualificacao";
+import { gravarFicha } from "@/lib/leads/gravar-ficha";
+import { comClasse } from "@/lib/classe-server";
+import type { LeadFichaPatch } from "@/lib/data/backend";
 import type { LeadStatus } from "@/lib/types";
 
 // A exportação de leads em CSV mora em `leads/exportar/route.ts`: o servidor
@@ -135,73 +149,25 @@ export async function registrarTentativa(
   falou: boolean,
   ocorreuEm?: string,
 ): Promise<TentativaResult> {
+  return registrarResultadoDoContato(leadId, { canal, resultado: falou ? "falou" : "nao_atendeu", ocorreuEm });
+}
+
+/**
+ * A tentativa COM o resultado (Falou · Agendou · Não atendeu · Número inválido ·
+ * Sem interesse) e as notas da ligação — o registro da ficha e da Fila. Quando o
+ * resultado agenda ou encerra, o status vai junto, pela régua de sempre
+ * (`lib/leads/registrar-contato.ts`, o mesmo caminho da API do n8n).
+ */
+export async function registrarResultadoDoContato(
+  leadId: string,
+  r: { canal: CanalContato; resultado: ResultadoContato; nota?: string; ocorreuEm?: string; reuniaoEm?: string },
+): Promise<TentativaResult> {
   if (!(await can("leads:write"))) {
     return { ok: false, message: "Você não tem permissão para alterar leads." };
   }
-  const lead = await getLead(leadId);
-  if (!lead || lead.deletedAt) return { ok: false, message: "Lead não encontrado." };
-  if (encerrado(lead.status)) {
-    return { ok: false, message: `O lead está encerrado como “${statusLabel(lead.status)}”.` };
-  }
-
-  const agora = Date.now();
-  let quando = new Date(agora).toISOString();
-  if (ocorreuEm) {
-    const t = Date.parse(ocorreuEm);
-    if (!Number.isFinite(t) || t > agora + 60_000 || t < agora - 7 * 86_400_000) {
-      return { ok: false, message: "A tentativa precisa ser de agora ou dos últimos 7 dias." };
-    }
-    quando = new Date(t).toISOString();
-  }
-
-  const antes = resumoContato(await listLeadEvents({ leadId, limit: 0 }));
-  const n = antes.tentativas + 1;
-  const proxima = falou ? undefined : proximaPelaCadencia(quando, n);
-  const actor = await currentActor();
-  const eventoId = newEventId();
-
-  await addLeadEvent({
-    id: eventoId,
-    leadId,
-    brand: lead.brand,
-    leadName: lead.name,
-    actor,
-    action: "tentativa",
-    payload: { canal, falou: falou ? "sim" : "nao", ...(proxima ? { proxima } : {}) },
-    occurredAt: quando,
-    createdAt: new Date().toISOString(),
-  });
-
-  // 1ª tentativa: marco gravado uma vez, e "Novo" vira "Em contato".
-  const statusAntes = lead.status;
-  const novoStatus = statusAntes === "lead" ? "em_contato" : statusAntes;
-  await setLeadStatus(leadId, novoStatus, { firstContactAt: quando });
-  if (novoStatus !== statusAntes) {
-    await addLeadEvent({
-      id: newEventId(),
-      leadId,
-      brand: lead.brand,
-      leadName: lead.name,
-      actor,
-      action: "status_changed",
-      fromStatus: statusAntes,
-      toStatus: novoStatus,
-      occurredAt: quando,
-      createdAt: new Date().toISOString(),
-    });
-  }
-  revalidatePath("/", "layout");
-
-  if (falou) {
-    return { ok: true, eventoId, message: "Contato registrado. Agora registre o desfecho: agendar, sem interesse…" };
-  }
-  return {
-    ok: true,
-    eventoId,
-    message: proxima
-      ? `Tentativa ${n} sem resposta registrada. Próxima: ${formatDateTime(proxima)}.`
-      : `Tentativa ${n} sem resposta registrada — a cadência terminou; já dá para encerrar como “Sem resposta”.`,
-  };
+  const feito = await registrarContato(leadId, { ...r, actor: await currentActor(), proxima: await cadenciaDoAtendimento() });
+  if (feito.ok) revalidatePath("/", "layout");
+  return feito;
 }
 
 /**
@@ -433,4 +399,78 @@ export async function corrigirDesistenciaSemReuniao(leadId: string, para: LeadSt
   });
   revalidatePath("/", "layout");
   return { ok: true, message: `“${lead.name}” corrigido para “${statusLabel(para)}”.` };
+}
+
+// ---------------------------------------------------------------- ficha da live
+
+export interface RespostasDaFicha {
+  bem?: string;
+  faixaValor?: string;
+  finalidade?: string;
+  faixaParcela?: string;
+  prazoCompra?: string;
+  horarioPreferido?: string;
+  aceiteMensagens?: boolean | null;
+}
+
+/**
+ * Corrige as respostas do formulário na ficha (o n8n falhou, ou a pessoa contou
+ * outra coisa na ligação). Campo vazio limpa; valor fora do vocabulário é
+ * recusado. A classe do painel é recalculada a partir delas.
+ */
+export async function salvarRespostas(leadId: string, r: RespostasDaFicha): Promise<StatusResult> {
+  if (!(await can("leads:write"))) {
+    return { ok: false, message: "Você não tem permissão para alterar leads." };
+  }
+  const lead = await getLead(leadId);
+  if (!lead || lead.deletedAt) return { ok: false, message: "Lead não encontrado." };
+  const ler = <K extends string>(vocab: Record<K, string>, v: string | undefined, nome: string): K | null => {
+    if (!v) return null;
+    const k = lerOpcao(vocab, v);
+    if (!k) throw new Error(`${nome}: valor inválido.`);
+    return k;
+  };
+  let patch: LeadFichaPatch;
+  try {
+    patch = {
+      bem: ler(BENS, r.bem, "Bem"),
+      faixaValor: ler(FAIXAS_VALOR, r.faixaValor, "Valor"),
+      finalidade: ler(FINALIDADES, r.finalidade, "Finalidade"),
+      faixaParcela: ler(FAIXAS_PARCELA, r.faixaParcela, "Parcela"),
+      prazoCompra: ler(PRAZOS_COMPRA, r.prazoCompra, "Prazo"),
+      horarioPreferido: ler(HORARIOS, r.horarioPreferido, "Horário"),
+      aceiteMensagens: r.aceiteMensagens ?? null,
+    };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "Resposta inválida." };
+  }
+  const { mudou } = await gravarFicha(lead, await comClasse(lead, patch), await currentActor());
+  revalidatePath("/", "layout");
+  return { ok: true, message: mudou.length ? "Ficha atualizada." : "Nada mudou." };
+}
+
+/**
+ * Reunião confirmada com a pessoa, ou ela pediu para remarcar (ainda sem data
+ * nova). Data nova se grava pelo "Agendado" de sempre — que limpa os dois.
+ */
+export async function marcarReuniao(leadId: string, o: "confirmada" | "remarcar"): Promise<StatusResult> {
+  if (!(await can("leads:write"))) {
+    return { ok: false, message: "Você não tem permissão para alterar leads." };
+  }
+  const lead = await getLead(leadId);
+  if (!lead || lead.deletedAt) return { ok: false, message: "Lead não encontrado." };
+  if (o === "confirmada" && lead.status !== "agendado") {
+    return { ok: false, message: "Só se confirma reunião agendada." };
+  }
+  if (o === "remarcar" && lead.status !== "agendado" && lead.status !== "no_show") {
+    return { ok: false, message: "Só se remarca reunião agendada ou de quem não compareceu." };
+  }
+  const agora = new Date().toISOString();
+  await gravarFicha(
+    lead,
+    o === "confirmada" ? { reuniaoConfirmadaEm: agora, reuniaoRemarcarEm: null } : { reuniaoRemarcarEm: agora, reuniaoConfirmadaEm: null },
+    await currentActor(),
+  );
+  revalidatePath("/", "layout");
+  return { ok: true, message: o === "confirmada" ? "Reunião confirmada." : "Registrado: pediu para remarcar. Grave a data nova em “Agendado”." };
 }

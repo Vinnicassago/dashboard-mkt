@@ -10,7 +10,19 @@ import { getData, getLead, listCapiEnvios, listLeadEvents } from "@/lib/data/sto
 import { can } from "@/lib/auth/guard";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { mensagemWhatsapp } from "@/lib/integracoes";
-import { resumoContato, quando } from "@/lib/contato";
+import { resumoContato, quando, tentativasDoLead } from "@/lib/contato";
+import { FichaQualificacao } from "@/components/leads/ficha-qualificacao";
+import { ClasseBadge } from "@/components/leads/classe-badge";
+import {
+  RESULTADOS_CONTATO,
+  STATUS_ATENDIMENTO,
+  STATUS_MSG1,
+  STATUS_REUNIAO,
+  classeDiverge,
+  classeDoLead,
+  statusAtendimento,
+  statusReuniao,
+} from "@/lib/qualificacao";
 import { etapaDoLead, FILA_ETAPAS } from "@/lib/fila";
 import { gruposDuplicados, pareceTeste, problemasDeContato } from "@/lib/identidade";
 import { ETAPA_MAXIMA_LABEL, etapaMaxima } from "@/lib/lead-status";
@@ -119,6 +131,9 @@ export default async function FichaDoLead({
   ].sort((a, b) => Date.parse(b.em) - Date.parse(a.em));
 
   const contato = resumoContato(proprios);
+  const tentativas = tentativasDoLead(proprios);
+  const ultimoResultado = [...tentativas].reverse().find((t) => t.resultado)?.resultado;
+  const reuniao = statusReuniao(lead);
   const origem = origemDoLead(dados)(lead);
   const naFila = lead.deletedAt ? null : etapaDoLead(lead, proprios, new Date().toISOString());
   const teste = pareceTeste(lead);
@@ -273,6 +288,129 @@ export default async function FichaDoLead({
               </dl>
             </CardContent>
           </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex flex-wrap items-center gap-2">
+                Qualificação
+                <ClasseBadge classe={classeDoLead(lead)} origem={lead.classe ? undefined : lead.classeN8n ? "n8n" : undefined} />
+              </CardTitle>
+              <CardDescription>
+                As respostas do formulário. A classe é a do painel (calculada das respostas); sem respostas
+                completas, vale a que o n8n mandou.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {classeDiverge(lead) ? (
+                <p className="flex items-start gap-2 rounded-lg border border-[var(--warning)]/50 bg-[var(--warning)]/10 p-2.5 text-xs">
+                  <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-[var(--warning-text)]" />
+                  <span>
+                    O n8n classificou como <strong>{lead.classeN8n}</strong> e o painel calcula{" "}
+                    <strong>{lead.classe}</strong> com as mesmas respostas. A Fila usa a do painel — confira a
+                    tabela de parcela em Configurações → Atendimento e o fluxo do n8n.
+                  </span>
+                </p>
+              ) : null}
+              <FichaQualificacao
+                id={lead.id}
+                canEdit={canEdit && !lead.deletedAt}
+                atuais={{
+                  bem: lead.bem,
+                  faixaValor: lead.faixaValor,
+                  finalidade: lead.finalidade,
+                  faixaParcela: lead.faixaParcela,
+                  prazoCompra: lead.prazoCompra,
+                  horarioPreferido: lead.horarioPreferido,
+                  aceiteMensagens: lead.aceiteMensagens,
+                }}
+              />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Atendimento</CardTitle>
+              <CardDescription>
+                Cada tentativa com o resultado e as notas da ligação, do histórico — nada é contado à parte.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <dl className="divide-y">
+                <Linha rotulo="Status do atendimento">{STATUS_ATENDIMENTO[statusAtendimento(lead)]}</Linha>
+                {[0, 1, 2].map((i) => {
+                  const t = tentativas[i];
+                  return (
+                    <Linha key={i} rotulo={`${i + 1}ª tentativa`}>
+                      {t ? (
+                        <>
+                          {formatDateTime(t.em)}
+                          {t.resultado ? ` · ${RESULTADOS_CONTATO[t.resultado]}` : t.falou ? " · falou" : " · sem resposta"}
+                          {t.nota ? <span className="block text-xs text-muted-foreground whitespace-pre-line">{t.nota}</span> : null}
+                        </>
+                      ) : (
+                        "—"
+                      )}
+                    </Linha>
+                  );
+                })}
+                {tentativas.length > 3 ? <Linha rotulo="Outras tentativas">{tentativas.length - 3}</Linha> : null}
+                <Linha rotulo="Resultado do contato">
+                  {ultimoResultado ? RESULTADOS_CONTATO[ultimoResultado] : "—"}
+                </Linha>
+                <Linha rotulo="Reunião">
+                  {reuniao ? STATUS_REUNIAO[reuniao] : "—"}
+                  {lead.meetingFor ? ` · ${formatDateTime(lead.meetingFor)}` : ""}
+                  {reuniao === "confirmada" && lead.reuniaoConfirmadaEm ? (
+                    <span className="block text-xs text-muted-foreground">confirmada em {formatDateTime(lead.reuniaoConfirmadaEm)}</span>
+                  ) : null}
+                </Linha>
+              </dl>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Automação (n8n)</CardTitle>
+              <CardDescription>O que o fluxo do n8n registrou: mensagem, avisos e comunidade.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <dl className="divide-y">
+                <Linha rotulo="Mensagem automática">
+                  {lead.msg1EnviadaEm ? formatDateTime(lead.msg1EnviadaEm) : "não enviada"}
+                  {lead.msg1Status ? ` · ${(STATUS_MSG1 as Record<string, string>)[lead.msg1Status] ?? lead.msg1Status}` : ""}
+                </Linha>
+                <Linha rotulo="Atendimento avisado">{data(lead.atendimentoAvisadoEm)}</Linha>
+                <Linha rotulo="Escalado">{data(lead.escaladoEm)}</Linha>
+                <Linha rotulo="Clicou na comunidade">
+                  {lead.comunidadeEm ? `sim · ${formatDateTime(lead.comunidadeEm)}` : "não"}
+                </Linha>
+              </dl>
+            </CardContent>
+          </Card>
+
+          {lead.diagnostico ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Diagnóstico</CardTitle>
+                <CardDescription>
+                  {lead.diagnostico.feitoEm ? `Feito em ${formatDateTime(lead.diagnostico.feitoEm)}. ` : ""}
+                  {lead.diagnostico.perfil ? `Perfil: ${lead.diagnostico.perfil}` : "Sem perfil final."}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ol className="space-y-2 text-sm">
+                  {lead.diagnostico.respostas.map((r, i) => (
+                    <li key={i}>
+                      <p className="text-xs text-muted-foreground">
+                        {i + 1}. {r.pergunta ?? `Pergunta ${i + 1}`}
+                      </p>
+                      <p className="whitespace-pre-line">{r.resposta}</p>
+                    </li>
+                  ))}
+                </ol>
+              </CardContent>
+            </Card>
+          ) : null}
 
           <Card>
             <CardHeader>

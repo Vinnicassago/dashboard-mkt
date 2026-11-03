@@ -22,7 +22,10 @@ import {
   type ListCapiEnviosOpts,
   aplicarPatchCapi,
   agruparCampanhasDaConta,
+  aplicarFicha,
   chaveDeLinhaDeAnuncio,
+  emFilaNoProcesso,
+  type LeadFichaPatch,
 } from "./backend";
 import { toRole } from "../auth/roles";
 import { LOST_STATUSES, normalizeLeadStatus } from "../lead-status";
@@ -407,6 +410,17 @@ export const localBackend: DataBackend = {
     // seguinte (o "status anterior" mudava junto) — o Postgres nunca faz isso.
     const l = file().data.leads.find((x) => x.id === id);
     return l ? { ...l } : null;
+  },
+
+  async updateLeadFicha(id: string, patch: LeadFichaPatch) {
+    commit((data) => {
+      const lead = data.leads.find((l) => l.id === id);
+      if (lead) aplicarFicha(lead, patch);
+    });
+  },
+
+  async comTravaDaPessoa<T>(chave: string, fn: () => Promise<T>) {
+    return emFilaNoProcesso(`pessoa:${chave}`, fn);
   },
 
   async setLeadCreatedAt(id: string, createdAt: string) {

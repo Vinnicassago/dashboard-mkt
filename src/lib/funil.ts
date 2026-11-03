@@ -66,6 +66,7 @@ import {
 } from "./metrics";
 import { AMOSTRA_MIN, ATRASO_REGISTRO_HORAS, ATRASO_REGISTRO_SHARE, LOTE_JANELA_MIN, LOTE_MIN } from "./motor";
 import { formatInt, formatPercent } from "./format";
+import { CLASSES_NA_FILA, classeDoLead } from "./qualificacao";
 import { segundaDaSemana, somarDias, ultimasSemanas } from "./semana";
 
 /** Dias de `de` até `ate` (AAAA-MM-DD); 0 no mesmo dia. */
@@ -225,6 +226,58 @@ function eventosNoPeriodo(data: DashboardData, range: DateRange | undefined) {
   return { realizadas, vendas };
 }
 
+/**
+ * As etapas da ficha da live: Qualificado (classe A ou B) e Clicou na comunidade.
+ *
+ * Qualificado é fato da ENTRADA (a classe sai das respostas do formulário), então
+ * é parte de Leads nas duas vistas — a taxa é sobre quem TEM classe (quem entrou
+ * sem as respostas não é "não qualificado", é sem leitura; a nota conta quantos).
+ * A comunidade não é pré-requisito do contato: a taxa é sobre os leads, não sobre
+ * a etapa de cima; na vista de período ela conta cliques do período (eventos).
+ */
+function etapasDaLive(data: DashboardData, range: DateRange | undefined, vista: VistaFunil, leadCount: number): EtapaFunil[] {
+  const doPeriodo = filterLeads(data.leads, range);
+  const comClasse = doPeriodo.filter((l) => classeDoLead(l));
+  const cliques =
+    vista === "periodo"
+      ? data.leads.filter((l) => l.comunidadeEm && inRange(dayOf(l.comunidadeEm), range)).length
+      : doPeriodo.filter((l) => l.comunidadeEm).length;
+  if (comClasse.length === 0 && cliques === 0) return [];
+
+  const out: EtapaFunil[] = [];
+  const semClasse = doPeriodo.length - comClasse.length;
+  const qualificado: EtapaFunil = {
+    key: "qualificados",
+    label: "Inscrito qualificado (A e B)",
+    dica: "qualificados",
+    valor: comClasse.filter((l) => CLASSES_NA_FILA.includes(classeDoLead(l)!)).length,
+    fonte: "crm",
+    dono: "MKT",
+    nota: [
+      "classe calculada das respostas do formulário (sem elas, a do n8n)",
+      semClasse > 0 ? `${formatInt(semClasse)} ${semClasse === 1 ? "lead sem classe" : "leads sem classe"} (sem as respostas) — fora da taxa` : undefined,
+    ]
+      .filter(Boolean)
+      .join(" · "),
+  };
+  taxaAninhada(qualificado, comClasse.length, semClasse > 0 ? "dos que têm classe" : undefined);
+  out.push(qualificado);
+
+  const comunidade: EtapaFunil = {
+    key: "comunidade",
+    label: "Clicou na comunidade",
+    dica: "comunidade",
+    valor: cliques,
+    fonte: "crm",
+    dono: "MKT",
+    nota: vista === "periodo" ? "cliques no link da comunidade feitos no período" : "dos leads que entraram no período, quantos clicaram no link da comunidade",
+  };
+  if (vista === "periodo") comunidade.semTaxa = SEM_TAXA_PERIODO;
+  else taxaAninhada(comunidade, leadCount, "dos leads");
+  out.push(comunidade);
+  return out;
+}
+
 /** Um degrau da cascata traduzido em etapa — os números vêm como estão. */
 function traduzDegrau(d: Degrau): EtapaFunil {
   return {
@@ -347,6 +400,12 @@ function etapasDaCascata(degraus: Degrau[], e: EntradaFunil): { etapas: EtapaFun
   const leadCount = kpis.leads.valor;
   const ev = periodo ? eventosNoPeriodo(data, range) : undefined;
 
+  // Ficha da live: Qualificado (A+B) e Clicou na comunidade, entre Leads e o 1º
+  // contato. Só aparecem quando há lead com classe ou com clique no período — o
+  // funil de antes do formulário novo não ganha dois "0".
+  const daLive = etapasDaLive(data, range, vista, leadCount);
+  etapas.push(...daLive);
+
   // 1º contato: a etapa do comercial que o relatório pede — e um RAMO PARALELO
   // (`TRANSICOES.lead` inclui "agendado": quem agenda direto não passa por ela).
   // Quem ainda não teve tentativa no painel está parado aqui (a etapa "novo" da
@@ -375,7 +434,8 @@ function etapasDaCascata(degraus: Degrau[], e: EntradaFunil): { etapas: EtapaFun
       .join(" · "),
   };
   if (periodo) contato.semTaxa = SEM_TAXA_PERIODO;
-  else taxaAninhada(contato, leadCount);
+  // A base é Leads — com as etapas da live no meio, "da anterior" mentiria sobre qual é.
+  else taxaAninhada(contato, leadCount, daLive.length ? "dos leads" : undefined);
   etapas.push(contato);
 
   // Reuniões: por período, as AGENDADAS no período (a north star) com o custo por

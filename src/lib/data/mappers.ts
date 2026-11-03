@@ -9,6 +9,17 @@
 
 import { toRole } from "../auth/roles";
 import { normalizeLeadStatus } from "../lead-status";
+import {
+  BENS,
+  CLASSES,
+  FAIXAS_PARCELA,
+  FAIXAS_VALOR,
+  FINALIDADES,
+  HORARIOS,
+  PRAZOS_COMPRA,
+  lerOpcao,
+  type Diagnostico,
+} from "../qualificacao";
 import type {
   AcaoEstado,
   AcaoEstadoValor,
@@ -307,7 +318,39 @@ export const toLead = (r: Row): Lead => ({
   deletedAt: r.deleted_at ? iso(r.deleted_at) : undefined,
   deletedBy: r.deleted_by ? s(r.deleted_by) : undefined,
   deletedReason: r.deleted_reason ? s(r.deleted_reason) : undefined,
+  // Ficha da live (0021). Valor fora do vocabulário (gravado à mão no banco) some, não quebra a tela.
+  bem: lerOpcao(BENS, r.bem),
+  faixaValor: lerOpcao(FAIXAS_VALOR, r.faixa_valor),
+  finalidade: lerOpcao(FINALIDADES, r.finalidade),
+  faixaParcela: lerOpcao(FAIXAS_PARCELA, r.faixa_parcela),
+  prazoCompra: lerOpcao(PRAZOS_COMPRA, r.prazo_compra),
+  classe: lerOpcao(CLASSES, r.classe),
+  classeN8n: lerOpcao(CLASSES, r.classe_n8n),
+  aceiteMensagens: r.aceite_mensagens == null ? undefined : Boolean(r.aceite_mensagens),
+  msg1EnviadaEm: r.msg1_enviada_em ? iso(r.msg1_enviada_em) : undefined,
+  msg1Status: r.msg1_status ? s(r.msg1_status) : undefined,
+  horarioPreferido: lerOpcao(HORARIOS, r.horario_preferido),
+  atendimentoAvisadoEm: r.atendimento_avisado_em ? iso(r.atendimento_avisado_em) : undefined,
+  escaladoEm: r.escalado_em ? iso(r.escalado_em) : undefined,
+  comunidadeEm: r.comunidade_em ? iso(r.comunidade_em) : undefined,
+  diagnostico: lerDiagnostico(r.diagnostico),
+  reuniaoConfirmadaEm: r.reuniao_confirmada_em ? iso(r.reuniao_confirmada_em) : undefined,
+  reuniaoRemarcarEm: r.reuniao_remarcar_em ? iso(r.reuniao_remarcar_em) : undefined,
 });
+
+/** jsonb do diagnóstico → objeto (o Postgres devolve objeto; texto antigo é lido também). */
+function lerDiagnostico(v: unknown): Diagnostico | undefined {
+  let obj = v;
+  if (typeof v === "string") {
+    try {
+      obj = JSON.parse(v);
+    } catch {
+      return undefined;
+    }
+  }
+  if (!obj || typeof obj !== "object" || !Array.isArray((obj as Diagnostico).respostas)) return undefined;
+  return obj as Diagnostico;
+}
 
 export const fromLead = (l: Lead): Row => ({
   id: l.id,
@@ -343,6 +386,23 @@ export const fromLead = (l: Lead): Row => ({
   deleted_at: l.deletedAt ?? null,
   deleted_by: l.deletedBy ?? null,
   deleted_reason: l.deletedReason ?? null,
+  bem: l.bem ?? null,
+  faixa_valor: l.faixaValor ?? null,
+  finalidade: l.finalidade ?? null,
+  faixa_parcela: l.faixaParcela ?? null,
+  prazo_compra: l.prazoCompra ?? null,
+  classe: l.classe ?? null,
+  classe_n8n: l.classeN8n ?? null,
+  aceite_mensagens: l.aceiteMensagens ?? null,
+  msg1_enviada_em: l.msg1EnviadaEm ?? null,
+  msg1_status: l.msg1Status ?? null,
+  horario_preferido: l.horarioPreferido ?? null,
+  atendimento_avisado_em: l.atendimentoAvisadoEm ?? null,
+  escalado_em: l.escaladoEm ?? null,
+  comunidade_em: l.comunidadeEm ?? null,
+  diagnostico: l.diagnostico ?? null,
+  reuniao_confirmada_em: l.reuniaoConfirmadaEm ?? null,
+  reuniao_remarcar_em: l.reuniaoRemarcarEm ?? null,
 });
 
 export const toGoal = (r: Row): Goal => ({

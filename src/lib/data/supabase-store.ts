@@ -19,7 +19,10 @@ import {
   type CapiEnvioPatch,
   type ListCapiEnviosOpts,
   agruparCampanhasDaConta,
+  aplicarFicha,
   chaveDeLinhaDeAnuncio,
+  emFilaNoProcesso,
+  type LeadFichaPatch,
 } from "./backend";
 import { toRole } from "../auth/roles";
 import type {
@@ -343,6 +346,28 @@ export const supabaseBackend: DataBackend = {
     const { data, error } = await supabase().from("leads").select("*").eq("id", id).maybeSingle();
     check(error, "get lead");
     return data ? toLead(data as Row) : null;
+  },
+
+  /** Sem transação no REST: lê, aplica a mesma regra do JSON local (`aplicarFicha`) e grava. */
+  async updateLeadFicha(id: string, patch: LeadFichaPatch) {
+    const db = supabase();
+    const cur = await db.from("leads").select("*").eq("id", id).maybeSingle();
+    check(cur.error, "get lead (ficha)");
+    if (!cur.data) return;
+    const lead = toLead(cur.data as Row);
+    aplicarFicha(lead, patch);
+    const row = fromLead(lead);
+    // msg1EnviadaEm → msg1_enviada_em, classeN8n → classe_n8n (a mesma regra do Postgres).
+    const cols = Object.keys(patch).map((f) => f.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`));
+    const update = Object.fromEntries(cols.map((c) => [c, row[c] ?? null]));
+    const { error } = await db.from("leads").update(update).eq("id", id);
+    check(error, "update lead (ficha)");
+    await touch(false);
+  },
+
+  /** Supabase não expõe advisory lock pelo REST: a trava vale só dentro do processo. */
+  async comTravaDaPessoa<T>(chave: string, fn: () => Promise<T>) {
+    return emFilaNoProcesso(`pessoa:${chave}`, fn);
   },
 
   async setLeadCreatedAt(id: string, createdAt: string) {

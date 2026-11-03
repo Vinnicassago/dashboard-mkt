@@ -162,6 +162,81 @@ function contrato(nome: string, abrir: () => Promise<{ backend: DataBackend; fec
       expect(k.adDaily.map((r) => r.adId)).toEqual(["300"]);
     });
 
+    it("ficha da live: grava na entrada, respostas sobrescrevem, fatos da automação ficam com a 1ª vez", async () => {
+      const id = `LEAD-N8N-ficha-${sfx}`;
+      await b.addLead({
+        id,
+        brand: "consorcio",
+        createdAt: "2026-11-16T19:10:00.000Z",
+        name: "Pessoa Ficha",
+        phone: "5511999990001",
+        status: "lead",
+        bem: "imovel",
+        faixaValor: "300k_500k",
+        finalidade: "morar",
+        faixaParcela: "1500_3000",
+        prazoCompra: "ate_1_ano",
+        classe: "A",
+        classeN8n: "A",
+        aceiteMensagens: true,
+        horarioPreferido: "noite",
+      });
+      await b.updateLeadFicha(id, {
+        faixaValor: "500k_1m",
+        classe: "C",
+        msg1EnviadaEm: "2026-11-16T19:10:05.000Z",
+        msg1Status: "enviada",
+        comunidadeEm: "2026-11-16T19:30:00.000Z",
+        diagnostico: { respostas: [{ pergunta: "P1", resposta: "R1" }], perfil: "Investidor" },
+        reuniaoConfirmadaEm: "2026-11-20T12:00:00.000Z",
+      });
+      // a 2ª mensagem e o 2º clique não apagam a 1ª vez; o status da mensagem muda
+      await b.updateLeadFicha(id, {
+        msg1EnviadaEm: "2026-11-17T09:00:00.000Z",
+        msg1Status: "lida",
+        comunidadeEm: "2026-11-18T09:00:00.000Z",
+        reuniaoConfirmadaEm: null,
+        horarioPreferido: null,
+      });
+      // reenvio do formulário (mesmo id) não mexe na ficha
+      await b.addLead({ id, brand: "consorcio", createdAt: "2026-11-17T10:00:00.000Z", name: "Outro", status: "lead", bem: "carro" });
+      const l = await b.getLead(id);
+      expect(l).toMatchObject({
+        bem: "imovel",
+        faixaValor: "500k_1m",
+        finalidade: "morar",
+        faixaParcela: "1500_3000",
+        prazoCompra: "ate_1_ano",
+        classe: "C",
+        classeN8n: "A",
+        aceiteMensagens: true,
+        msg1EnviadaEm: "2026-11-16T19:10:05.000Z",
+        msg1Status: "lida",
+        comunidadeEm: "2026-11-16T19:30:00.000Z",
+        diagnostico: { respostas: [{ pergunta: "P1", resposta: "R1" }], perfil: "Investidor" },
+      });
+      expect(l?.horarioPreferido).toBeUndefined();
+      expect(l?.reuniaoConfirmadaEm).toBeUndefined();
+      expect(l?.createdAt).toBe("2026-11-16T19:10:00.000Z");
+    });
+
+    it("trava da pessoa: duas entradas ao mesmo tempo com a mesma chave rodam uma depois da outra", async () => {
+      const ordem: string[] = [];
+      const passo = (nome: string, ms: number) =>
+        b.comTravaDaPessoa(`5511999990002-${sfx}`, async () => {
+          ordem.push(`${nome}:entra`);
+          await new Promise((r) => setTimeout(r, ms));
+          ordem.push(`${nome}:sai`);
+          return nome;
+        });
+      const [x, y] = await Promise.all([passo("lp", 60), passo("n8n", 5)]);
+      expect([x, y]).toEqual(["lp", "n8n"]);
+      expect(ordem).toEqual(["lp:entra", "lp:sai", "n8n:entra", "n8n:sai"]);
+      // chaves diferentes não esperam uma pela outra
+      const livre = await b.comTravaDaPessoa(`outra-${sfx}`, async () => "ok");
+      expect(livre).toBe("ok");
+    });
+
     it("upsertAdDaily: o mesmo (dia, anúncio) que muda de marca não fica nas duas", async () => {
       await b.replaceAdData(
         [

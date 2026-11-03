@@ -27,6 +27,28 @@ import {
 } from "./lead-status";
 import { everBooked, filterLeads, type DateRange } from "./metrics";
 import { origemDoLead, type Origem } from "./origem";
+import {
+  BENS,
+  CLASSES,
+  FAIXAS_PARCELA,
+  FAIXAS_VALOR,
+  FINALIDADES,
+  PRAZOS_COMPRA,
+  STATUS_ATENDIMENTO,
+  STATUS_REUNIAO,
+  classeDiverge,
+  classeDoLead,
+  statusAtendimento,
+  statusReuniao,
+  type Bem,
+  type Classe,
+  type FaixaParcela,
+  type FaixaValor,
+  type Finalidade,
+  type PrazoCompra,
+  type StatusAtendimento,
+  type StatusReuniao,
+} from "./qualificacao";
 import type { DashboardData, Lead, LeadEvent, LeadStatus } from "./types";
 
 // ---------------------------------------------------------------- vocabulário
@@ -95,6 +117,36 @@ export interface LinhaDeLead {
   /** Quem age em seguida; sem dono = lead encerrado. */
   dono?: Dono;
   sinalizadores: Sinalizadores;
+  // ---- ficha da live (lib/qualificacao.ts) ----
+  /** A classe que vale (a do painel; sem ela, a do n8n) — `classeDoLead`. */
+  classe?: Classe;
+  /** A do painel e a do n8n discordam. */
+  classeDiverge: boolean;
+  bem?: Bem;
+  faixaValor?: FaixaValor;
+  finalidade?: Finalidade;
+  faixaParcela?: FaixaParcela;
+  prazoCompra?: PrazoCompra;
+  /** A leitura em cinco estados do atendimento. */
+  atendimento: StatusAtendimento;
+  reuniao?: StatusReuniao;
+  /** Clicou no link da comunidade. */
+  comunidade: boolean;
+  /** Mensagem automática: saiu, falhou (status "falhou") ou não há registro. */
+  msg1: Msg1Situacao;
+}
+
+/** A mensagem automática do lead, como o filtro e o CSV leem. */
+export type Msg1Situacao = "enviada" | "falhou" | "nao";
+export const MSG1_SITUACAO_LABEL: Record<Msg1Situacao, string> = {
+  enviada: "Enviada",
+  falhou: "Falhou",
+  nao: "Sem registro",
+};
+
+function msg1Situacao(l: Pick<Lead, "msg1EnviadaEm" | "msg1Status">): Msg1Situacao {
+  if (l.msg1Status === "falhou") return "falhou";
+  return l.msg1EnviadaEm ? "enviada" : "nao";
 }
 
 // ---------------------------------------------------------------- montagem
@@ -202,6 +254,17 @@ export function montarLinhasDeLeads(
         duplicadoDe: grupo && grupo.principal.id !== l.id ? grupo.principal.name : undefined,
         contatoInvalido: l.status === "contato_invalido" || problemasDeContato(l).length > 0,
       },
+      classe: classeDoLead(l),
+      classeDiverge: classeDiverge(l),
+      bem: l.bem,
+      faixaValor: l.faixaValor,
+      finalidade: l.finalidade,
+      faixaParcela: l.faixaParcela,
+      prazoCompra: l.prazoCompra,
+      atendimento: statusAtendimento(l),
+      reuniao: statusReuniao(l),
+      comunidade: Boolean(l.comunidadeEm),
+      msg1: msg1Situacao(l),
     };
   });
 }
@@ -227,6 +290,50 @@ export interface FiltroDeLeads {
   sinalizadores: SinalizadorChave[];
   /** Nome, e-mail ou telefone. */
   busca: string;
+  // ---- ficha da live ----
+  /** "sem" = sem classe (faltam respostas e o n8n não mandou). */
+  classe?: Classe | "sem";
+  bem?: Bem;
+  faixaValor?: FaixaValor;
+  finalidade?: Finalidade;
+  faixaParcela?: FaixaParcela;
+  prazoCompra?: PrazoCompra;
+  atendimento?: StatusAtendimento;
+  reuniao?: StatusReuniao;
+  comunidade?: "sim" | "nao";
+  msg1?: Msg1Situacao;
+}
+
+/**
+ * Os filtros da ficha da live: chave na URL e no pedido de exportação →
+ * vocabulário que valida o valor e rótulo para o registro. Fonte única para a
+ * tela, a URL, a exportação e `descreverFiltro`.
+ */
+export const FILTROS_DA_FICHA = {
+  classe: { rotulo: "Classe", vocab: { ...CLASSES, sem: "Sem classe" } },
+  bem: { rotulo: "Bem", vocab: BENS },
+  faixaValor: { rotulo: "Valor", vocab: FAIXAS_VALOR },
+  finalidade: { rotulo: "Finalidade", vocab: FINALIDADES },
+  faixaParcela: { rotulo: "Parcela", vocab: FAIXAS_PARCELA },
+  prazoCompra: { rotulo: "Prazo", vocab: PRAZOS_COMPRA },
+  atendimento: { rotulo: "Atendimento", vocab: STATUS_ATENDIMENTO },
+  reuniao: { rotulo: "Reunião", vocab: STATUS_REUNIAO },
+  comunidade: { rotulo: "Comunidade", vocab: { sim: "Clicou", nao: "Não clicou" } },
+  msg1: { rotulo: "Mensagem automática", vocab: MSG1_SITUACAO_LABEL },
+} as const satisfies Record<string, { rotulo: string; vocab: Record<string, string> }>;
+export type FiltroDaFicha = keyof typeof FILTROS_DA_FICHA;
+export const CHAVES_FILTRO_FICHA = Object.keys(FILTROS_DA_FICHA) as FiltroDaFicha[];
+
+/** O valor da linha que o filtro da ficha compara. */
+function valorNaLinha(r: LinhaDeLead, k: FiltroDaFicha): string | undefined {
+  switch (k) {
+    case "classe":
+      return r.classe ?? "sem";
+    case "comunidade":
+      return r.comunidade ? "sim" : "nao";
+    default:
+      return r[k];
+  }
 }
 
 export const FILTRO_VAZIO: FiltroDeLeads = { status: "todos", sinalizadores: [], busca: "" };
@@ -246,6 +353,9 @@ export function aplicarFiltroSemStatus(linhas: LinhaDeLead[], f: FiltroDeLeads):
     if (f.conjunto && r.origem.conjunto !== f.conjunto) return false;
     if (f.dono && r.dono !== f.dono) return false;
     if (f.sinalizadores.length && !f.sinalizadores.some((s) => temSinal(r, s))) return false;
+    for (const k of CHAVES_FILTRO_FICHA) {
+      if (f[k] && valorNaLinha(r, k) !== f[k]) return false;
+    }
     if (!q) return true;
     const noTexto = r.name.toLowerCase().includes(q) || (r.email ?? "").toLowerCase().includes(q);
     const noFone = qDigitos.length > 0 && (r.phone ?? "").replace(/\D/g, "").includes(qDigitos);
@@ -269,6 +379,10 @@ export function descreverFiltro(f: FiltroDeLeads, periodo: string): string {
   if (f.conjunto) partes.push(`conjunto: ${f.conjunto}`);
   if (f.dono) partes.push(`dono: ${DONO_LABEL[f.dono]}`);
   if (f.sinalizadores.length) partes.push(`sinalizadores: ${f.sinalizadores.map((s) => SINALIZADOR_LABEL[s]).join(", ")}`);
+  for (const k of CHAVES_FILTRO_FICHA) {
+    const v = f[k];
+    if (v) partes.push(`${FILTROS_DA_FICHA[k].rotulo.toLowerCase()}: ${(FILTROS_DA_FICHA[k].vocab as Record<string, string>)[v]}`);
+  }
   if (f.busca.trim()) partes.push("busca: sim");
   return partes.join(" · ");
 }
@@ -304,7 +418,18 @@ export function filtroDoPedido(entrada: unknown): FiltroDeLeads {
     dono,
     sinalizadores,
     busca: textoDoPedido(e.busca) ?? "",
+    ...filtrosDaFichaDe(e),
   };
+}
+
+/** Os filtros da ficha de um objeto qualquer (pedido, URL): o que não é do vocabulário cai. */
+export function filtrosDaFichaDe(e: Record<string, unknown>): Partial<FiltroDeLeads> {
+  const out: Record<string, string> = {};
+  for (const k of CHAVES_FILTRO_FICHA) {
+    const v = e[k];
+    if (typeof v === "string" && Object.hasOwn(FILTROS_DA_FICHA[k].vocab, v)) out[k] = v;
+  }
+  return out as Partial<FiltroDeLeads>;
 }
 
 const dataBr = (iso: string) => iso.split("-").reverse().join("/");
@@ -381,6 +506,17 @@ export const CSV_CABECALHO = [
   "Anúncio",
   "Reunião",
   "Dono",
+  "Classe",
+  "Classe (n8n diverge)",
+  "Bem",
+  "Valor",
+  "Finalidade",
+  "Parcela",
+  "Prazo",
+  "Atendimento",
+  "Status da reunião",
+  "Comunidade",
+  "Mensagem automática",
 ] as const;
 
 /** CSV pt-BR (`;`, BOM, CRLF) das linhas recebidas — e só delas: o filtro vale. */
@@ -401,6 +537,17 @@ export function montarCsvDeLeads(linhas: LinhaDeLead[]): string {
       csvCell(r.origem.anuncio === "—" ? "" : r.origem.anuncio),
       csvCell(r.meetingFor ? formatDateTime(r.meetingFor) : r.jaAgendou ? "data não registrada" : ""),
       csvCell(r.dono ? DONO_LABEL[r.dono] : ""),
+      csvCell(r.classe ?? ""),
+      csvCell(r.classeDiverge ? "sim" : ""),
+      csvCell(r.bem ? BENS[r.bem] : ""),
+      csvCell(r.faixaValor ? FAIXAS_VALOR[r.faixaValor] : ""),
+      csvCell(r.finalidade ? FINALIDADES[r.finalidade] : ""),
+      csvCell(r.faixaParcela ? FAIXAS_PARCELA[r.faixaParcela] : ""),
+      csvCell(r.prazoCompra ? PRAZOS_COMPRA[r.prazoCompra] : ""),
+      csvCell(STATUS_ATENDIMENTO[r.atendimento]),
+      csvCell(r.reuniao ? STATUS_REUNIAO[r.reuniao] : ""),
+      csvCell(r.comunidade ? "sim" : "não"),
+      csvCell(MSG1_SITUACAO_LABEL[r.msg1]),
     ].join(";"),
   );
   // BOM + CRLF: é assim que o Excel pt-BR abre acentos e colunas certos.

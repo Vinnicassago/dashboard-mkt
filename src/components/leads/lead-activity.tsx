@@ -10,6 +10,7 @@ import { statusMeta } from "@/components/tables/lead-status";
 import type { LeadEvent } from "@/lib/types";
 import { formatDateTime } from "@/lib/format";
 import { CANAL_LABEL, type CanalContato } from "@/lib/contato";
+import { FATOS_DA_FICHA, RESULTADOS_CONTATO, lerOpcao, type FatoDaFicha } from "@/lib/qualificacao";
 
 /** O que aconteceu, em uma linha — usado no histórico de Pessoas e na ficha. */
 export function DescricaoEvento({ e }: { e: LeadEvent }) {
@@ -26,14 +27,29 @@ export function DescricaoEvento({ e }: { e: LeadEvent }) {
   }
   if (e.action === "tentativa") {
     const canal = CANAL_LABEL[(e.payload?.canal ?? "") as CanalContato] ?? "Contato";
+    const resultado = lerOpcao(RESULTADOS_CONTATO, e.payload?.resultado);
     return (
       <span className="text-muted-foreground">
         Tentativa por {canal.toLowerCase()} —{" "}
-        {e.payload?.falou === "sim" ? "falou com a pessoa" : "sem resposta"}
+        {resultado
+          ? RESULTADOS_CONTATO[resultado].toLowerCase()
+          : e.payload?.falou === "sim"
+            ? "falou com a pessoa"
+            : "sem resposta"}
         {e.payload?.proxima ? ` · próxima ${formatDateTime(e.payload.proxima)}` : ""}
         {e.occurredAt && Math.abs(Date.parse(e.occurredAt) - Date.parse(e.createdAt)) > 15 * 60_000
           ? ` · feita em ${formatDateTime(e.occurredAt)}`
           : ""}
+        {e.payload?.nota ? <span className="mt-0.5 block whitespace-pre-line text-foreground">{e.payload.nota}</span> : null}
+      </span>
+    );
+  }
+  if (e.action === "ficha") {
+    const fato = e.payload?.fato as FatoDaFicha | undefined;
+    return (
+      <span className="text-muted-foreground">
+        {fato && Object.hasOwn(FATOS_DA_FICHA, fato) ? FATOS_DA_FICHA[fato] : "Ficha atualizada"}
+        {e.payload?.detalhe ? ` — ${e.payload.detalhe}` : ""}
       </span>
     );
   }

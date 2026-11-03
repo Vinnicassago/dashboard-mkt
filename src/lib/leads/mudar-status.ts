@@ -1,5 +1,5 @@
 import "server-only";
-import { addLeadEvent, setLeadStatus } from "../data/store";
+import { addLeadEvent, setLeadStatus, updateLeadFicha } from "../data/store";
 import { everBooked } from "../metrics";
 import { chaveNome } from "../lead-id";
 import {
@@ -65,6 +65,8 @@ export async function aplicarStatus(
   lead: Lead,
   status: LeadStatus,
   dados: DadosDaTransicao = {},
+  /** Quem registra quando não é o usuário logado (a API do n8n grava "n8n"). */
+  opts: { actor?: string } = {},
 ): Promise<StatusResult> {
   const prevStatus = lead.status;
   const becomesBooked = isBookedStatus(status);
@@ -72,7 +74,7 @@ export async function aplicarStatus(
   const eventos = eventosDaMudanca(lead, status);
   const now = new Date().toISOString();
   // Antes de qualquer escrita: uma falha aqui não deixa marco gravado sem evento.
-  const actor = await currentActor();
+  const actor = opts.actor ?? (await currentActor());
   const motivo = dados.motivo ? (MOTIVOS_CONTATO_INVALIDO[dados.motivo] ?? dados.motivo) : undefined;
 
   /**
@@ -89,6 +91,11 @@ export async function aplicarStatus(
     lostAt: isLostStatus(status) ? now : null,
     lostReasonDetail: isLostStatus(status) ? (motivo ?? null) : null,
   });
+  // Data NOVA de reunião (agendar ou remarcar): a confirmação e o "pediu para
+  // remarcar" eram da data anterior.
+  if (dados.meetingFor && dados.meetingFor !== lead.meetingFor && (lead.reuniaoConfirmadaEm || lead.reuniaoRemarcarEm)) {
+    await updateLeadFicha(lead.id, { reuniaoConfirmadaEm: null, reuniaoRemarcarEm: null });
+  }
 
   // O histórico vem DEPOIS de enfileirar o envio à Meta: se a escrita do
   // histórico falhar, o evento do fato que acabou de ser carimbado já está na fila

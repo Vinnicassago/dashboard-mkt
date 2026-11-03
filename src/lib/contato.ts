@@ -10,6 +10,7 @@
 
 import { diaBrt } from "./horario-util";
 import { normalizarTelefone } from "./phone";
+import { RESULTADOS_CONTATO, lerOpcao, type ResultadoContato } from "./qualificacao";
 import type { LeadEvent } from "./types";
 
 /** Link do WhatsApp com a mensagem pronta; `{nome}` vira o primeiro nome. */
@@ -48,6 +49,39 @@ export interface ResumoContato {
 
 /** Quando o fato aconteceu (o registro pode ser posterior). */
 export const quando = (e: LeadEvent) => e.occurredAt ?? e.createdAt;
+
+/** Uma tentativa do histórico, como a ficha e a API do n8n mostram (tentativa_1_em…). */
+export interface TentativaDoLead {
+  id: string;
+  em: string;
+  canal?: CanalContato;
+  falou: boolean;
+  /** O resultado, quando registrado com ele (Fila, ficha, n8n). */
+  resultado?: ResultadoContato;
+  /** As notas da ligação. */
+  nota?: string;
+  /** Quem registrou. */
+  por: string;
+}
+
+/** As tentativas que valem (sem as desfeitas), da mais antiga para a mais nova. */
+export function tentativasDoLead(eventos: LeadEvent[]): TentativaDoLead[] {
+  const desfeitos = new Set(
+    eventos.filter((e) => e.action === "desfeito" && e.payload?.evento).map((e) => e.payload!.evento),
+  );
+  return eventos
+    .filter((e) => e.action === "tentativa" && !desfeitos.has(e.id))
+    .sort((a, b) => Date.parse(quando(a)) - Date.parse(quando(b)))
+    .map((e) => ({
+      id: e.id,
+      em: quando(e),
+      canal: (e.payload?.canal as CanalContato | undefined) || undefined,
+      falou: e.payload?.falou === "sim",
+      resultado: lerOpcao(RESULTADOS_CONTATO, e.payload?.resultado),
+      nota: e.payload?.nota || undefined,
+      por: e.actor,
+    }));
+}
 
 /** Resumo das tentativas de UM lead. `eventos` = histórico dele (qualquer ordem). */
 export function resumoContato(eventos: LeadEvent[]): ResumoContato {

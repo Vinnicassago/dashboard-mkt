@@ -39,7 +39,12 @@ export type MetricaId =
   | "alcance_organico_posts"
   | "views"
   | "interacoes"
-  | "visitas_perfil";
+  | "visitas_perfil"
+  // ---- live de 01/12 (ficha, Fila e aba Live) ----
+  | "qualificados"
+  | "comunidade"
+  | "custo_por_inscrito"
+  | "custo_por_qualificado";
 
 export interface Definicao {
   id: MetricaId;
@@ -264,6 +269,42 @@ export const DICIONARIO: Record<MetricaId, Definicao> = {
     fonte: "Instagram (profile_views)",
     inclui: "quem veio de post, anúncio ou busca",
     exclui: "nada",
+  },
+  qualificados: {
+    id: "qualificados",
+    nome: "Qualificados",
+    definicao: "Inscritos de classe A ou B — os que entram na Fila de contato.",
+    formula: "nº de leads com entrada no período e classe A ou B",
+    fonte: "Painel (classe calculada das respostas; sem respostas, a do n8n)",
+    inclui: "classes A e B",
+    exclui: "C, X e quem não tem classe (sem as respostas do formulário)",
+  },
+  comunidade: {
+    id: "comunidade",
+    nome: "Na comunidade",
+    definicao: "Inscritos que clicaram no link da comunidade do WhatsApp.",
+    formula: "nº de leads com clique na comunidade registrado pelo n8n",
+    fonte: "n8n (clique no link da comunidade)",
+    inclui: "o 1º clique de cada pessoa",
+    exclui: "quem entrou na comunidade sem passar pelo link",
+  },
+  custo_por_inscrito: {
+    id: "custo_por_inscrito",
+    nome: "Custo por inscrito",
+    definicao: "Gasto da captação da live ÷ inscrições no período.",
+    formula: "gasto nas campanhas de captação ÷ leads da live",
+    fonte: "Meta Ads + Painel",
+    inclui: "só a verba da captação",
+    exclui: "remarketing e pós-live, leads que não são da live",
+  },
+  custo_por_qualificado: {
+    id: "custo_por_qualificado",
+    nome: "Custo por qualificado",
+    definicao: "Gasto da captação da live ÷ inscritos de classe A ou B.",
+    formula: "gasto nas campanhas de captação ÷ qualificados (A+B)",
+    fonte: "Meta Ads + Painel",
+    inclui: "só a verba da captação",
+    exclui: "C, X e sem classe",
   },
 };
 

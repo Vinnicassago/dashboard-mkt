@@ -8,6 +8,7 @@ import { DataTable, type Column } from "@/components/ui/data-table";
 import { Badge } from "@/components/ui/badge";
 import { useComPeriodo } from "@/components/layout/use-periodo";
 import { RegistrarStatus, StatusBadge } from "@/components/tables/lead-status";
+import { ClasseBadge } from "@/components/leads/classe-badge";
 import { deleteLeadAction, restoreLeadAction } from "@/app/(dashboard)/leads/actions";
 import { pedirCsvDeLeads } from "@/components/leads/exportar-csv";
 import { ETAPA_MAXIMA_LABEL, LEAD_STATUSES, LEAD_STATUS_META } from "@/lib/lead-status";
@@ -17,9 +18,12 @@ import { dica } from "@/lib/dicionario";
 import { formatDateTime, formatDateTimeCurta, formatarEspera } from "@/lib/format";
 import { normalizarTelefone } from "@/lib/phone";
 import {
+  CHAVES_FILTRO_FICHA,
+  FILTROS_DA_FICHA,
   FILTRO_VAZIO,
   SINALIZADOR_LABEL,
   aplicarFiltroSemStatus,
+  filtrosDaFichaDe,
   contarPorStatus,
   profundidadeDaEtapa,
   qtdDeLeads,
@@ -231,6 +235,24 @@ function montarColunas(opts: {
         ),
     },
     {
+      key: "classe",
+      header: "Classe",
+      headerTitle:
+        "A classe do painel, calculada das respostas (sem respostas completas, a do n8n). A e B entram na Fila; C e X ficam só aqui.",
+      sortable: true,
+      sortValue: (r) => (r.classe ? "ABCX".indexOf(r.classe) : 9),
+      render: (r) => (
+        <span className="inline-flex items-center gap-1">
+          <ClasseBadge classe={r.classe} />
+          {r.classeDiverge ? (
+            <span className={foraDoPrazoCls} title="A classe do n8n é diferente da do painel — veja a ficha">
+              ≠ n8n
+            </span>
+          ) : null}
+        </span>
+      ),
+    },
+    {
       key: "etapaMaxima",
       header: "Etapa máxima",
       headerTitle: "Até onde chegou, pelos marcos gravados uma vez: quem agendou e se perdeu continua tendo agendado.",
@@ -346,6 +368,7 @@ function filtroDaUrl(p: URLSearchParams): FiltroDeLeads {
     dono: isDono(dono) ? dono : undefined,
     sinalizadores: sinais,
     busca: "",
+    ...filtrosDaFichaDe(Object.fromEntries(CHAVES_FILTRO_FICHA.map((k) => [k, p.get(k) ?? undefined]))),
   };
 }
 
@@ -363,6 +386,7 @@ function urlComFiltro(f: FiltroDeLeads): string {
   set("conjunto", f.conjunto);
   set("dono", f.dono);
   set("sinal", f.sinalizadores.length ? f.sinalizadores.join(",") : undefined);
+  for (const k of CHAVES_FILTRO_FICHA) set(k, f[k]);
   return url.pathname + (p.toString() ? `?${p.toString()}` : "") + url.hash;
 }
 
@@ -398,15 +422,16 @@ export function LeadsDirectory({
   const [msgExport, setMsgExport] = useState<{ ok: boolean; text: string } | null>(null);
 
   // Filtro → URL (sem servidor). Só os campos que valem a pena compartilhar.
-  const { status, campanha, conjunto, dono, sinalizadores } = filtro;
+  // A busca não vai para a URL: é digitação, e costuma ser PII.
+  const semBusca = JSON.stringify({ ...filtro, busca: "" });
   useEffect(() => {
-    const alvo = urlComFiltro({ status, campanha, conjunto, dono, sinalizadores, busca: "" });
+    const alvo = urlComFiltro(JSON.parse(semBusca) as FiltroDeLeads);
     if (alvo !== window.location.pathname + window.location.search + window.location.hash) {
       // `null`, não o estado atual: é assim que o Next copia os internos dele e
       // sincroniza `useSearchParams` sem ir ao servidor.
       window.history.replaceState(null, "", alvo);
     }
-  }, [status, campanha, conjunto, dono, sinalizadores]);
+  }, [semBusca]);
 
   const mudar = (patch: Partial<FiltroDeLeads>) => setFiltro((f) => ({ ...f, ...patch }));
 
@@ -446,7 +471,13 @@ export function LeadsDirectory({
     filtro.status !== "todos" ||
     Boolean(filtro.campanha || filtro.conjunto || filtro.dono) ||
     filtro.sinalizadores.length > 0 ||
-    filtro.busca.trim().length > 0;
+    filtro.busca.trim().length > 0 ||
+    CHAVES_FILTRO_FICHA.some((k) => filtro[k]);
+  // Os filtros da ficha da live só aparecem quando há lead com ficha (classe, respostas, automação).
+  const temFicha = useMemo(
+    () => rows.some((r) => r.classe || r.bem || r.comunidade || r.msg1 !== "nao") || CHAVES_FILTRO_FICHA.some((k) => filtro[k]),
+    [rows, filtro],
+  );
 
   function exportar() {
     setMsgExport(null);
@@ -617,6 +648,33 @@ export function LeadsDirectory({
           </button>
         ) : null}
       </div>
+
+      {temFicha ? (
+        <div className="flex flex-wrap items-center gap-2" aria-label="Filtros da ficha da live">
+          <span className="text-xs text-muted-foreground">Ficha:</span>
+          {CHAVES_FILTRO_FICHA.map((k) => {
+            const def = FILTROS_DA_FICHA[k];
+            return (
+              <select
+                key={k}
+                aria-label={def.rotulo}
+                value={filtro[k] ?? ""}
+                onChange={(e) =>
+                  mudar({ ...filtrosDaFichaDe({ [k]: e.target.value }), ...(e.target.value ? {} : { [k]: undefined }) })
+                }
+                className={selectCls}
+              >
+                <option value="">{def.rotulo}: todos</option>
+                {Object.entries(def.vocab as Record<string, string>).map(([v, rotulo]) => (
+                  <option key={v} value={v}>
+                    {rotulo}
+                  </option>
+                ))}
+              </select>
+            );
+          })}
+        </div>
+      ) : null}
 
       <DataTable
         columns={colunas}

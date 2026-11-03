@@ -8,6 +8,17 @@
  * All dates are ISO strings: `yyyy-mm-dd` for daily rows, full ISO for events.
  */
 
+import type {
+  Bem,
+  Classe,
+  Diagnostico,
+  FaixaParcela,
+  FaixaValor,
+  Finalidade,
+  HorarioPreferido,
+  PrazoCompra,
+} from "./qualificacao";
+
 // ------------------------- Marca / conta ----------------------------
 
 /**
@@ -434,6 +445,39 @@ export interface Lead {
   deletedAt?: string;
   deletedBy?: string;
   deletedReason?: string;
+
+  // ---- Ficha da live (E1-15, migração 0021). Vocabulários em `lib/qualificacao.ts`. ----
+  /** As respostas do formulário — a classe sai delas. */
+  bem?: Bem;
+  faixaValor?: FaixaValor;
+  finalidade?: Finalidade;
+  faixaParcela?: FaixaParcela;
+  prazoCompra?: PrazoCompra;
+  /**
+   * A classe que o PAINEL calcula (`lib/classe.ts`). Gravada para todo lugar ler
+   * igual, e recalculada quando uma resposta ou a tabela de parcela muda.
+   */
+  classe?: Classe;
+  /** A classe que o n8n mandou. Discordar da do painel vira aviso (`classeDiverge`). */
+  classeN8n?: Classe;
+  /** Aceitou receber mensagens no WhatsApp. */
+  aceiteMensagens?: boolean;
+  /** A mensagem automática do n8n: quando saiu (a 1ª vez) e o último status informado. */
+  msg1EnviadaEm?: string;
+  msg1Status?: string;
+  horarioPreferido?: HorarioPreferido;
+  /** Quando o n8n avisou o atendimento do lead novo (gravado uma vez). */
+  atendimentoAvisadoEm?: string;
+  /** Quando o n8n escalou o lead sem tentativa no prazo (gravado uma vez). */
+  escaladoEm?: string;
+  /** Clicou no link da comunidade do WhatsApp — quando (a 1ª vez). */
+  comunidadeEm?: string;
+  /** As respostas do diagnóstico e o perfil final. */
+  diagnostico?: Diagnostico;
+  /** A pessoa confirmou a reunião marcada. Limpo quando a reunião é remarcada. */
+  reuniaoConfirmadaEm?: string;
+  /** Pediu para remarcar e ainda não há data nova. Limpo quando a data nova é gravada. */
+  reuniaoRemarcarEm?: string;
 }
 
 // ------------------------- Lead audit log ---------------------------
@@ -455,7 +499,9 @@ export type LeadEventAction =
   | "nota"
   | "mesclado"
   | "excluido"
-  | "restaurado";
+  | "restaurado"
+  /** Um fato da ficha da live: respostas, mensagem automática, comunidade, diagnóstico… (`payload.fato`). */
+  | "ficha";
 
 /** One entry in the "quem alterou o lead" trail. */
 export interface LeadEvent {
