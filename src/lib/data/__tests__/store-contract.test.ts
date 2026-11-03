@@ -162,6 +162,47 @@ function contrato(nome: string, abrir: () => Promise<{ backend: DataBackend; fec
       expect(k.adDaily.map((r) => r.adId)).toEqual(["300"]);
     });
 
+    it("upsertAdDaily: o mesmo (dia, anúncio) que muda de marca não fica nas duas", async () => {
+      await b.replaceAdData(
+        [
+          { ...ad("consorcio", "2026-08-10", "777", 735), campaign: "[KRN] -Post 10/08" },
+          { ...ad("consorcio", "2026-08-11", "777", 100), campaign: "[KRN] -Post 10/08" },
+          ad("consorcio", "2026-08-10", "csv-nome", 5),
+        ],
+        [],
+      );
+      // A regra mudou: o sync traz o 10/08 do anúncio 777 já na krone.
+      await b.upsertAdDaily([
+        { ...ad("krone", "2026-08-10", "777", 735), campaign: "[KRN] -Post 10/08" },
+        ad("krone", "2026-08-10", "csv-nome", 5),
+      ]);
+      const c = await b.getData("consorcio");
+      expect(c.adDaily.map((r) => `${r.date}:${r.adId}`).sort()).toEqual([
+        "2026-08-10:csv-nome", // id que não é da API (nome do anúncio) não é deduplicado entre marcas
+        "2026-08-11:777", // fora do que o sync trouxe: fica até a reclassificação
+      ]);
+      const k = await b.getData("krone");
+      expect(k.adDaily.map((r) => `${r.date}:${r.adId}`).sort()).toEqual(["2026-08-10:777", "2026-08-10:csv-nome"]);
+    });
+
+    it("listCampanhasDaConta: todas as marcas, somadas por campanha, com o primeiro e o último dia", async () => {
+      await b.replaceAdData(
+        [
+          { ...ad("consorcio", "2026-10-01", "1", 10.1), campaign: "[BRN] Leads", campaignId: "11" },
+          { ...ad("consorcio", "2026-10-03", "2", 20.2), campaign: "[BRN] Leads", campaignId: "11" },
+          { ...ad("krone", "2026-08-10", "3", 735), campaign: "[KRN] -Post 10/08", campaignId: "33" },
+          { ...ad("nao-classificado", "2026-10-02", "4", 1), campaign: "Sem dono" },
+        ],
+        [],
+      );
+      const lista = (await b.listCampanhasDaConta()).sort((x, y) => x.campaign.localeCompare(y.campaign));
+      expect(lista).toEqual([
+        { brand: "consorcio", campaign: "[BRN] Leads", campaignId: "11", spend: 30.3, de: "2026-10-01", ate: "2026-10-03" },
+        { brand: "krone", campaign: "[KRN] -Post 10/08", campaignId: "33", spend: 735, de: "2026-08-10", ate: "2026-08-10" },
+        { brand: "nao-classificado", campaign: "Sem dono", campaignId: undefined, spend: 1, de: "2026-10-02", ate: "2026-10-02" },
+      ]);
+    });
+
     it("restaurar o exemplo preserva o histórico dos leads", async () => {
       await b.addLeadEvent(evento(`L-r-${sfx}`, `EVT-r-${sfx}`, "status_changed"));
       await b.resetToSeed();

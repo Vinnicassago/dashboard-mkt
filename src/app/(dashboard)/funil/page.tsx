@@ -13,7 +13,7 @@ import { NotasMedicao } from "@/components/funil/notas-medicao";
 import { getData, listLeadEvents } from "@/lib/data/store";
 import { activeBrandSlug } from "@/lib/active-brand";
 import { pageRange } from "@/lib/page-range";
-import { resolveMetaBrands } from "@/lib/meta/config";
+import { contextoDeMarcas } from "@/lib/meta/config";
 import { coberturaDeAnuncios } from "@/lib/sincronizacao";
 import { kpisDoPeriodo, periodoDaRegua } from "@/lib/kpis";
 import { gargalo, transicoesDoFunil } from "@/lib/gargalo";
@@ -71,8 +71,8 @@ export default async function FunilPage({
   const agora = agoraDate.toISOString();
   const hoje = hojeEmBrasilia(agoraDate);
 
-  const [brandRules, cobertura, fontes, robo, eventos] = await Promise.all([
-    resolveMetaBrands(),
+  const [{ brandRules, campanhasDaConta }, cobertura, fontes, robo, eventos] = await Promise.all([
+    contextoDeMarcas(),
     coberturaDeAnuncios(brand),
     getCascataFontes(),
     getRoboSnapshot(range?.from),
@@ -80,7 +80,7 @@ export default async function FunilPage({
   ]);
 
   // Os MESMOS números da home e da Mídia (kpisDoPeriodo), com Δ do período anterior.
-  const kp = kpisDoPeriodo(data, range, { brandRules, cobertura, comparar: true, hoje, agora });
+  const kp = kpisDoPeriodo(data, range, { brandRules, campanhasDaConta, cobertura, comparar: true, hoje, agora });
   const k = kp.overview;
 
   // A resposta: o gargalo da Bússola, calculado do mesmo jeito.

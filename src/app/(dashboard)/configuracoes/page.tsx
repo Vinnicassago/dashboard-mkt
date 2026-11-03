@@ -6,7 +6,7 @@ import { StatusMetaBadge } from "@/components/kpi/status-meta";
 import { RolarParaAncora } from "@/components/ui/rolar-para-ancora";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getData } from "@/lib/data/store";
-import { resolveMetaBrands } from "@/lib/meta/config";
+import { contextoDeMarcas } from "@/lib/meta/config";
 import { coberturaDeAnuncios } from "@/lib/sincronizacao";
 import { kpisDoPeriodo, mostrar, reguaDoPeriodo, type LinhaDaRegua } from "@/lib/kpis";
 import { META_DEF, formatarAlvo, precisaRecalibrar, taxasObservadas } from "@/lib/metas";
@@ -29,10 +29,8 @@ export default async function MetasPage({ searchParams }: { searchParams: Promis
   const ctx = await contextoDeConfiguracoes(searchParams);
   const data = await getData(ctx.brand.slug);
   const { range } = pageRange(data, ctx.rangeKey);
-  const kp = kpisDoPeriodo(data, range, {
-    brandRules: await resolveMetaBrands(),
-    cobertura: await coberturaDeAnuncios(ctx.brand.slug),
-  });
+  const [marcas, cobertura] = await Promise.all([contextoDeMarcas(), coberturaDeAnuncios(ctx.brand.slug)]);
+  const kp = kpisDoPeriodo(data, range, { ...marcas, cobertura });
   const pendencias = pendenciasDeConfiguracoes(kp.trust.travas, ctx.rangeKey);
 
   // A régua (Fase 4): metas com vigência, calculadora e histórico.

@@ -2,8 +2,9 @@ import "server-only";
 import { isSupabaseConfigured } from "../supabase/client";
 import { BRANDS } from "../brands";
 import { DEFAULT_BRAND } from "../types";
-import { getState } from "../data/store";
-import { STATE_KEYS } from "../data/backend";
+import { getState, listCampanhasDaConta } from "../data/store";
+import { STATE_KEYS, type CampanhaDaConta } from "../data/backend";
+import { CURINGA, NAO_CLASSIFICADO, marcaDaCampanha } from "../regra-de-marca";
 
 /**
  * Meta API configuration.
@@ -104,53 +105,33 @@ export async function resolveMetaBrands(): Promise<BrandMeta[]> {
 }
 
 /**
- * Balde das linhas de anúncio que NENHUMA regra reivindica numa conta
- * compartilhada. Não é marca: fica fora de todos os números, com alerta, até
- * alguém dizer de quem é. Antes elas caíam em silêncio na marca padrão — e um
- * erro de atribuição era indistinguível de um acerto.
+ * O que as travas de marca precisam para julgar a regra: a regra resolvida e as
+ * campanhas da conta INTEIRA (todas as marcas, todo o histórico). Só com as
+ * linhas da marca aberta, uma regra que funciona — e por isso tirou daqui as
+ * campanhas da outra marca — era lida como "não pega nada", e o "≤" não saía.
  */
-export const NAO_CLASSIFICADO = "nao-classificado";
+export async function contextoDeMarcas(): Promise<{
+  brandRules: BrandMeta[];
+  campanhasDaConta: CampanhaDaConta[];
+}> {
+  const [brandRules, campanhasDaConta] = await Promise.all([resolveMetaBrands(), listCampanhasDaConta()]);
+  return { brandRules, campanhasDaConta };
+}
 
-/** Token que declara uma marca como "o resto da conta". */
-export const CURINGA = "*";
+/** Balde do que nenhuma regra reivindica e o curinga "o resto da conta" (fonte: regra-de-marca.ts). */
+export { CURINGA, NAO_CLASSIFICADO };
 
 /**
- * Escolhe a marca de uma linha de anúncio dentro de um ad account compartilhado,
- * pela campanha: casa por id numérico ou por fragmento do nome. Sem casar:
- *   • conta de uma marca só → essa marca (não há o que classificar);
- *   • uma marca com o token `*` → ela (o "resto" declarado);
- *   • NENHUMA marca com regra → a padrão (ninguém começou a classificar; a trava
- *     "separação nunca configurada" avisa) — sem isso a conta inteira viraria
- *     "não classificado" no dia do deploy;
- *   • exatamente uma marca SEM regra → ela (o resto implícito de antes da 0016);
- *   • senão → `NAO_CLASSIFICADO`.
- * Pura/testável.
+ * A marca de uma linha de anúncio pela campanha — `marcaDaCampanha`
+ * (regra-de-marca.ts), com a marca padrão do painel. É a mesma função que a
+ * prévia de Configurações → Marcas roda no navegador.
  */
 export function brandForCampaign(
   campaignName: string | undefined,
   campaignId: string | undefined,
   brands: BrandMeta[],
 ): string {
-  const name = (campaignName ?? "").toLowerCase();
-  for (const b of brands) {
-    for (const token of b.campaignMatch) {
-      if (token === CURINGA) continue;
-      if (/^\d+$/.test(token)) {
-        if (campaignId && campaignId === token) return b.slug;
-      } else if (token && name.includes(token.toLowerCase())) {
-        return b.slug;
-      }
-    }
-  }
-  if (brands.length <= 1) return brands[0]?.slug ?? DEFAULT_BRAND;
-  const resto = brands.find((b) => b.campaignMatch.includes(CURINGA));
-  if (resto) return resto.slug;
-  const semRegra = brands.filter((b) => b.campaignMatch.length === 0);
-  if (semRegra.length === brands.length) {
-    return (brands.find((b) => b.slug === DEFAULT_BRAND) ?? brands[0]).slug;
-  }
-  if (semRegra.length === 1) return semRegra[0].slug;
-  return NAO_CLASSIFICADO;
+  return marcaDaCampanha(campaignName, campaignId, brands, DEFAULT_BRAND);
 }
 
 /** Conversions API: the dataset id is what used to be called the Pixel id. */

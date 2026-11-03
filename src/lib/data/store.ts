@@ -74,6 +74,9 @@ export const upsertAdDaily = (rows: AdDaily[]) => backend().upsertAdDaily(rows);
 
 export const upsertCreatives = (rows: Creative[]) => backend().upsertCreatives(rows);
 
+/** Campanhas de TODAS as marcas, somadas no histórico (as travas de marca leem daqui). */
+export const listCampanhasDaConta = () => backend().listCampanhasDaConta();
+
 /** Troca as linhas de anúncio de um recorte (ou todas) pelas novas, de uma vez. */
 export const replaceAdData = (rows: AdDaily[], creatives: Creative[], scope?: AdScope) =>
   backend().replaceAdData(rows, creatives, scope);

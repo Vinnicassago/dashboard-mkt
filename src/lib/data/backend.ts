@@ -68,6 +68,58 @@ export interface AdScope {
 }
 
 /**
+ * Uma campanha da conta de anúncios, em qualquer marca (inclusive o balde "não
+ * classificado"), somada no histórico inteiro. É o que a trava "a regra não pega
+ * nada" precisa ver: se o token casa com campanhas que já estão na OUTRA marca,
+ * a regra funciona.
+ */
+export interface CampanhaDaConta {
+  brand: string;
+  campaign: string;
+  campaignId?: string;
+  spend: number;
+  /** Primeiro e último dia com linha (AAAA-MM-DD). */
+  de: string;
+  ate: string;
+}
+
+/** Junta (marca, campanha, id) — a mesma soma nos três backends. */
+export function agruparCampanhasDaConta(rows: AdDaily[]): CampanhaDaConta[] {
+  const map = new Map<string, CampanhaDaConta>();
+  for (const r of rows) {
+    const key = `${r.brand}\u0000${r.campaign}\u0000${r.campaignId ?? ""}`;
+    const cur = map.get(key);
+    if (!cur) {
+      map.set(key, {
+        brand: r.brand,
+        campaign: r.campaign,
+        campaignId: r.campaignId || undefined,
+        spend: r.spend,
+        de: r.date,
+        ate: r.date,
+      });
+    } else {
+      cur.spend += r.spend;
+      if (r.date < cur.de) cur.de = r.date;
+      if (r.date > cur.ate) cur.ate = r.date;
+    }
+  }
+  // Centavos, como o `sum(numeric)` do Postgres: a soma em ponto flutuante não pode diferir entre backends.
+  return [...map.values()].map((c) => ({ ...c, spend: Math.round(c.spend * 100) / 100 }));
+}
+
+/**
+ * A mesma linha de anúncio (dia, anúncio) mora numa marca só. Quando o sync traz
+ * de novo um (dia, anúncio) já guardado em OUTRA marca — a regra mudou, ou a
+ * campanha foi renomeada —, a linha antiga sai: com a marca na chave, o upsert
+ * criava uma segunda cópia e o gasto dobrava. Só para id numérico (o da API): o
+ * CSV antigo usava o NOME do anúncio como id, e nomes se repetem entre marcas.
+ */
+export function chaveDeLinhaDeAnuncio(r: Pick<AdDaily, "date" | "adId">): string | null {
+  return /^\d+$/.test(r.adId) ? `${r.date}::${r.adId}` : null;
+}
+
+/**
  * Campos de contato e de atribuição que um reenvio pode PREENCHER (nunca
  * sobrescrever) — inclusive os ids de anúncio, conjunto e campanha que o UTM
  * traz (0019): um lead que entrou sem id ganha o id no reenvio; o que já tem
@@ -129,8 +181,15 @@ export interface DataBackend {
    */
   resetToSeed(by?: string): Promise<DashboardData>;
 
+  /**
+   * Grava linhas de anúncio por (marca, dia, anúncio). Um (dia, anúncio) de id
+   * numérico que já estava em OUTRA marca sai dela (`chaveDeLinhaDeAnuncio`): a
+   * mesma linha nunca fica em duas marcas.
+   */
   upsertAdDaily(rows: AdDaily[]): Promise<number>;
   upsertCreatives(rows: Creative[]): Promise<number>;
+  /** As campanhas da conta inteira, todas as marcas (`agruparCampanhasDaConta`). */
+  listCampanhasDaConta(): Promise<CampanhaDaConta[]>;
   /**
    * Troca as linhas de anúncio de um recorte numa operação só: apaga o que
    * estiver em `scope` (marcas × datas) — ou tudo, sem `scope` — grava `rows` e

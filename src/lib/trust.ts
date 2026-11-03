@@ -21,6 +21,7 @@ import type { DateRange } from "./metrics";
 import { hojeEmBrasilia } from "./range";
 import { diaCoberto, type Intervalo } from "./cobertura";
 import { isAwareness } from "./brands";
+import { CURINGA, tokenQueCasa } from "./regra-de-marca";
 
 // ---------------------------------------------------------------- vocabulário
 
@@ -71,6 +72,13 @@ export interface TrustInput {
   range?: DateRange;
   /** Regras de marca já resolvidas (env + override da UI). */
   brandRules: { slug: string; campaignMatch: string[] }[];
+  /**
+   * Campanhas da conta INTEIRA — todas as marcas, todo o histórico
+   * (`listCampanhasDaConta`). É o que diz se a regra pega alguma coisa: quando
+   * ela funciona, as campanhas da outra marca já não estão em `data`. Ausente =
+   * sem como saber, e a trava "a regra não pega nada" não dispara.
+   */
+  campanhasDaConta?: { brand: string; campaign: string; campaignId?: string; spend: number }[];
   kpis: {
     meetings: number;
     leads: number;
@@ -170,31 +178,44 @@ function diasSemDado(
  * configurada" existe em separado. Sem balde de "não classificado", um erro de
  * atribuição é indistinguível de um acerto (meta/config.ts:111-131).
  */
-function gastoDeOutraMarca(input: TrustInput): {
-  valor: number;
-  tokens: string[];
-  /** Havia regra declarada, mas nenhuma campanha casou com ela. */
-  regraInerte: boolean;
-} {
-  const minha = input.data.campaign.brand;
-  const outros = input.brandRules
-    .filter((b) => b.slug !== minha)
-    .flatMap((b) => b.campaignMatch)
-    .map((t) => t.trim().toLowerCase())
-    .filter((t) => t && !/^\d+$/.test(t));
-  if (outros.length === 0) return { valor: 0, tokens: [], regraInerte: false };
+function gastoDeOutraMarca(input: TrustInput): { valor: number; tokens: string[] } {
+  const outros = tokensDeOutrasMarcas(input);
+  if (outros.length === 0) return { valor: 0, tokens: [] };
 
   const casados = new Set<string>();
   let valor = 0;
   for (const row of linhasDoPeriodo(input)) {
-    const nome = (row.campaign ?? "").toLowerCase();
-    const hit = outros.find((t) => nome.includes(t));
+    const hit = tokenQueCasa(row.campaign, row.campaignId, outros);
     if (hit) {
       valor += row.spend;
       casados.add(hit);
     }
   }
-  return { valor, tokens: [...casados], regraInerte: valor === 0 };
+  return { valor, tokens: [...casados] };
+}
+
+/** Os tokens que as OUTRAS marcas declaram (o curinga `*` não é token de nome). */
+function tokensDeOutrasMarcas(input: TrustInput): string[] {
+  const minha = input.data.campaign.brand;
+  return input.brandRules
+    .filter((b) => b.slug !== minha)
+    .flatMap((b) => b.campaignMatch)
+    .map((t) => t.trim())
+    .filter((t) => t && t !== CURINGA);
+}
+
+/**
+ * Há regra declarada para outra marca e ela não casa com NENHUMA campanha da
+ * conta, em marca nenhuma, no histórico inteiro — o token está errado.
+ *
+ * Olhar só as linhas desta marca (como era) não separa os dois casos: quando a
+ * regra funciona, as campanhas da outra marca saem daqui, e "nenhuma linha
+ * daqui casa" era lido como "a regra não pega nada" — o "≤" ficava para sempre.
+ */
+function regraNaoPegaNada(input: TrustInput): boolean {
+  const tokens = tokensDeOutrasMarcas(input);
+  if (tokens.length === 0 || !input.campanhasDaConta) return false;
+  return !input.campanhasDaConta.some((c) => tokenQueCasa(c.campaign, c.campaignId, tokens));
 }
 
 /**
@@ -210,20 +231,17 @@ function gastoDeOutraMarca(input: TrustInput): {
  * campanhas se identifica com `[KRN]` e nada as reivindica, isso aparece.
  */
 function prefixosOrfaos(input: TrustInput): { prefixo: string; valor: number }[] {
-  const minha = input.data.campaign.brand;
-  const tokens = input.brandRules
-    .flatMap((b) => (b.slug === minha ? [] : b.campaignMatch))
-    .map((t) => t.trim().toLowerCase())
-    .filter(Boolean);
+  const tokens = tokensDeOutrasMarcas(input);
 
   const porPrefixo = new Map<string, number>();
   for (const row of linhasDoPeriodo(input)) {
     const nome = row.campaign ?? "";
-    const m = /^\s*\[([^\]]{1,12})\]/.exec(nome);
+    // Colchete de largura cheia e espaço dentro dele não mudam o prefixo ("[ krn ]" = "[KRN]").
+    const m = /^\s*\[([^\]]{1,12})\]/.exec(nome.normalize("NFKC"));
     if (!m) continue;
-    const prefixo = `[${m[1].trim()}]`;
+    const prefixo = `[${m[1].trim().toUpperCase()}]`;
     // Já reivindicado por alguma regra? Então não é órfão.
-    if (tokens.some((t) => nome.toLowerCase().includes(t))) continue;
+    if (tokenQueCasa(nome, row.campaignId, tokens)) continue;
     porPrefixo.set(prefixo, (porPrefixo.get(prefixo) ?? 0) + row.spend);
   }
 
@@ -343,9 +361,8 @@ export function assessTrust(input: TrustInput): TrustReport {
    */
   if (multimarca) {
     const orfaos = prefixosOrfaos(input).filter((o) => o.valor / kpis.spendTotal > 0.05);
-    const tokensDeclarados = input.brandRules
-      .filter((b) => b.slug !== data.campaign.brand)
-      .flatMap((b) => b.campaignMatch);
+    const tokensDeclarados = tokensDeOutrasMarcas(input);
+    const regraInerte = regraNaoPegaNada(input);
     const semRegra = input.brandRules
       .filter((b) => b.slug !== data.campaign.brand)
       .every((b) => b.campaignMatch.length === 0);
@@ -360,7 +377,7 @@ export function assessTrust(input: TrustInput): TrustReport {
         afeta: AFETA_CUSTO,
         cta: { label: "Definir a regra", href: "/configuracoes/marcas" },
       });
-    } else if (contaminacao.regraInerte && orfaos.length === 0) {
+    } else if (regraInerte && orfaos.length === 0) {
       // Com prefixo órfão detectado, a regra inerte vira parte daquele cartão —
       // dois cartões para a mesma falha era a redundância que a home combate.
       travas.push({
@@ -368,7 +385,7 @@ export function assessTrust(input: TrustInput): TrustReport {
         nivel: "teto",
         titulo: "A regra de separação de marcas não está pegando nada",
         detalhe:
-          "Existe uma regra salva, mas ela não casou com NENHUMA campanha do período. O match é uma substring literal do nome — um token quase certo pega zero. Enquanto isso, tudo continua caindo nesta marca.",
+          `Existe uma regra salva ("${tokensDeclarados.join('", "')}"), mas ela não casa com NENHUMA campanha da conta, em marca nenhuma. O match é um trecho do nome (sem diferença de maiúsculas e espaços) ou o id da campanha — um token quase certo pega zero. Enquanto isso, tudo continua caindo nesta marca.`,
         afeta: AFETA_CUSTO,
         cta: { label: "Conferir a regra", href: "/configuracoes/marcas" },
       });
@@ -383,9 +400,11 @@ export function assessTrust(input: TrustInput): TrustReport {
         titulo: `R$ ${Math.round(orfao.valor)} em campanhas ${orfao.prefixo} estão nesta marca`,
         detalhe:
           `${Math.round((orfao.valor / kpis.spendTotal) * 100)}% do investimento vem de campanhas marcadas ${orfao.prefixo} no Ads Manager, e nenhuma regra as reivindica.` +
-          (contaminacao.regraInerte && tokensDeclarados.length
+          (regraInerte && tokensDeclarados.length
             ? ` A regra salva hoje ("${tokensDeclarados.join('", "')}") não casa com nenhuma campanha.`
-            : "") +
+            : tokensDeclarados.length
+              ? ` A regra salva hoje ("${tokensDeclarados.join('", "')}") não casa com elas.`
+              : "") +
           ` Use ${orfao.prefixo} como token da outra marca e reclassifique.`,
         afeta: AFETA_CUSTO,
         cta: { label: "Corrigir a atribuição", href: "/configuracoes/marcas" },

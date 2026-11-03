@@ -19,6 +19,7 @@ import {
   type StoredUser,
   type CapiEnvioPatch,
   type ListCapiEnviosOpts,
+  chaveDeLinhaDeAnuncio,
 } from "./backend";
 import type {
   AcaoEstado,
@@ -311,9 +312,38 @@ export const postgresBackend: DataBackend = {
   },
 
   async upsertAdDaily(rows: AdDaily[]) {
-    await upsertMany("ad_daily", AD_COLS, rows.map(fromAd), ["brand", "date", "ad_id"], withoutPk(AD_COLS, ["brand", "date", "ad_id"]));
+    const adPk = ["brand", "date", "ad_id"];
+    // O mesmo (dia, anúncio) que chega em outra marca sai da antiga (chaveDeLinhaDeAnuncio).
+    const daApi = rows.filter((r) => chaveDeLinhaDeAnuncio(r));
+    await inTransaction(async (client) => {
+      if (daApi.length) {
+        await client.query(
+          `delete from ad_daily a
+             using unnest($1::date[], $2::text[], $3::text[]) as v(date, ad_id, brand)
+            where a.date = v.date and a.ad_id = v.ad_id and a.brand <> v.brand`,
+          [daApi.map((r) => r.date), daApi.map((r) => r.adId), daApi.map((r) => r.brand)],
+        );
+      }
+      await upsertMany("ad_daily", AD_COLS, rows.map(fromAd), adPk, withoutPk(AD_COLS, adPk), client);
+    });
     await touch(false);
     return rows.length;
+  },
+
+  async listCampanhasDaConta() {
+    const rows = await q(
+      `select brand, campaign, campaign_id, sum(spend)::float8 as spend, min(date) as de, max(date) as ate
+         from ad_daily
+        group by brand, campaign, campaign_id`,
+    );
+    return rows.map((r) => ({
+      brand: s(r.brand),
+      campaign: s(r.campaign),
+      campaignId: r.campaign_id ? s(r.campaign_id) : undefined,
+      spend: Math.round(Number(r.spend) * 100) / 100,
+      de: s(r.de).slice(0, 10),
+      ate: s(r.ate).slice(0, 10),
+    }));
   },
 
   async upsertCreatives(rows: Creative[]) {

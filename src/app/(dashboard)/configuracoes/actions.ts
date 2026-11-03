@@ -25,6 +25,7 @@ import { parseAdsCsv } from "@/lib/csv";
 import { parseLeadsCsv } from "@/lib/leads-csv";
 import { resyncAdsHistory, runSync, type SyncSource } from "@/lib/meta/sync";
 import { resolveMetaBrands, brandForCampaign, NAO_CLASSIFICADO } from "@/lib/meta/config";
+import { tokensDoCampo } from "@/lib/regra-de-marca";
 import { BRANDS } from "@/lib/brands";
 import { can } from "@/lib/auth/guard";
 import { currentActor, newEventId } from "@/lib/auth/actor";
@@ -39,6 +40,8 @@ import { setMensagemWhatsapp, setRoboDesativado } from "@/lib/integracoes";
 import { reenviarPendentes } from "@/lib/meta/capi-envios";
 import { LIMITE_REENVIO_MANUAL } from "@/lib/capi-politica";
 import { randomUUID } from "node:crypto";
+import { mensagemHumana } from "@/lib/erros";
+import { formatCurrency0 } from "@/lib/format";
 import {
   type AdDaily,
   type Creative,
@@ -500,15 +503,85 @@ export async function setBrandMatchAction(
   for (const b of BRANDS) {
     const raw = formData.get(`match_${b.slug}`);
     if (raw == null) continue;
-    next[b.slug] = String(raw).split(",").map((s) => s.trim()).filter(Boolean);
+    next[b.slug] = tokensDoCampo(String(raw));
   }
   await setState(STATE_KEYS.brandCampaignMatch, next);
-  revalidateAll();
-  return {
-    ok: true,
-    message:
-      'Regra de separação salva. Clique em "Reclassificar anúncios por marca" (ou "Zerar e ressincronizar") para aplicar aos dados já coletados.',
-  };
+  await registrarAuditoria(
+    "Regra de marca salva",
+    BRANDS.map((b) => `${b.slug}: ${(next[b.slug] ?? []).join(", ") || "(vazia)"}`).join(" · "),
+  );
+  /*
+   * A regra só vale para o que é GRAVADO (o sync etiqueta cada linha ao chegar):
+   * salvar sem reclassificar deixava o histórico na marca antiga e o painel lia a
+   * regra nova "sem pegar nada". Por isso salvar já reetiqueta tudo — no mesmo
+   * passo, para não existir regra salva e não aplicada.
+   */
+  try {
+    const resumo = await reclassificarAnuncios();
+    revalidateAll();
+    return { ok: true, message: `Regra salva e aplicada a todo o histórico — ${resumo}.` };
+  } catch (e) {
+    console.error("[marcas] reclassificação depois de salvar a regra:", e);
+    revalidateAll();
+    return {
+      ok: false,
+      message: `A regra foi salva, mas a reclassificação falhou (${mensagemHumana("banco de dados", e)}). Clique em "Reclassificar anúncios por marca".`,
+    };
+  }
+}
+
+/**
+ * Reetiqueta TODAS as linhas de anúncio guardadas pela regra atual (a mesma do
+ * sync) e troca tudo numa operação só. Devolve o resumo por marca e registra em
+ * `audit_log`.
+ */
+async function reclassificarAnuncios(): Promise<string> {
+  const brands = await resolveMetaBrands();
+  const ads: AdDaily[] = [];
+  const creatives: Creative[] = [];
+  // O balde "não classificado" entra junto: a troca abaixo substitui TUDO, e
+  // linha que ficasse de fora seria apagada.
+  for (const slug of [...BRANDS.map((b) => b.slug), NAO_CLASSIFICADO]) {
+    const d = await getData(slug);
+    ads.push(...d.adDaily);
+    creatives.push(...d.creatives);
+  }
+  // Duas cópias do mesmo (dia, anúncio) em marcas diferentes — sobra de um sync
+  // de antes da regra mudar — viram uma linha só, na marca que a regra diz. A
+  // cópia que já estava nessa marca é a do sync mais recente com a regra atual.
+  const unicas = new Map<string, { row: AdDaily; jaEstava: boolean }>();
+  for (const r of ads) {
+    // O id da campanha (gravado desde a 0016) faz a regra por id valer aqui também.
+    const brand = brandForCampaign(r.campaign, r.campaignId, brands);
+    const k = `${brand}::${r.date}::${r.adId}`;
+    if (unicas.get(k)?.jaEstava) continue;
+    unicas.set(k, { row: { ...r, brand }, jaEstava: r.brand === brand });
+  }
+  const retaggedAds = [...unicas.values()].map((u) => u.row);
+  // O criativo não guarda a campanha — herda a marca do seu anúncio.
+  const adBrand = new Map<string, string>();
+  for (const r of retaggedAds) if (!adBrand.has(r.adId)) adBrand.set(r.adId, r.brand);
+  const retaggedCreatives = creatives.map((c) => ({ ...c, brand: adBrand.get(c.adId) ?? c.brand }));
+
+  // Troca tudo numa operação só: se falhar no meio, nada some.
+  await replaceAdData(retaggedAds, retaggedCreatives);
+
+  const dist: Record<string, { linhas: number; gasto: number }> = {};
+  for (const r of retaggedAds) {
+    const d = (dist[r.brand] ??= { linhas: 0, gasto: 0 });
+    d.linhas += 1;
+    d.gasto += r.spend;
+  }
+  const summary =
+    Object.entries(dist)
+      .map(([s, d]) => `${s}: ${d.linhas} linha(s), ${formatCurrency0(d.gasto)}`)
+      .join(" · ") || "nenhuma linha";
+  const duplicadas = ads.length - retaggedAds.length;
+  await registrarAuditoria(
+    "Reclassificar anúncios por marca",
+    duplicadas > 0 ? `${summary} · ${duplicadas} cópia(s) duplicada(s) removida(s)` : summary,
+  );
+  return duplicadas > 0 ? `${summary} · ${duplicadas} cópia(s) duplicada(s) removida(s)` : summary;
 }
 
 /**
@@ -520,37 +593,12 @@ export async function setBrandMatchAction(
 export async function reclassifyAdsAction(): Promise<ActionState> {
   if (!(await can("data:write"))) return DENIED;
   try {
-    const brands = await resolveMetaBrands();
-    const ads: AdDaily[] = [];
-    const creatives: Creative[] = [];
-    // O balde "não classificado" entra junto: a troca abaixo substitui TUDO, e
-    // linha que ficasse de fora seria apagada.
-    for (const slug of [...BRANDS.map((b) => b.slug), NAO_CLASSIFICADO]) {
-      const d = await getData(slug);
-      ads.push(...d.adDaily);
-      creatives.push(...d.creatives);
-    }
-    const retaggedAds = ads.map((r) => ({
-      ...r,
-      // O id da campanha (gravado desde a 0016) faz a regra por id valer aqui também.
-      brand: brandForCampaign(r.campaign, r.campaignId, brands),
-    }));
-    // O criativo não guarda a campanha — herda a marca do seu anúncio.
-    const adBrand = new Map<string, string>();
-    for (const r of retaggedAds) if (!adBrand.has(r.adId)) adBrand.set(r.adId, r.brand);
-    const retaggedCreatives = creatives.map((c) => ({ ...c, brand: adBrand.get(c.adId) ?? c.brand }));
-
-    // Troca tudo numa operação só: se falhar no meio, nada some.
-    await replaceAdData(retaggedAds, retaggedCreatives);
-
-    const dist: Record<string, number> = {};
-    for (const r of retaggedAds) dist[r.brand] = (dist[r.brand] ?? 0) + 1;
-    const summary = Object.entries(dist).map(([s, n]) => `${s}: ${n} linha(s)`).join(" · ");
-    await registrarAuditoria("Reclassificar anúncios por marca", summary || "nenhuma linha");
+    const resumo = await reclassificarAnuncios();
     revalidateAll();
-    return { ok: true, message: `Anúncios reclassificados por campanha — ${summary || "nenhuma linha"}.` };
+    return { ok: true, message: `Anúncios reclassificados por campanha — ${resumo}.` };
   } catch (e) {
-    return { ok: false, message: e instanceof Error ? e.message : "Falha ao reclassificar." };
+    console.error("[marcas] reclassificar:", e);
+    return { ok: false, message: `Falha ao reclassificar: ${mensagemHumana("banco de dados", e)}` };
   }
 }
 

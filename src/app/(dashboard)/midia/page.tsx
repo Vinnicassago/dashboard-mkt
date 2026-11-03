@@ -11,7 +11,7 @@ import { getData } from "@/lib/data/store";
 import { activeBrandSlug } from "@/lib/active-brand";
 import { pageRange } from "@/lib/page-range";
 import { dailySeries, trechosSemDado, trechosSemVeiculacao } from "@/lib/metrics";
-import { resolveMetaBrands } from "@/lib/meta/config";
+import { contextoDeMarcas } from "@/lib/meta/config";
 import { custoExibivel, kpisDoPeriodo, reguaDoPeriodo } from "@/lib/kpis";
 import {
   SEMANAS_DA_TENDENCIA,
@@ -53,16 +53,16 @@ export default async function MidiaPage({ searchParams }: { searchParams: Promis
   const brand = await activeBrandSlug();
   const data = await getData(brand);
   const { range, rangeKey } = pageRange(data, (await searchParams).range);
-  const [cobertura, brandRules] = await Promise.all([coberturaDeAnuncios(brand), resolveMetaBrands()]);
+  const [cobertura, { brandRules, campanhasDaConta }] = await Promise.all([coberturaDeAnuncios(brand), contextoDeMarcas()]);
   const hoje = hojeEmBrasilia();
   const fim = range?.to ?? hoje;
 
-  const kp = kpisDoPeriodo(data, range, { brandRules, cobertura, hoje });
+  const kp = kpisDoPeriodo(data, range, { brandRules, campanhasDaConta, cobertura, hoje });
   const regua = reguaDoPeriodo(kp, data, range, hoje);
   const resumo = resumoDaMidia(kp, regua);
   const cprExibivel = custoExibivel(kp.custoPorReuniao);
 
-  const tendencia = tendenciaSemanalMidia(data, { fim, hoje, kpis: { brandRules, cobertura } });
+  const tendencia = tendenciaSemanalMidia(data, { fim, hoje, kpis: { brandRules, campanhasDaConta, cobertura } });
   const conjuntos = conjuntosPorId(data, range, { custoPorReuniaoExibivel: cprExibivel });
   const cplAlvo = cplAlvoDaMidia(data, kp, fim);
   // `fim` (e não `range?.to`): sem `?range=` a Mídia olha o histórico inteiro e

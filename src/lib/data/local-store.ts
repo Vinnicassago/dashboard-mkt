@@ -21,6 +21,8 @@ import {
   type CapiEnvioPatch,
   type ListCapiEnviosOpts,
   aplicarPatchCapi,
+  agruparCampanhasDaConta,
+  chaveDeLinhaDeAnuncio,
 } from "./backend";
 import { toRole } from "../auth/roles";
 import { LOST_STATUSES, normalizeLeadStatus } from "../lead-status";
@@ -306,7 +308,18 @@ export const localBackend: DataBackend = {
   async upsertAdDaily(rows: AdDaily[]) {
     commit((data) => {
       const key = (r: AdDaily) => `${r.brand}::${r.date}::${r.adId}`;
-      const index = new Map(data.adDaily.map((r) => [key(r), r]));
+      // O mesmo (dia, anúncio) que chega em outra marca sai da antiga (chaveDeLinhaDeAnuncio).
+      const marcaNova = new Map<string, string>();
+      for (const row of rows) {
+        const k = chaveDeLinhaDeAnuncio(row);
+        if (k) marcaNova.set(k, row.brand);
+      }
+      const ficam = data.adDaily.filter((r) => {
+        const k = chaveDeLinhaDeAnuncio(r);
+        const nova = k ? marcaNova.get(k) : undefined;
+        return nova === undefined || nova === r.brand;
+      });
+      const index = new Map(ficam.map((r) => [key(r), r]));
       for (const row of rows) index.set(key(row), row);
       data.adDaily = [...index.values()].sort((a, b) =>
         a.date === b.date ? a.adId.localeCompare(b.adId) : a.date.localeCompare(b.date),
@@ -314,6 +327,10 @@ export const localBackend: DataBackend = {
       data.isSeed = false;
     });
     return rows.length;
+  },
+
+  async listCampanhasDaConta() {
+    return agruparCampanhasDaConta(file().data.adDaily);
   },
 
   async upsertCreatives(rows: Creative[]) {

@@ -48,8 +48,8 @@ export default async function MarcasPage({ searchParams }: { searchParams: Promi
               Separação de marcas (tráfego pago)
             </CardTitle>
             <CardDescription>
-              Defina como reconhecer as campanhas de cada marca — um token do nome (ex.: [KRN]) ou o id da
-              campanha — e reclassifique os anúncios já coletados.
+              Defina como reconhecer as campanhas de cada marca — um trecho do nome (ex.: [KRN]) ou o id da
+              campanha. Salvar aplica a regra aos anúncios já coletados.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -96,9 +96,15 @@ export default async function MarcasPage({ searchParams }: { searchParams: Promi
             </div>
             <p className="text-xs text-muted-foreground">
               Confira acima se cada campanha está na marca certa. Uma campanha na marca errada? Ajuste a regra
-              abaixo (ou renomeie a campanha no Ads Manager) e clique em Reclassificar.
+              abaixo (ou renomeie a campanha no Ads Manager) e salve — o histórico é reclassificado na hora.
             </p>
-            <BrandMatchForm current={sep.regraAtual} />
+            <BrandMatchForm
+              current={sep.regraAtual}
+              regraDoAmbiente={sep.regraDoAmbiente}
+              campanhas={sep.porMarca.flatMap((b) =>
+                b.campaigns.map((c) => ({ name: c.name, id: c.id, spend: c.spend, brand: b.slug })),
+              )}
+            />
             <ReclassifyAdsButton />
           </CardContent>
         </Card>

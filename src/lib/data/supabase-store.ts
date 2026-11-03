@@ -18,6 +18,8 @@ import {
   type StoredUser,
   type CapiEnvioPatch,
   type ListCapiEnviosOpts,
+  agruparCampanhasDaConta,
+  chaveDeLinhaDeAnuncio,
 } from "./backend";
 import { toRole } from "../auth/roles";
 import type {
@@ -196,12 +198,31 @@ export const supabaseBackend: DataBackend = {
 
   async upsertAdDaily(rows: AdDaily[]) {
     if (rows.length === 0) return 0;
-    const { error } = await supabase()
-      .from("ad_daily")
-      .upsert(rows.map(fromAd), { onConflict: "brand,date,ad_id" });
+    const db = supabase();
+    // O mesmo (dia, anúncio) que chega em outra marca sai da antiga (chaveDeLinhaDeAnuncio).
+    // Sem transação no REST: um delete por (marca, dia), só com os pares exatos.
+    const grupos = new Map<string, { brand: string; date: string; ids: string[] }>();
+    for (const r of rows) {
+      if (!chaveDeLinhaDeAnuncio(r)) continue;
+      const k = `${r.brand}::${r.date}`;
+      const g = grupos.get(k) ?? { brand: r.brand, date: r.date, ids: [] };
+      g.ids.push(r.adId);
+      grupos.set(k, g);
+    }
+    for (const g of grupos.values()) {
+      const del = await db.from("ad_daily").delete().neq("brand", g.brand).eq("date", g.date).in("ad_id", g.ids);
+      check(del.error, "upsert ad_daily (outra marca)");
+    }
+    const { error } = await db.from("ad_daily").upsert(rows.map(fromAd), { onConflict: "brand,date,ad_id" });
     check(error, "upsert ad_daily");
     await touch(false);
     return rows.length;
+  },
+
+  async listCampanhasDaConta() {
+    const { data, error } = await supabase().from("ad_daily").select("brand,campaign,campaign_id,spend,date");
+    check(error, "campanhas da conta");
+    return agruparCampanhasDaConta((data ?? []).map((r: Row) => toAd(r)));
   },
 
   async upsertCreatives(rows: Creative[]) {

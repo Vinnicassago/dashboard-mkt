@@ -2,9 +2,9 @@ import "server-only";
 import { activeBrandSlug } from "@/lib/active-brand";
 import { BRANDS, brandDef, type BrandDef } from "@/lib/brands";
 import { can } from "@/lib/auth/guard";
-import { activeBackend, getData, getState } from "@/lib/data/store";
+import { activeBackend, getState, listCampanhasDaConta } from "@/lib/data/store";
 import { STATE_KEYS } from "@/lib/data/backend";
-import { NAO_CLASSIFICADO, brandForCampaign, resolveMetaBrands } from "@/lib/meta/config";
+import { NAO_CLASSIFICADO, brandForCampaign, metaBrands, resolveMetaBrands } from "@/lib/meta/config";
 
 /**
  * O que várias vistas de Configurações precisam: marca ativa, período da URL,
@@ -55,6 +55,8 @@ export async function contextoDeConfiguracoes(
 
 export interface CampanhaDaMarca {
   name: string;
+  /** Id da campanha, quando gravado (a regra também casa por id). */
+  id?: string;
   spend: number;
   /** Para onde a campanha iria se reclassificasse agora (quando muda de marca). */
   vaiPara?: string;
@@ -75,6 +77,8 @@ export interface SeparacaoDeMarcas {
   regraAtual: Record<string, string>;
   /** Gasto no balde "não classificado": fora de TODOS os números. */
   naoClassificado: number;
+  /** A regra do servidor (env), que vale para a marca cujo campo fica vazio. */
+  regraDoAmbiente: Record<string, string[]>;
 }
 
 /**
@@ -86,32 +90,31 @@ export async function separacaoDeMarcas(): Promise<SeparacaoDeMarcas> {
   const matchState = (await getState<Record<string, string[]>>(STATE_KEYS.brandCampaignMatch)) ?? {};
   const regraAtual: Record<string, string> = {};
   for (const [slug, list] of Object.entries(matchState)) regraAtual[slug] = (list ?? []).join(", ");
-  if (!multiBrand) return { multiBrand, porMarca: [], regraAtual, naoClassificado: 0 };
+  const regraDoAmbiente = Object.fromEntries(metaBrands().map((b) => [b.slug, b.campaignMatch]));
+  if (!multiBrand) return { multiBrand, porMarca: [], regraAtual, naoClassificado: 0, regraDoAmbiente };
 
-  const regras = await resolveMetaBrands();
+  const [regras, campanhas] = await Promise.all([resolveMetaBrands(), listCampanhasDaConta()]);
   const nomeDaMarca = (slug: string) =>
     slug === NAO_CLASSIFICADO ? "não classificado" : (BRANDS.find((b) => b.slug === slug)?.label ?? slug);
   const baldes = [...BRANDS.map((b) => ({ slug: b.slug, label: b.label })), { slug: NAO_CLASSIFICADO, label: "Não classificado" }];
-  const porMarca = (
-    await Promise.all(
-      baldes.map(async (b): Promise<GastoPorMarca> => {
-        const d = await getData(b.slug);
-        const byCamp = new Map<string, { spend: number; id?: string }>();
-        for (const r of d.adDaily) {
-          const name = r.campaign || "(sem nome)";
-          const cur = byCamp.get(name) ?? { spend: 0, id: r.campaignId };
-          byCamp.set(name, { spend: cur.spend + r.spend, id: cur.id ?? r.campaignId });
-        }
-        const campaigns = [...byCamp.entries()]
-          .map(([name, c]) => {
-            const destino = brandForCampaign(name, c.id, regras);
-            return { name, spend: c.spend, vaiPara: destino !== b.slug ? nomeDaMarca(destino) : undefined };
-          })
-          .sort((a, b) => b.spend - a.spend);
-        return { slug: b.slug, label: b.label, spend: campaigns.reduce((s, c) => s + c.spend, 0), campaigns };
-      }),
-    )
-  ).filter((b) => b.slug !== NAO_CLASSIFICADO || b.campaigns.length > 0);
+  const porMarca = baldes
+    .map((b): GastoPorMarca => {
+      const byCamp = new Map<string, { spend: number; id?: string }>();
+      for (const c of campanhas) {
+        if (c.brand !== b.slug) continue;
+        const name = c.campaign || "(sem nome)";
+        const cur = byCamp.get(name) ?? { spend: 0, id: c.campaignId };
+        byCamp.set(name, { spend: cur.spend + c.spend, id: cur.id ?? c.campaignId });
+      }
+      const campaigns = [...byCamp.entries()]
+        .map(([name, c]) => {
+          const destino = brandForCampaign(name, c.id, regras);
+          return { name, id: c.id, spend: c.spend, vaiPara: destino !== b.slug ? nomeDaMarca(destino) : undefined };
+        })
+        .sort((a, b) => b.spend - a.spend);
+      return { slug: b.slug, label: b.label, spend: campaigns.reduce((s, c) => s + c.spend, 0), campaigns };
+    })
+    .filter((b) => b.slug !== NAO_CLASSIFICADO || b.campaigns.length > 0);
   const naoClassificado = porMarca.find((b) => b.slug === NAO_CLASSIFICADO)?.spend ?? 0;
-  return { multiBrand, porMarca, regraAtual, naoClassificado };
+  return { multiBrand, porMarca, regraAtual, naoClassificado, regraDoAmbiente };
 }

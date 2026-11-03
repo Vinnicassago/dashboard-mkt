@@ -7,7 +7,7 @@ import { kpisDoPeriodo } from "./kpis";
 import { montarBussola, type Bussola } from "./bussola";
 import { semanaDaAcao } from "./motor";
 import { temLpNoPeriodo } from "./gargalo";
-import { NAO_CLASSIFICADO, integrationStatus, resolveMetaBrands } from "./meta/config";
+import { NAO_CLASSIFICADO, contextoDeMarcas, integrationStatus } from "./meta/config";
 import { coberturaDeAnuncios, estadoDaFonte } from "./sincronizacao";
 import { getComercial, getRoboLeads } from "./robo/client";
 import { dataQualityChecks, type DateRange } from "./metrics";
@@ -56,9 +56,9 @@ export async function carregarBussola(
   const status = integrationStatus();
   const semanaDosEstados = opts.semanaDosEstados ?? semanaDaAcao(hoje);
 
-  const [brandRules, cobertura, eventos, comercial, convites, ads, estados, historicoAcoes, resumos, semMarca] =
+  const [{ brandRules, campanhasDaConta }, cobertura, eventos, comercial, convites, ads, estados, historicoAcoes, resumos, semMarca] =
     await Promise.all([
-      resolveMetaBrands(),
+      contextoDeMarcas(),
       coberturaDeAnuncios(brand.slug),
       listLeadEvents({ brand: brand.slug, limit: 0 }),
       getComercial(),
@@ -79,6 +79,7 @@ export async function carregarBussola(
   const roboReunioes = comercial.kpis?.reunioes_realizadas ?? null;
   const kpis = kpisDoPeriodo(data, range, {
     brandRules,
+    campanhasDaConta,
     cobertura,
     roboReunioes: range ? null : roboReunioes,
     comparar: true,
@@ -87,7 +88,7 @@ export async function carregarBussola(
   });
   // O acumulado da campanha com o MESMO contexto (marca, cobertura, robô): é o
   // número que a Mídia imprime em "Campanha", com os mesmos "≥"/"≤".
-  const campanha = range ? kpisDoPeriodo(data, undefined, { brandRules, cobertura, roboReunioes, hoje, agora }) : kpis;
+  const campanha = range ? kpisDoPeriodo(data, undefined, { brandRules, campanhasDaConta, cobertura, roboReunioes, hoje, agora }) : kpis;
 
   // Robô DESLIGADO (sem credencial, ou desativado em Configurações) é ausência, não
   // falha: as filas dele não existem. Leitura que QUEBROU é outra coisa.

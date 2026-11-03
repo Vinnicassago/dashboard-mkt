@@ -91,6 +91,8 @@ export interface KpisDoPeriodo {
 export interface OpcoesKpis {
   /** Regras de marca resolvidas (env + Configurações) — sem elas, as travas de marca não rodam. */
   brandRules?: TrustInput["brandRules"];
+  /** Campanhas da conta inteira (`contextoDeMarcas`) — diz se a regra pega alguma coisa. */
+  campanhasDaConta?: TrustInput["campanhasDaConta"];
   /** Reuniões que o atendimento registrou no período; `null` = sem leitura. */
   roboReunioes?: number | null;
   /** "Hoje" em Brasília (AAAA-MM-DD). */
@@ -151,6 +153,7 @@ export function kpisDoPeriodo(
     data,
     range,
     brandRules: opts.brandRules ?? [],
+    campanhasDaConta: opts.campanhasDaConta,
     kpis: {
       meetings: k.meetings,
       meetingsConversao: k.meetingsConversao,
