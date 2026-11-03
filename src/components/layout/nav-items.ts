@@ -12,6 +12,7 @@ import {
 import type { BrandDef } from "@/lib/brands";
 import { hasPlaybook } from "@/lib/content/playbook";
 import type { RangeKey } from "@/lib/range";
+import { PERIODO_DA_LIVE } from "@/lib/live-periodo";
 
 /**
  * A navegação é nomeada pela PERGUNTA que cada página responde — ou pelo dono do
@@ -32,6 +33,10 @@ export interface NavVista {
   href: string;
   /** Depende de um guia de produção — oculta para marcas que ainda não têm um. */
   playbookOnly?: boolean;
+  /** Só no funil de conversão (lead→reunião) — oculta para marcas awareness. */
+  conversaoOnly?: boolean;
+  /** Período que a vista assume sem `?range=` (pode ser um período livre "de..ate"). */
+  periodoPadrao?: string;
 }
 
 export interface NavItem {
@@ -61,6 +66,12 @@ export const NAV: NavItem[] = [
     grupo: "Visão geral",
     pergunta: "Estamos no ritmo, onde trava e o que fazer esta semana?",
     periodoPadrao: "7d",
+    // A live de 01/12 é outro trabalho (metas da campanha, atendimento, verba):
+    // uma vista da Bússola, não página nova — a navegação continua com 7.
+    vistas: [
+      { label: "Semana", href: "/" },
+      { label: "Live 01/12", href: "/live", conversaoOnly: true, periodoPadrao: PERIODO_DA_LIVE },
+    ],
   },
   {
     label: "Funil",
@@ -133,9 +144,11 @@ export function navForBrand(brand: BrandDef): NavItem[] {
   return NAV.filter((n) => !(n.conversaoOnly && brand.type === "awareness"));
 }
 
-/** Vistas visíveis de um item: marca sem guia de produção não vê a Produção. */
+/** Vistas visíveis de um item: marca sem guia de produção não vê a Produção; awareness não vê as de conversão. */
 export function vistasForBrand(item: NavItem, brand: BrandDef): NavVista[] {
-  return (item.vistas ?? []).filter((v) => !(v.playbookOnly && !hasPlaybook(brand.slug)));
+  return (item.vistas ?? []).filter(
+    (v) => !(v.playbookOnly && !hasPlaybook(brand.slug)) && !(v.conversaoOnly && brand.type === "awareness"),
+  );
 }
 
 /** `/conteudo/posts` pertence a `/conteudo`; `/filas` não pertenceria a `/fila`. */
@@ -144,11 +157,18 @@ export function isActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-export function navItemFromPath(pathname: string): NavItem | undefined {
-  return NAV.find((n) => isActive(pathname, n.href));
+/** O item está ativo — pela rota dele ou por uma das vistas (a Live mora em /live, vista da Bússola). */
+export function itemAtivo(pathname: string, item: NavItem): boolean {
+  return isActive(pathname, item.href) || (item.vistas ?? []).some((v) => v.href !== item.href && isActive(pathname, v.href));
 }
 
-/** O período de uma página sem `?range=`: o padrão dela, ou a campanha inteira. */
-export function periodoPadraoDe(pathname: string): RangeKey {
-  return navItemFromPath(pathname)?.periodoPadrao ?? "all";
+export function navItemFromPath(pathname: string): NavItem | undefined {
+  return NAV.find((n) => isActive(pathname, n.href)) ?? NAV.find((n) => itemAtivo(pathname, n));
+}
+
+/** O período de uma página sem `?range=`: o da vista, o da página, ou a campanha inteira. */
+export function periodoPadraoDe(pathname: string): RangeKey | string {
+  const item = navItemFromPath(pathname);
+  const vista = item?.vistas?.find((v) => v.href !== item.href && isActive(pathname, v.href));
+  return vista?.periodoPadrao ?? item?.periodoPadrao ?? "all";
 }

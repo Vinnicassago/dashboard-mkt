@@ -138,7 +138,8 @@ export function ehInscritoDaLive(l: Lead, cfg: CampanhaDaLive): boolean {
   const dia = l.createdAt.slice(0, 10);
   if (dia < cfg.periodo.de || dia > cfg.periodo.ate) return false;
   if (cfg.inscritos.criterio === "utm") {
-    return cfg.inscritos.utmCampaign.some((t) => casaToken(l.utmCampaign, l.campaignId, t));
+    // Id numérico compara com o id gravado na entrada e, sem ele, com o próprio utm_campaign.
+    return cfg.inscritos.utmCampaign.some((t) => casaToken(l.utmCampaign, l.campaignId ?? l.utmCampaign, t));
   }
   return Boolean(classeDoLead(l) || l.bem || l.faixaValor || l.finalidade);
 }

@@ -17,6 +17,7 @@ import { gravarFicha } from "../leads/gravar-ficha";
 import { aplicarStatus } from "../leads/mudar-status";
 import { registrarContato } from "../leads/registrar-contato";
 import { idLeadLp } from "../lead-id";
+import { idsDoUtm } from "../atribuicao";
 import { isLostStatus, podeTransitar, statusLabel } from "../lead-status";
 import { everBooked } from "../metrics";
 import { mesmoTelefone, normalizarTelefone } from "../phone";
@@ -101,6 +102,8 @@ export async function inscrever(i: Inscricao): Promise<ResultadoInscricao> {
         email: i.email,
         phone: i.whatsapp,
         ...i.utm,
+        // Os ids que o UTM padrão traz ({{campaign.id}}, {{adset.id}}, {{ad.id}}): a atribuição ao anúncio (D6).
+        ...idsDoUtm({ utm_campaign: i.utm.utmCampaign, utm_term: i.utm.utmTerm, utm_content: i.utm.utmContent }),
         status: "lead",
       };
       const ficha = await comClasse(base, i.ficha);

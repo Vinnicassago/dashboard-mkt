@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { NAV_GRUPOS, isActive, navForBrand } from "./nav-items";
+import { NAV_GRUPOS, itemAtivo, navForBrand } from "./nav-items";
 import { useComPeriodo } from "./use-periodo";
 import type { BrandDef } from "@/lib/brands";
 import { cn } from "@/lib/utils";
@@ -31,7 +31,7 @@ function SideLinks({ brand, hrefFor }: { brand: BrandDef; hrefFor: HrefFor }) {
               {grupo}
             </p>
             {doGrupo.map((item) => {
-              const active = isActive(pathname, item.href);
+              const active = itemAtivo(pathname, item);
               return (
                 <Link
                   key={item.href}
@@ -101,7 +101,7 @@ function MobileLinks({ brand, hrefFor }: { brand: BrandDef; hrefFor: HrefFor }) 
   return (
     <>
       {navForBrand(brand).map((item) => {
-        const active = isActive(pathname, item.href);
+        const active = itemAtivo(pathname, item);
         return (
           <Link
             key={item.href}
