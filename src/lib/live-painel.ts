@@ -11,6 +11,7 @@
  * FATO ("R$ X investidos · N reuniões"), não como razão.
  */
 import { RESULTADOS_VALIDOS, classeDoLead, statusReuniao, type StatusReuniao } from "./qualificacao";
+import { resultadoDaReuniao } from "./reuniao";
 import { eventosPorLead, tentativasDoLead } from "./contato";
 import { MIN_REUNIOES } from "./trust";
 import { formatCurrency0, formatInt } from "./format";
@@ -101,6 +102,16 @@ export interface PainelLive {
     porReuniao: { valor: number | null; texto: string };
   };
   qualidade: Taxa[];
+  /** Depois da reunião (E5-05): as vendas são as da linha "Vendas" (digitadas, senão as do painel). */
+  fechamento: {
+    realizadas: number;
+    vendas: number | null;
+    valorEmCartas: number | null;
+    /** Reunião realizada, ainda sem desfecho, com "proposta enviada" como último resultado. */
+    propostasEmAberto: number;
+    /** Foram à reunião e disseram não ("Não tem interesse" ou desistência). */
+    disseramNao: number;
+  };
   diagnosticos: number;
   /** Nenhuma linha de anúncio casou com os trechos das campanhas da live. */
   semCampanhas: boolean;
@@ -140,8 +151,11 @@ export function montarPainelLive(e: EntradaPainelLive): PainelLive {
 
   const agendaram = inscritos.filter((l) => l.bookedAt || ["agendado", "no_show", "reuniao_realizada", "cliente"].includes(l.status));
   const realizaram = inscritos.filter((l) => l.attendedAt || l.status === "reuniao_realizada" || l.status === "cliente");
-  const clientesNoPainel = inscritos.filter((l) => l.closedAt || l.status === "cliente").length;
+  const clientes = inscritos.filter((l) => l.closedAt || l.status === "cliente");
+  const valorDosClientes = clientes.reduce((s, l) => s + (l.value ?? 0), 0);
   const m = cfg.manuais;
+  // Uma venda, um número: o digitado vale; sem ele, os clientes registrados na ficha (E5-05).
+  const vendas = m.vendasQtd ?? (clientes.length ? clientes.length : null);
 
   const metas: LinhaDeMeta[] = [
     { id: "inscricoes", rotulo: "Inscrições", valor: inscritos.length, meta: cfg.metas.inscricoes, esperado: esperado(cfg.metas.inscricoes), ritmo: "sem_ritmo" },
@@ -161,16 +175,21 @@ export function montarPainelLive(e: EntradaPainelLive): PainelLive {
     {
       id: "vendas",
       rotulo: "Vendas",
-      valor: m.vendasQtd ?? null,
+      valor: vendas,
       meta: cfg.metas.vendas,
       esperado: null,
       ritmo: "sem_ritmo",
-      nota: [
-        m.vendasValor != null ? `${formatCurrency0(m.vendasValor)} em carta` : undefined,
-        clientesNoPainel ? `${formatInt(clientesNoPainel)} marcado(s) como cliente no painel` : undefined,
-      ]
-        .filter(Boolean)
-        .join(" · ") || "digitado à mão",
+      nota:
+        m.vendasQtd != null
+          ? [
+              m.vendasValor != null ? `${formatCurrency0(m.vendasValor)} em carta` : undefined,
+              clientes.length ? `${formatInt(clientes.length)} marcado(s) como cliente no painel` : undefined,
+            ]
+              .filter(Boolean)
+              .join(" · ") || "digitado à mão"
+          : clientes.length
+            ? `clientes registrados na ficha · ${formatCurrency0(valorDosClientes)} em carta`
+            : "digitado à mão, ou “Cliente” na ficha",
     },
   ];
   for (const l of metas) l.ritmo = ritmoDe(l.valor, l.esperado);
@@ -352,6 +371,15 @@ export function montarPainelLive(e: EntradaPainelLive): PainelLive {
     dias,
     custos,
     qualidade,
+    fechamento: {
+      realizadas: realizaram.length,
+      vendas,
+      valorEmCartas: m.vendasQtd != null ? (m.vendasValor ?? null) : clientes.length ? valorDosClientes : null,
+      propostasEmAberto: inscritos.filter(
+        (l) => l.status === "reuniao_realizada" && resultadoDaReuniao(porLead.get(l.id) ?? [])?.resultado === "proposta",
+      ).length,
+      disseramNao: inscritos.filter((l) => l.attendedAt && (l.status === "sem_interesse" || l.status === "desistencia")).length,
+    },
     diagnosticos: inscritos.filter((l) => l.diagnostico).length,
     semCampanhas: linhasDaLive.length === 0,
   };
@@ -370,7 +398,7 @@ export function resumoSemanalDaLive(p: PainelLive, cfg: CampanhaDaLive, ate: str
 
 /** Um texto pronto para colar no comentário de uma tarefa do ClickUp. */
 export interface RelatorioDaLive {
-  id: "semana" | "atendimento" | "live" | "pos_live";
+  id: "semana" | "atendimento" | "live" | "pos_live" | "fechamento";
   /** A tarefa e quando ela pede o texto. */
   rotulo: string;
   quando: string;
@@ -388,7 +416,20 @@ export function relatoriosDaLive(p: PainelLive, cfg: CampanhaDaLive, hoje: strin
     { id: "atendimento", rotulo: "Atendimento da semana (E3-07)", quando: "toda segunda", texto: semNbsp(textoDoAtendimento(p, cfg, hoje)) },
     { id: "live", rotulo: "Números da live (E4-05)", quando: "02/12", texto: semNbsp(textoDaNoiteDaLive(p, cfg, hoje)) },
     { id: "pos_live", rotulo: "Primeiro relatório (E5-08)", quando: "07 e 08/12", texto: semNbsp(textoDoPosLive(p, cfg)) },
+    { id: "fechamento", rotulo: "Reuniões e vendas (E5-05)", quando: diaMes(cfg.posLive.ate), texto: semNbsp(textoDoFechamento(p, cfg)) },
   ];
+}
+
+function textoDoFechamento(p: PainelLive, cfg: CampanhaDaLive): string {
+  const f = p.fechamento;
+  const taxa = f.vendas != null && f.realizadas > 0 ? pctTexto(f.vendas / f.realizadas) : "—";
+  return [
+    `Reuniões realizadas: ${formatInt(f.realizadas)} (meta ${formatInt(cfg.metas.realizadas)})`,
+    `Vendas: ${ou(f.vendas)} · Valor total em cartas: ${f.valorEmCartas != null ? formatCurrency0(f.valorEmCartas) : "R$ __"}`,
+    `Propostas em aberto: ${formatInt(f.propostasEmAberto)}`,
+    `Taxa de fechamento (vendas ÷ realizadas): ${taxa}`,
+    `Motivos mais comuns de "não": __${f.disseramNao ? ` (${plural(f.disseramNao, "disse", "disseram")} não depois da reunião)` : ""}`,
+  ].join("\n");
 }
 
 const diaMes = (dia: string) => `${dia.slice(8, 10)}/${dia.slice(5, 7)}`;

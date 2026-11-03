@@ -31,6 +31,7 @@ import {
 } from "@/lib/qualificacao";
 import { gravarFicha } from "@/lib/leads/gravar-ficha";
 import { comClasse } from "@/lib/classe-server";
+import { RESULTADOS_DA_REUNIAO, type ResultadoDaReuniao } from "@/lib/reuniao";
 import type { LeadFichaPatch } from "@/lib/data/backend";
 import type { LeadStatus } from "@/lib/types";
 
@@ -283,6 +284,35 @@ export async function anotarLead(leadId: string, texto: string): Promise<StatusR
   });
   revalidatePath("/", "layout");
   return { ok: true, message: "Anotação salva." };
+}
+
+/**
+ * O resultado da reunião que ainda não é status (E5-05): proposta enviada ou vai
+ * pensar. Só depois da reunião realizada; vendeu é "Cliente" e não tem interesse
+ * é "Sem interesse", pelo registro de status de sempre. Vira fato da ficha.
+ */
+export async function registrarResultadoDaReuniao(leadId: string, resultado: ResultadoDaReuniao): Promise<StatusResult> {
+  if (!(await can("leads:write"))) {
+    return { ok: false, message: "Você não tem permissão para alterar leads." };
+  }
+  if (!Object.hasOwn(RESULTADOS_DA_REUNIAO, resultado)) return { ok: false, message: "Resultado inválido." };
+  const lead = await getLead(leadId);
+  if (!lead || lead.deletedAt) return { ok: false, message: "Lead não encontrado." };
+  if (lead.status !== "reuniao_realizada") {
+    return { ok: false, message: "Registre antes a reunião como realizada." };
+  }
+  await addLeadEvent({
+    id: newEventId(),
+    leadId,
+    brand: lead.brand,
+    leadName: lead.name,
+    actor: await currentActor(),
+    action: "ficha",
+    payload: { fato: "resultado_reuniao", resultado, detalhe: RESULTADOS_DA_REUNIAO[resultado].toLowerCase() },
+    createdAt: new Date().toISOString(),
+  });
+  revalidatePath("/", "layout");
+  return { ok: true, message: `Registrado: ${RESULTADOS_DA_REUNIAO[resultado].toLowerCase()}.` };
 }
 
 /**

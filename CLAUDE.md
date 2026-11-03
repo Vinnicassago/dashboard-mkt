@@ -372,6 +372,11 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   Meta): cedo demais até 5 dias E R$ 60; pausar acima de 2× a média dos julgáveis; o de carro só
   a partir de `carro.julgarDesde`, contra os de imóvel da mesma semana. Nomes das campanhas,
   conjuntos e anúncios = trechos editáveis (proposta `[LIVE] …`, `Carro`, `C9`, `C4A/C4B`).
+- **Reunião com o Brunno** (E5-05, `lib/reuniao.ts`, puro): a ficha mostra a linha da véspera
+  (`mensagemDaVespera`, com os alertas do diagnóstico) e, com a reunião realizada, "proposta enviada"
+  ou "vai pensar" — FATO da ficha (`resultado_reuniao`), não status novo; vendeu continua "Cliente"
+  com valor. "Vendas" da aba Live = o digitado, senão os clientes da ficha (um número só nos textos).
+  Os textos das tarefas (E3-13, E3-07, E4-05, E5-08, E5-05) saem de `relatoriosDaLive`.
 - **Conferência com o Gerenciador** (`lib/conferencia.ts`, tabela `conferencias_gasto`, 0022): o
   servidor recalcula o gasto do período (o número do card de Investimento); até 5% é verde.
 

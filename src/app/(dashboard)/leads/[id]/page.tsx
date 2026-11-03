@@ -13,6 +13,8 @@ import { mensagemWhatsapp } from "@/lib/integracoes";
 import { resumoContato, quando, tentativasDoLead } from "@/lib/contato";
 import { FichaQualificacao } from "@/components/leads/ficha-qualificacao";
 import { ClasseBadge } from "@/components/leads/classe-badge";
+import { ReuniaoNaFicha } from "@/components/leads/reuniao-ficha";
+import { mensagemDaVespera, resultadoDaReuniao } from "@/lib/reuniao";
 import {
   RESULTADOS_CONTATO,
   STATUS_ATENDIMENTO,
@@ -137,6 +139,12 @@ export default async function FichaDoLead({
   const tentativas = tentativasDoLead(proprios);
   const ultimoResultado = [...tentativas].reverse().find((t) => t.resultado)?.resultado;
   const reuniao = statusReuniao(lead);
+  // A linha para o Brunno só faz sentido com a reunião marcada e pela frente (E5-05).
+  const vespera =
+    (reuniao === "agendada" || reuniao === "confirmada") && lead.meetingFor && Date.parse(lead.meetingFor) > Date.parse(agoraFicha)
+      ? mensagemDaVespera(lead)
+      : null;
+  const resultadoReuniao = resultadoDaReuniao(proprios);
   const origem = origemDoLead(dados)(lead);
   const naFila = lead.deletedAt ? null : etapaDoLead(lead, proprios, new Date().toISOString());
   // A e B da ficha da live: a etapa e o prazo vêm da Fila da live (pelo turno).
@@ -379,6 +387,17 @@ export default async function FichaDoLead({
                   ) : null}
                 </Linha>
               </dl>
+              <ReuniaoNaFicha
+                id={lead.id}
+                status={lead.status}
+                vespera={vespera}
+                resultado={
+                  resultadoReuniao
+                    ? { resultado: resultadoReuniao.resultado, quando: formatDateTime(resultadoReuniao.em) }
+                    : undefined
+                }
+                canEdit={canEdit && !lead.deletedAt}
+              />
             </CardContent>
           </Card>
 
@@ -411,7 +430,13 @@ export default async function FichaDoLead({
                   {lead.diagnostico.perfil ? `Perfil: ${lead.diagnostico.perfil}` : "Sem perfil final."}
                 </CardDescription>
               </CardHeader>
-              <CardContent>
+              <CardContent className="space-y-3">
+                {lead.diagnostico.alertas?.length ? (
+                  <p className="flex items-start gap-2 rounded-lg border border-[var(--warning)]/50 bg-[var(--warning)]/10 p-2.5 text-xs">
+                    <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-[var(--warning-text)]" />
+                    <span>Alertas do resultado: {lead.diagnostico.alertas.join(" · ")}</span>
+                  </p>
+                ) : null}
                 <ol className="space-y-2 text-sm">
                   {lead.diagnostico.respostas.map((r, i) => (
                     <li key={i}>

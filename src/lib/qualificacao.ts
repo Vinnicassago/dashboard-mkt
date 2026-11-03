@@ -117,6 +117,8 @@ export interface Diagnostico {
   respostas: RespostaDiagnostico[];
   /** O perfil final que o diagnóstico devolve (texto). */
   perfil?: string;
+  /** Os alertas que o resultado mostrou (resgate, "não é sorte", reserva…) — vão para o Brunno na véspera. */
+  alertas?: string[];
   /** Quando foi feito (ISO). */
   feitoEm?: string;
 }
@@ -133,6 +135,7 @@ export const FATOS_DA_FICHA = {
   diagnostico: "Diagnóstico",
   reuniao_confirmada: "Reunião confirmada",
   reuniao_remarcar: "Pediu para remarcar",
+  resultado_reuniao: "Resultado da reunião",
 } as const;
 export type FatoDaFicha = keyof typeof FATOS_DA_FICHA;
 

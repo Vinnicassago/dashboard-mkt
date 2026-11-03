@@ -111,6 +111,7 @@ Mande só o que aconteceu; o resto fica como está. Pode juntar vários num envi
   "diagnostico": {
     "respostas": ["resposta 1", "resposta 2", "…", "resposta 9"],
     "perfil": "Comprador planejado",
+    "alertas": ["resgate", "não é sorte"],
     "feito_em": "2026-11-17T10:00:00-03:00"
   }
 }
@@ -120,6 +121,8 @@ Mande só o que aconteceu; o resto fica como está. Pode juntar vários num envi
   gravados **uma vez** (a 1ª vale). `msg1_status` (enviada · entregue · lida ·
   falhou) muda a cada envio.
 - `diagnostico.respostas` aceita lista de textos ou de `{ "pergunta", "resposta" }`.
+  `alertas` (opcional) são os avisos que o resultado mostrou — lista ou texto com
+  vírgulas; vão na mensagem da véspera para o Brunno (ficha do lead).
 
 **Tentativa** (o Eduardo ligou — ou o n8n registra por ele):
 

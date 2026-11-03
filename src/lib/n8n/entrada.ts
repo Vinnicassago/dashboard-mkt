@@ -213,7 +213,13 @@ function lerDiagnostico(v: unknown, agora: string, erros: string[]): Diagnostico
     })
     .filter((r) => r.resposta);
   const feitoEm = instante(d.feito_em, "diagnostico.feito_em", erros, agora) ?? agora;
-  return { respostas, perfil: texto(d.perfil, 500), feitoEm };
+  // Os alertas do resultado: lista de textos ou um texto só (separado por vírgula).
+  const brutos = Array.isArray(d.alertas) ? d.alertas : typeof d.alertas === "string" ? d.alertas.split(",") : [];
+  const alertas = brutos
+    .map((a) => (typeof a === "string" ? a.trim().slice(0, 200) : ""))
+    .filter(Boolean)
+    .slice(0, 10);
+  return { respostas, perfil: texto(d.perfil, 500), ...(alertas.length ? { alertas } : {}), feitoEm };
 }
 
 export function lerAtualizacao(entrada: unknown, agora: string): Lido<Atualizacao> {
