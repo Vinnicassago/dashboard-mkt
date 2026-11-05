@@ -3,6 +3,11 @@ import { redirect } from "next/navigation";
 import { Header } from "@/components/layout/header";
 import { MobileNav, Sidebar } from "@/components/layout/sidebar";
 import { SubNav } from "@/components/layout/sub-nav";
+import { inicioDoComercial } from "@/components/layout/nav-items";
+import type { AtalhoDoSeletor } from "@/components/layout/periodo-do-seletor";
+import { atalhoDaLive, chavesDaLive } from "@/lib/atalho-live";
+import { campanhaDaLive } from "@/lib/live-server";
+import { hojeEmBrasilia } from "@/lib/range";
 import { NAO_CLASSIFICADO, integrationStatus } from "@/lib/meta/config";
 import { estadoDaFonte } from "@/lib/sincronizacao";
 import { AlertasProvider } from "@/components/layout/alertas";
@@ -66,8 +71,9 @@ export default async function DashboardLayout({
     if (robo.ligado) {
       frescor.push(frescorDaFonte("Robô", robo.sync.ultimoOk, agora, robo.sync.falha, LIMITES_DO_ROBO));
       if (robo.sync.falha) globais.push(alertaDeFalha("robo", "do robô", robo.sync.falha));
-      // Gente sem a 1ª mensagem do robô — a MESMA contagem da B1 (b) e de
-      // Integrações, e só com a leitura em dia (parada, quem fala é o sync-robo).
+      // Gente sem a 1ª mensagem do robô — a MESMA contagem da frase do Início e de
+      // Integrações (e da B1 do motor, dormente), e só com a leitura em dia (parada,
+      // quem fala é o sync-robo).
       // Do histórico só os `reaberto` (o relógio recomeça ali): o layout roda a cada
       // navegação e não lê o histórico inteiro.
       const agoraIso = agora.toISOString();
@@ -139,6 +145,23 @@ export default async function DashboardLayout({
     console.warn("[layout] limpeza dos envios vencidos da CAPI falhou:", e instanceof Error ? e.message : e);
   }
 
+  // O atalho "Live 01/12" do seletor de período (C10): a régua EDITÁVEL
+  // (Configurações → Metas e orçamento), visível até o último dia dela e nunca na
+  // marca awareness. A chave continua valendo depois (o seletor mostra o nome com
+  // ela na URL); o Início do comercial abre o painel da live enquanto o botão existe.
+  let atalhoLive: AtalhoDoSeletor | null = null;
+  let chavesLive: string[] = [];
+  if (brand.type !== "awareness") {
+    try {
+      const cfg = await campanhaDaLive();
+      atalhoLive = atalhoDaLive(cfg, hojeEmBrasilia(agora), brand.type);
+      chavesLive = Object.values(chavesDaLive(cfg));
+    } catch (e) {
+      console.warn("[layout] leitura da régua da live falhou:", e instanceof Error ? e.message : e);
+    }
+  }
+  const hrefDoInicio = inicioDoComercial(sessionUser?.role, atalhoLive);
+
   // CAPI: evento que não chegou à Meta (ou modo de teste em produção) — para quem cuida dos dados.
   if (status.capi && (await can("data:write"))) {
     const desde = new Date(agora.getTime() - 7 * 86_400_000).toISOString();
@@ -160,14 +183,16 @@ export default async function DashboardLayout({
   return (
     <AlertasProvider globais={globais}>
     <div className="flex min-h-screen">
-      <Sidebar brand={brand} />
+      <Sidebar brand={brand} hrefDoInicio={hrefDoInicio} />
       <div className="flex min-w-0 flex-1 flex-col">
-        <MobileNav brand={brand} />
+        <MobileNav brand={brand} hrefDoInicio={hrefDoInicio} />
         <Header
           frescor={frescor}
           username={sessionUser?.username ?? null}
           brand={brand.slug}
           geradoEm={agora.toISOString()}
+          atalhoLive={atalhoLive}
+          chavesDaLive={chavesLive}
         />
         <main className="flex-1 p-4 md:p-6">
           <div className="mx-auto w-full max-w-[1600px]">

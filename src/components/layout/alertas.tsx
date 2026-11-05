@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useId, useMemo, useS
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { AlertTriangle, Info, Settings2, TrendingDown, TrendingUp, WifiOff, X } from "lucide-react";
+import { AlertTriangle, Info, TrendingDown, TrendingUp, WifiOff, X } from "lucide-react";
 import { ordenarAlertas, type Alerta, type NivelAlerta } from "@/lib/alertas";
 import { comPeriodo } from "@/lib/range";
 import { periodoPadraoDe } from "./nav-items";
@@ -59,23 +59,30 @@ export function RegistrarAlertas({ alertas }: { alertas: Alerta[] }) {
   return null;
 }
 
-const ESTILO: Record<NivelAlerta, { Icon: typeof AlertTriangle; cor: string; tag: string }> = {
+/**
+ * O que entra no ⚠. `config` (meta e orçamento não cadastrados) NÃO entra: não
+ * desqualifica número nenhum e mora em Configurações → Pendências
+ * (`alertasDeConfianca` já descarta; o filtro aqui só garante).
+ */
+type NivelNoPainel = Exclude<NivelAlerta, "config">;
+const noPainel = (a: Alerta): a is Alerta & { nivel: NivelNoPainel } => a.nivel !== "config";
+
+const ESTILO: Record<NivelNoPainel, { Icon: typeof AlertTriangle; cor: string; tag: string }> = {
   falha: { Icon: WifiOff, cor: "text-[var(--danger-text)]", tag: "integração falhando" },
   quarentena: { Icon: AlertTriangle, cor: "text-[var(--danger-text)]", tag: "não dá para decidir com isto" },
   teto: { Icon: TrendingDown, cor: "text-[var(--warning-text)]", tag: "o valor real é menor" },
   piso: { Icon: TrendingUp, cor: "text-[var(--warning-text)]", tag: "o valor real é maior" },
   aviso: { Icon: Info, cor: "text-[var(--warning-text)]", tag: "confira" },
-  config: { Icon: Settings2, cor: "text-muted-foreground", tag: "falta configurar" },
 };
 
 export function IndicadorAlertas() {
   const ctx = useContext(Ctx);
   const [aberto, setAberto] = useState(false);
-  // Sem `?range=`, o link leva o período que a página está mostrando (a Bússola: 7 dias).
+  // Sem `?range=`, o link leva o período que a página está mostrando (o Início: 7 dias).
   const pathname = usePathname();
   const rangeKey = useSearchParams().get("range") ?? periodoPadraoDe(pathname);
   const alertas = useMemo(
-    () => (ctx ? ordenarAlertas([ctx.globais, ...Object.values(ctx.daPagina)]) : []),
+    () => (ctx ? ordenarAlertas([ctx.globais, ...Object.values(ctx.daPagina)]).filter(noPainel) : []),
     [ctx],
   );
 
@@ -88,7 +95,6 @@ export function IndicadorAlertas() {
 
   if (alertas.length === 0) return null;
   const grave = alertas.some((a) => a.nivel === "falha" || a.nivel === "quarentena");
-  const so_config = alertas.every((a) => a.nivel === "config");
 
   return (
     <>
@@ -98,11 +104,7 @@ export function IndicadorAlertas() {
         title="Alertas sobre os dados e os números desta tela"
         className={cn(
           "inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-medium",
-          grave
-            ? "border-[var(--danger)]/40 text-[var(--danger-text)]"
-            : so_config
-              ? "text-muted-foreground"
-              : "border-[var(--warning)]/40 text-[var(--warning-text)]",
+          grave ? "border-[var(--danger)]/40 text-[var(--danger-text)]" : "border-[var(--warning)]/40 text-[var(--warning-text)]",
         )}
       >
         <AlertTriangle className="size-3.5" />

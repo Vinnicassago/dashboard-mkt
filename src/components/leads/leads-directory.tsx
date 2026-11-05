@@ -14,7 +14,7 @@ import { pedirCsvDeLeads } from "@/components/leads/exportar-csv";
 import { ETAPA_MAXIMA_LABEL, LEAD_STATUSES, LEAD_STATUS_META } from "@/lib/lead-status";
 import { DONO_LABEL, type Dono } from "@/lib/dono";
 import { formatDateTime, formatDateTimeCurta } from "@/lib/format";
-import { normalizarTelefone } from "@/lib/phone";
+import { normalizarTelefone, telefoneUtilizavel } from "@/lib/phone";
 import { FILTROS_DO_ROBO, FILTRO_ROBO_LABEL } from "@/lib/robo/situacao";
 import {
   CHAVES_FILTRO_FICHA,
@@ -63,6 +63,9 @@ function Contato({ row, mascarado }: { row: LinhaDeLead; mascarado: boolean }) {
         <span>
           {row.phone} <span className="text-[var(--status-fora-text)]">· pediu para não receber mensagens</span>
         </span>
+      ) : row.phone && !telefoneUtilizavel(row.phone) ? (
+        // Número que não serve ("123", "0"): texto, sem um `wa.me` que não abre nada.
+        <span className="text-muted-foreground">{row.phone}</span>
       ) : row.phone ? (
         <a
           href={`https://wa.me/${normalizarTelefone(row.phone)}`}

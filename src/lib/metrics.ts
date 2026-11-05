@@ -20,6 +20,8 @@ import type {
 } from "./types";
 import { isAwareness } from "./brands";
 import { diaCoberto, type Intervalo } from "./cobertura";
+import { diaDoLead } from "./horario-util";
+import { hojeEmBrasilia } from "./range";
 import { atribuidor, isPaidSource } from "./atribuicao";
 import {
   LEAD_STATUS_META,
@@ -38,7 +40,16 @@ export interface DateRange {
 
 const div = (a: number, b: number) => (b > 0 ? a / b : 0);
 
-/** Extract the yyyy-mm-dd part of an ISO string. */
+/**
+ * O prefixo AAAA-MM-DD da string, sem fuso nenhum — o dia UTC de um instante.
+ * Serve para o que já é dia da FONTE: as métricas diárias da conta do Instagram
+ * (dia UTC da Meta, `instagram.ts`) e o filtro de PERÍODO dos posts — UM só na
+ * tela de Posts: a tabela (`postPerformance`), os agregados (pilar, formato, dia
+ * da semana, retenção) e a cadência (`postingCadence`) contam o mesmo conjunto. O
+ * dia de um lead ou evento é o de Brasília: `diaDoLead` (`horario-util.ts`); DENTRO
+ * da cadência (maior intervalo, dias com 2+ peças) e no "último post"
+ * (`ultimoPostDaGrade`) o dia do post também é o de Brasília.
+ */
 export function dayOf(iso: string): string {
   return iso.slice(0, 10);
 }
@@ -52,8 +63,18 @@ export function filterAds(rows: AdDaily[], range?: DateRange): AdDaily[] {
   return range ? rows.filter((r) => inRange(r.date, range)) : rows;
 }
 
+/** Leads que ENTRARAM no período — pelo dia de Brasília da entrada (`diaDoLead`). */
 export function filterLeads(leads: Lead[], range?: DateRange): Lead[] {
-  return range ? leads.filter((l) => inRange(dayOf(l.createdAt), range)) : leads;
+  return range ? leads.filter((l) => inRange(diaDoLead(l.createdAt), range)) : leads;
+}
+
+/**
+ * O último dia do período que já aconteceu: `min(range.to, hoje)` (sem range,
+ * hoje). É onde as janelas da saúde dos criativos e a tendência terminam — dia
+ * depois de hoje é FUTURO, nem "sem dados" nem "sem veiculação" (C9).
+ */
+export function fimDoPeriodo(range: DateRange | undefined, hoje: string): string {
+  return range?.to && range.to < hoje ? range.to : hoje;
 }
 
 /** The equal-length window immediately before `range` (for period-over-period). */
@@ -390,7 +411,7 @@ export function countMeetings(leads: Lead[]): number {
  */
 export function dataDoAgendamento(l: Lead): string | undefined {
   if (!isBooked(l)) return undefined;
-  return dayOf(l.bookedAt ?? l.meetingAt ?? l.createdAt);
+  return diaDoLead(l.bookedAt ?? l.meetingAt ?? l.createdAt);
 }
 
 /**
@@ -636,13 +657,22 @@ export interface DailyPoint {
 /**
  * Série diária CONTÍNUA: todo dia do período aparece, com ou sem dado. Antes só
  * os dias com linha entravam, e o eixo do gráfico pulava de 24/08 para 03/09 —
- * semanas sem gasto pareciam continuidade (B12).
+ * semanas sem gasto pareciam continuidade (B12). Dia depois de `hoje` é FUTURO:
+ * aparece zerado, sem "sem dados" nem "sem veiculação" (C9 — um período que
+ * ainda não começou não é falha do sync nem campanha pausada). Dia antes da 1ª
+ * linha de anúncio da marca também não existia: nem "sem dados" nem "sem
+ * veiculação", mesmo coberto por sync (o 1º sync da Meta cobre uma janela
+ * retroativa que inclui dias antes do lançamento) — o mesmo corte do
+ * `resolveRange`, da trava de cobertura, das coortes do Funil e das barras do
+ * Início (`leadsPorDia`).
  */
 export function dailySeries(
   data: DashboardData,
   range?: DateRange,
   /** Janelas cobertas por syncs bem-sucedidos (ADR-06). Ausente = todo dia sem linha é "sem dados". */
   cobertura?: Intervalo[],
+  /** Hoje (AAAA-MM-DD, Brasília). Ausente = nenhum dia é tratado como futuro. */
+  hoje?: string,
 ): DailyPoint[] {
   const ads = filterAds(data.adDaily, range);
   const byDate = new Map<string, DailyPoint>();
@@ -657,6 +687,8 @@ export function dailySeries(
     byDate.set(r.date, p);
   }
   const datas = [...byDate.keys()].sort();
+  let primeiroDado: string | undefined;
+  for (const r of data.adDaily) if (!primeiroDado || r.date < primeiroDado) primeiroDado = r.date;
   const from = range?.from ?? datas[0];
   const to = range?.to ?? datas.at(-1);
   if (!from || !to) return [];
@@ -664,11 +696,22 @@ export function dailySeries(
   for (let d = new Date(from + "T00:00:00Z"); d.toISOString().slice(0, 10) <= to; d.setUTCDate(d.getUTCDate() + 1)) {
     const date = d.toISOString().slice(0, 10);
     const p = byDate.get(date);
+    const futuro = hoje !== undefined && date > hoje;
+    const antesDoDado = primeiroDado !== undefined && date < primeiroDado;
     const coberto = Boolean(cobertura && diaCoberto(cobertura, date));
     out.push(
       p
         ? { ...p, cpl: div(p.spend, p.leads) }
-        : { date, spend: 0, impressions: 0, clicks: 0, leads: 0, cpl: 0, semDado: !coberto, semVeiculacao: coberto },
+        : {
+            date,
+            spend: 0,
+            impressions: 0,
+            clicks: 0,
+            leads: 0,
+            cpl: 0,
+            semDado: !futuro && !antesDoDado && !coberto,
+            semVeiculacao: !futuro && !antesDoDado && coberto,
+          },
     );
   }
   return out;
@@ -732,8 +775,8 @@ export interface SeguidoresDoPeriodo {
 }
 
 /**
- * Seguidores do período — a regra ÚNICA da variação. `igAccountTotals` (Bússola,
- * Funil, IA, Conteúdo) e `followerSeries` (os gráficos) leem daqui: um fato, um
+ * Seguidores do período — a regra ÚNICA da variação. `igAccountTotals` (Início da
+ * awareness, Funil, IA, Conteúdo) e `followerSeries` (os gráficos) leem daqui: um fato, um
  * número. `followers` é o total no FIM do dia, e 0 é desconhecido.
  *
  * - Série completa (todo dia do período com ganhos e perdas): cada dia varia
@@ -1422,7 +1465,7 @@ export interface Cohort {
   semVeiculacao: boolean;
 }
 
-/** Segunda-feira (UTC) da semana de uma data ISO. */
+/** Segunda-feira da semana de um DIA (AAAA-MM-DD; de um instante só lê o prefixo — passe `diaDoLead` antes). */
 function weekStart(iso: string): string {
   const d = new Date(iso.slice(0, 10) + "T00:00:00Z");
   const dow = (d.getUTCDay() + 6) % 7; // Mon=0 … Sun=6
@@ -1441,8 +1484,9 @@ export function cohortWeekly(
 ): Cohort[] {
   const leads = filterLeads(data.leads, range);
   const byWeek = new Map<string, Lead[]>();
+  // A semana do lead é a do dia de Brasília (o de domingo 22h é do domingo).
   for (const l of leads) {
-    const w = weekStart(l.createdAt);
+    const w = weekStart(diaDoLead(l.createdAt));
     const list = byWeek.get(w) ?? [];
     list.push(l);
     byWeek.set(w, list);
@@ -1454,7 +1498,8 @@ export function cohortWeekly(
   const semanasComAnuncio = new Set(filterAds(data.adDaily, range).map((r) => weekStart(r.date)));
   const primeiras = [...byWeek.keys()].sort();
   if (primeiras.length === 0) return [];
-  const ultima = weekStart(range?.to ?? nowIso);
+  const hoje = diaDoLead(nowIso);
+  const ultima = weekStart(range?.to ?? hoje);
   const semanas: string[] = [];
   for (
     let w = new Date(primeiras[0] + "T00:00:00Z");
@@ -1478,7 +1523,8 @@ export function cohortWeekly(
       revenue: sumRevenue(ls),
       leadToMeeting: div(meetings, ls.length),
       immature: nowMs - startMs < 7 * 86_400_000,
-      semVeiculacao: !semanasComAnuncio.has(week),
+      // Semana que ainda não começou é futuro, não campanha pausada (C9).
+      semVeiculacao: week <= hoje && !semanasComAnuncio.has(week),
     };
   });
 }
@@ -1792,7 +1838,12 @@ export interface PostingCadence {
   days: number; // extensão da janela analisada (inclusiva)
   postsPerWeek: number;
   maxGapDays: number; // maior buraco entre publicações consecutivas
-  daysSinceLast: number; // dias desde o último post até `nowIso`
+  /**
+   * Dias (de Brasília) desde o último post DA GRADE no histórico inteiro até
+   * `nowIso` — `ultimoPostDaGrade`, não só a janela: uma semana sem post não é
+   * "há 0 dias". `null` = nunca houve post da grade.
+   */
+  daysSinceLast: number | null;
   /** máximo de posts num mesmo dia — 2+ já é canibalização (competem entre si) */
   maxSameDay: number;
   busiestDay?: string; // yyyy-mm-dd do dia com mais posts
@@ -1801,6 +1852,51 @@ export interface PostingCadence {
   /** composição por formato, normalizada por semana — o guia pede 4 reels + 2 carrosséis */
   reelsPerWeek: number;
   carrosseisPerWeek: number;
+}
+
+/**
+ * O filtro da GRADE: fora os testes e os impulsionados (criativo aponta para a
+ * mídia por id ou permalink, a MESMA regra de `postPerformance`) — ou um
+ * conjunto de ids já resolvido.
+ */
+function filtroDaGrade(foraDaGrade?: ReadonlySet<string> | Creative[]): (p: IgPost) => boolean {
+  const idsImpulsionados = new Set<string>();
+  const permalinksImpulsionados = new Set<string>();
+  if (Array.isArray(foraDaGrade)) {
+    for (const c of foraDaGrade) {
+      if (c.instagramMediaId) idsImpulsionados.add(c.instagramMediaId);
+      if (c.instagramPermalink) permalinksImpulsionados.add(c.instagramPermalink);
+    }
+  } else if (foraDaGrade) {
+    for (const id of foraDaGrade) idsImpulsionados.add(id);
+  }
+  return (p: IgPost) =>
+    !p.isTest &&
+    !idsImpulsionados.has(p.id) &&
+    !(p.permalink !== "" && permalinksImpulsionados.has(p.permalink));
+}
+
+/**
+ * "Último post há N dias" — UMA conta para Posts, Início e IA: dias entre o dia
+ * de Brasília do último post DA GRADE no histórico INTEIRO (sem teste nem
+ * impulsionado) e hoje em Brasília (`hojeEmBrasilia(nowIso)`). 0 = hoje; `null`
+ * = nunca houve post da grade. Não olha o período: uma semana sem post é "há 9
+ * dias", nunca "há 0".
+ */
+export function ultimoPostDaGrade(
+  posts: IgPost[],
+  foraDaGrade: ReadonlySet<string> | Creative[] | undefined,
+  nowIso: string,
+): number | null {
+  const daGrade = filtroDaGrade(foraDaGrade);
+  let ultimo: string | undefined;
+  for (const p of posts) {
+    if (!daGrade(p)) continue;
+    const d = diaDoLead(p.publishedAt);
+    if (d && (!ultimo || d > ultimo)) ultimo = d;
+  }
+  if (!ultimo) return null;
+  return Math.max(0, daysBetween(ultimo, hojeEmBrasilia(new Date(nowIso))));
 }
 
 /**
@@ -1814,6 +1910,11 @@ export interface PostingCadence {
  * dia de canibalização que não existe. `foraDaGrade` aceita os criativos
  * (impulsionado = criativo aponta para a mídia por id ou permalink, a MESMA
  * regra de `postPerformance`) ou um conjunto de ids já resolvido.
+ *
+ * Fase 2 (nov/26): dentro da janela, o dia do post é o de Brasília (intervalo,
+ * dias com 2+) e `daysSinceLast` sai de `ultimoPostDaGrade` (histórico inteiro,
+ * `null` sem post nenhum); quem é da janela sai do filtro de `postPerformance`
+ * (`dayOf`) — a contagem é a do card "Posts" da mesma tela.
  */
 export function postingCadence(
   posts: IgPost[],
@@ -1821,41 +1922,33 @@ export function postingCadence(
   nowIso: string,
   foraDaGrade?: ReadonlySet<string> | Creative[],
 ): PostingCadence {
-  const idsImpulsionados = new Set<string>();
-  const permalinksImpulsionados = new Set<string>();
-  if (Array.isArray(foraDaGrade)) {
-    for (const c of foraDaGrade) {
-      if (c.instagramMediaId) idsImpulsionados.add(c.instagramMediaId);
-      if (c.instagramPermalink) permalinksImpulsionados.add(c.instagramPermalink);
-    }
-  } else if (foraDaGrade) {
-    for (const id of foraDaGrade) idsImpulsionados.add(id);
-  }
-  const daGrade = (p: IgPost) =>
-    !p.isTest &&
-    !idsImpulsionados.has(p.id) &&
-    !(p.permalink !== "" && permalinksImpulsionados.has(p.permalink));
+  const daGrade = filtroDaGrade(foraDaGrade);
+  // O dia do post é o de Brasília (a mesma régua do "último post"): um post às
+  // 22h é do dia em que foi publicado para quem usa o painel. Mas QUEM é do
+  // período sai do mesmo filtro da tabela e do card "Posts" (`dayOf`, dia UTC):
+  // senão um post das 21h–24h na borda entrava num número da tela e não no outro.
+  const diaDoPost = (p: IgPost) => diaDoLead(p.publishedAt);
   const sorted = posts
     .filter((p) => daGrade(p) && inRange(dayOf(p.publishedAt), range))
-    .sort((a, b) => a.publishedAt.localeCompare(b.publishedAt));
-  const first = sorted[0] ? dayOf(sorted[0].publishedAt) : undefined;
-  const last = sorted.at(-1) ? dayOf(sorted.at(-1)!.publishedAt) : undefined;
+    .sort((a, b) => Date.parse(a.publishedAt) - Date.parse(b.publishedAt) || a.publishedAt.localeCompare(b.publishedAt));
+  const first = sorted[0] ? diaDoPost(sorted[0]) : undefined;
+  const last = sorted.at(-1) ? diaDoPost(sorted.at(-1)!) : undefined;
   const from = range?.from ?? first;
   // Sem range, a janela vai até HOJE (não até o último post) — senão uma grade
   // parada há 30 dias ainda pareceria ter a cadência da época em que postava.
-  const nowDay = nowIso.slice(0, 10);
+  const nowDay = hojeEmBrasilia(new Date(nowIso));
   const to = range?.to ?? (last && nowDay > last ? nowDay : last);
   const days = from && to ? daysBetween(from, to) + 1 : 0;
 
   let maxGapDays = 0;
   for (let i = 1; i < sorted.length; i++) {
-    const gap = daysBetween(dayOf(sorted[i - 1].publishedAt), dayOf(sorted[i].publishedAt));
+    const gap = daysBetween(diaDoPost(sorted[i - 1]), diaDoPost(sorted[i]));
     if (gap > maxGapDays) maxGapDays = gap;
   }
 
   const byDay = new Map<string, number>();
   for (const p of sorted) {
-    const d = dayOf(p.publishedAt);
+    const d = diaDoPost(p);
     byDay.set(d, (byDay.get(d) ?? 0) + 1);
   }
   let maxSameDay = 0;
@@ -1871,7 +1964,7 @@ export function postingCadence(
 
   // janela mínima de 7 dias: 1 post num dia só não vira "7 posts/semana"
   const weeks = Math.max(days, 7) / 7;
-  const daysSinceLast = last ? Math.max(0, daysBetween(last, nowDay)) : 0;
+  const daysSinceLast = ultimoPostDaGrade(posts, foraDaGrade, nowIso);
   return {
     count: sorted.length,
     days,

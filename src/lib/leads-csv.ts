@@ -123,6 +123,21 @@ export function lerTelefone(raw?: string): { valor?: string; ilegivel: boolean }
   return { valor: v || undefined, ilegivel: false };
 }
 
+/**
+ * O instante de entrada que o importador GRAVA, com fuso explícito. A planilha
+ * traz o relógio de Brasília: data sem hora vira o meio-dia de Brasília
+ * (`AAAA-MM-DDT12:00:00-03:00`) e hora sem fuso ganha `-03:00`. Gravada crua, a
+ * data pura virava meia-noite UTC no Postgres — 21:00 do dia anterior em
+ * Brasília — e o lead recuava um dia (`diaDoLead`). Com fuso, fica como veio.
+ */
+export function instanteDoCsv(criadoEm: string): string {
+  const v = criadoEm.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return `${v}T12:00:00-03:00`;
+  const m = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(:\d{2}(\.\d+)?)?$/.exec(v);
+  if (m) return `${m[1]}T${m[2]}${m[3] ?? ":00"}-03:00`;
+  return v;
+}
+
 /** Mesmo esquema de id do /api/track, para deduplicar com os leads ao vivo. */
 function leadIdFrom(eventId: string, fallbackSeed: string): string {
   const ev = eventId.trim();
@@ -173,7 +188,7 @@ export function parseLeadsCsv(text: string): LeadsParseResult {
     byId.set(id, {
       id,
       brand: DEFAULT_BRAND,
-      createdAt,
+      createdAt: instanteDoCsv(createdAt),
       name,
       email: pick("email"),
       phone: phone.valor,

@@ -662,7 +662,7 @@ export interface Goal {
 
 // ------------------------- Metas v2 (Fase 4) ------------------------
 
-/** As métricas do funil que têm meta (a régua da Bússola). */
+/** As métricas do funil que têm meta (a régua do funil, `lib/metas.ts`). */
 export type MetricaComMeta =
   | "reunioes_agendadas"
   | "leads"
@@ -744,7 +744,7 @@ export interface AcaoEstado {
 
 /**
  * A leitura da semana escrita pela IA (cron de segunda 08:00, ou regenerada à
- * mão). Uma linha por geração; a Bússola mostra a mais recente e guarda as 12
+ * mão). Uma linha por geração; o Início mostra a mais recente e guarda as 12
  * últimas como histórico.
  */
 export interface ResumoSemanal {

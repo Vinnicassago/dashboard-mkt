@@ -96,12 +96,14 @@ function buildOrganicContentRecommendations(
   const cadence = postingCadence(data.igPosts, undefined, nowIso, data.creatives);
   // Canibalização é lida DENTRO do período selecionado (alerta 6).
   const cadenceInRange = range ? postingCadence(data.igPosts, range, nowIso, data.creatives) : cadence;
-  if (cadence.daysSinceLast >= 3) {
+  // null = nunca houve post da grade: não é "a grade parou" (não há grade).
+  const diasSemPost = cadence.daysSinceLast;
+  if (diasSemPost !== null && diasSemPost >= 3) {
     recs.push({
       id: "no-recent-post",
-      severity: cadence.daysSinceLast >= 5 ? "alta" : "media",
+      severity: diasSemPost >= 5 ? "alta" : "media",
       title: "Publique hoje — a grade parou",
-      detail: `${formatInt(cadence.daysSinceLast)} dias sem post novo. Sem cadência o algoritmo esfria a entrega; retome com um reel curto (≤25s) de gancho forte.`,
+      detail: `${formatInt(diasSemPost)} dias sem post novo. Sem cadência o algoritmo esfria a entrega; retome com um reel curto (≤25s) de gancho forte.`,
     });
   }
 

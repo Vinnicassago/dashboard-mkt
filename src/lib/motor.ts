@@ -1,6 +1,9 @@
 /**
  * Motor de ações v2 (H5 do relatório) — o que fazer esta semana. Puro.
  *
+ * DORMENTE desde a Fase 2 (nov/26): o Início não o chama e a IA não o lê; volta
+ * com a Mídia (Fase 4). As regras e os testes continuam valendo.
+ *
  * Cada regra tem id, dono, gatilho, amostra mínima, impacto e confiança, e vira
  * UMA frase com número e um link para onde se age. A ordem é severidade ×
  * impacto × confiança — mais a regra do farol, que continua valendo como regra
@@ -11,7 +14,7 @@
  * parado: a leitura falhando, ou gente sem a 1ª mensagem dele).
  *
  * Duas disciplinas herdadas do painel:
- *   • o motor decide com os MESMOS números do placar (`kpisDoPeriodo`) — nunca
+ *   • o motor decide com os MESMOS números das telas (`kpisDoPeriodo`) — nunca
  *     com um CPL ou um custo por reunião que a tela esconde (quarentena);
  *   • o impacto aparece em número inteiro e só com amostra; sem amostra a ação
  *     entra pela severidade e o rótulo diz "estimativa indisponível".
@@ -45,11 +48,14 @@ import {
   creativePerformance,
   dailySeries,
   filterLeads,
+  fimDoPeriodo,
+  inRange,
   lpKpis,
   rotuloCriativo,
   type CreativePerf,
   type DateRange,
 } from "./metrics";
+import { diaDoLead } from "./horario-util";
 // M2 e M4 leem os conjuntos da MESMA função da página /midia (por id, S20):
 // a ação cita a linha que o link abre, com o número que ela mostra.
 import { chaveDoConjuntoPorAnuncio, conjuntosPorId, rotuloConjunto, type LinhaMidia } from "./midia";
@@ -487,7 +493,8 @@ function regraC5(c: Omit<Contexto, "registroEmLote" | "taxaAgendada">): Acao | n
   const porLead = new Map(c.data.leads.map((l) => [l.id, l]));
   const mudancas = c.eventos
     .filter((e) => e.action === "status_changed" && porLead.has(e.leadId))
-    .filter((e) => !c.range || (e.createdAt.slice(0, 10) >= c.range.from && e.createdAt.slice(0, 10) <= c.range.to))
+    // O dia de Brasília do registro — a MESMA forma do selo do Funil (`confiancaDoRegistro`).
+    .filter((e) => inRange(diaDoLead(e.createdAt), c.range))
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   if (mudancas.length < AMOSTRA_MIN.C5) return null;
 
@@ -575,13 +582,14 @@ function regraM1(c: Contexto): Acao | null {
 
 /**
  * Os criativos do período julgados como /midia#criativos os julga: as janelas
- * da saúde terminam no fim do período (HOJE quando não há `range` — senão o
- * anúncio pausado seria julgado pelos seus próprios últimos 14 dias e o M3
- * mandaria renovar a arte do que a tabela mostra "Parado") e com a mesma
- * cobertura do sync. M3, M4 e M6 leem daqui.
+ * da saúde terminam no fim do período que já aconteceu (`fimDoPeriodo` =
+ * min(fim, hoje); HOJE quando não há `range` — senão o anúncio pausado seria
+ * julgado pelos seus próprios últimos 14 dias e o M3 mandaria renovar a arte do
+ * que a tabela mostra "Parado") e com a mesma cobertura do sync. M3, M4 e M6
+ * leem daqui.
  */
 function criativosDoPeriodo(c: Contexto): CreativePerf[] {
-  return creativePerformance(c.data, c.range, { fim: c.range?.to ?? c.hoje, cobertura: c.cobertura });
+  return creativePerformance(c.data, c.range, { fim: fimDoPeriodo(c.range, c.hoje), cobertura: c.cobertura });
 }
 
 /** As linhas de CONJUNTO (não as de campanha) que /midia#conjuntos mostra, nos dois baldes. */
@@ -976,7 +984,7 @@ const posicaoFixa = (r: RegraId) => {
 };
 
 export function motorDeAcoes(e: EntradaMotor): Acao[] {
-  // "Campanha inteira" = do primeiro dado até hoje (a mesma régua do placar).
+  // "Campanha inteira" = do primeiro dado até hoje (`periodoDaRegua`, a mesma régua das metas).
   const semanas = diasDoPeriodo(periodoDaRegua(e.data, e.range, e.hoje)) / 7;
   const observadas = taxasObservadas(e.data, e.hoje, e.agora);
   // A MESMA entrada que /fila passa (o robô de `estadoDoRoboAgora`): o número da ação é o da página.

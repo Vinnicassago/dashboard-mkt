@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { NAV_GRUPOS, itemAtivo, navForBrand } from "./nav-items";
+import { NAV_GRUPOS, hrefDoItem, itemAtivo, navForBrand } from "./nav-items";
 import { useComPeriodo } from "./use-periodo";
 import type { BrandDef } from "@/lib/brands";
 import { cn } from "@/lib/utils";
@@ -16,8 +16,19 @@ function brandSubtitle(brand: BrandDef): string {
   return brand.type === "awareness" ? "Ganho de seguidores" : "Campanha de Leads";
 }
 
+/**
+ * `hrefDoInicio`: para onde o Início aponta quando não é a home de sempre — o
+ * comercial, com o atalho da live visível, abre o painel da live
+ * (`inicioDoComercial`, nav-items); `null` = o link de sempre, com o período.
+ */
+interface PropsDosLinks {
+  brand: BrandDef;
+  hrefFor: HrefFor;
+  hrefDoInicio?: string | null;
+}
+
 /** As 7 entradas, em grupos (Visão geral · Diagnóstico · Operação · Configurações). */
-function SideLinks({ brand, hrefFor }: { brand: BrandDef; hrefFor: HrefFor }) {
+function SideLinks({ brand, hrefFor, hrefDoInicio }: PropsDosLinks) {
   const pathname = usePathname();
   const itens = navForBrand(brand);
   return (
@@ -35,7 +46,7 @@ function SideLinks({ brand, hrefFor }: { brand: BrandDef; hrefFor: HrefFor }) {
               return (
                 <Link
                   key={item.href}
-                  href={hrefFor(item.href)}
+                  href={hrefDoItem(item, hrefFor, hrefDoInicio)}
                   aria-current={active ? "page" : undefined}
                   className={cn(
                     "relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
@@ -56,12 +67,12 @@ function SideLinks({ brand, hrefFor }: { brand: BrandDef; hrefFor: HrefFor }) {
   );
 }
 
-function SideLinksComPeriodo({ brand }: { brand: BrandDef }) {
+function SideLinksComPeriodo({ brand, hrefDoInicio }: Omit<PropsDosLinks, "hrefFor">) {
   const hrefFor = useComPeriodo();
-  return <SideLinks brand={brand} hrefFor={hrefFor} />;
+  return <SideLinks brand={brand} hrefFor={hrefFor} hrefDoInicio={hrefDoInicio} />;
 }
 
-export function Sidebar({ brand }: { brand: BrandDef }) {
+export function Sidebar({ brand, hrefDoInicio = null }: { brand: BrandDef; hrefDoInicio?: string | null }) {
   return (
     <aside className="hidden w-60 shrink-0 flex-col border-r bg-card md:flex">
       <div className="flex h-16 items-center gap-2 border-b px-5">
@@ -76,8 +87,8 @@ export function Sidebar({ brand }: { brand: BrandDef }) {
 
       <nav className="flex flex-1 flex-col gap-0.5 p-3">
         {/* useSearchParams pede Suspense; o fallback é a mesma lista, sem o período. */}
-        <Suspense fallback={<SideLinks brand={brand} hrefFor={semPeriodo} />}>
-          <SideLinksComPeriodo brand={brand} />
+        <Suspense fallback={<SideLinks brand={brand} hrefFor={semPeriodo} hrefDoInicio={hrefDoInicio} />}>
+          <SideLinksComPeriodo brand={brand} hrefDoInicio={hrefDoInicio} />
         </Suspense>
       </nav>
 
@@ -88,7 +99,7 @@ export function Sidebar({ brand }: { brand: BrandDef }) {
   );
 }
 
-function MobileLinks({ brand, hrefFor }: { brand: BrandDef; hrefFor: HrefFor }) {
+function MobileLinks({ brand, hrefFor, hrefDoInicio }: PropsDosLinks) {
   const pathname = usePathname();
   const activeRef = useRef<HTMLAnchorElement>(null);
 
@@ -105,7 +116,7 @@ function MobileLinks({ brand, hrefFor }: { brand: BrandDef; hrefFor: HrefFor }) 
         return (
           <Link
             key={item.href}
-            href={hrefFor(item.href)}
+            href={hrefDoItem(item, hrefFor, hrefDoInicio)}
             ref={active ? activeRef : undefined}
             aria-current={active ? "page" : undefined}
             className={cn(
@@ -124,17 +135,17 @@ function MobileLinks({ brand, hrefFor }: { brand: BrandDef; hrefFor: HrefFor }) 
   );
 }
 
-function MobileLinksComPeriodo({ brand }: { brand: BrandDef }) {
+function MobileLinksComPeriodo({ brand, hrefDoInicio }: Omit<PropsDosLinks, "hrefFor">) {
   const hrefFor = useComPeriodo();
-  return <MobileLinks brand={brand} hrefFor={hrefFor} />;
+  return <MobileLinks brand={brand} hrefFor={hrefFor} hrefDoInicio={hrefDoInicio} />;
 }
 
-/** Horizontal scrollable nav shown on mobile (md:hidden). */
-export function MobileNav({ brand }: { brand: BrandDef }) {
+/** A navegação do celular (md:hidden): uma linha que rola na horizontal dentro dela. */
+export function MobileNav({ brand, hrefDoInicio = null }: { brand: BrandDef; hrefDoInicio?: string | null }) {
   return (
     <nav className="flex gap-1 overflow-x-auto border-b bg-card px-3 py-2 [scrollbar-width:none] md:hidden [&::-webkit-scrollbar]:hidden">
-      <Suspense fallback={<MobileLinks brand={brand} hrefFor={semPeriodo} />}>
-        <MobileLinksComPeriodo brand={brand} />
+      <Suspense fallback={<MobileLinks brand={brand} hrefFor={semPeriodo} hrefDoInicio={hrefDoInicio} />}>
+        <MobileLinksComPeriodo brand={brand} hrefDoInicio={hrefDoInicio} />
       </Suspense>
     </nav>
   );

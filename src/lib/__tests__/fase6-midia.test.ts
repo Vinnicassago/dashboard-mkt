@@ -6,7 +6,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { adsetPerformance, computeFatigue, creativePerformance, REGRA_FADIGA } from "../metrics";
-import { custoExibivel, kpisDoPeriodo, mostrar, reguaDoPeriodo } from "../kpis";
+import { custoExibivel, fatoDoCustoPorReuniao, kpisDoPeriodo, mostrar, reguaDoPeriodo } from "../kpis";
 import {
   COLUNAS_CONJUNTOS_CONVERSAO,
   COLUNAS_CRIATIVOS_CONVERSAO,
@@ -153,7 +153,7 @@ function cenario(): DashboardData {
 // ---------------------------------------------------------------- resumo (ADR-03)
 
 describe("resumo da Mídia", () => {
-  it("o CPL do resumo é o mesmo kpisDoPeriodo da Bússola, e o custo por reunião vira fato abaixo da régua", () => {
+  it("o CPL do resumo é o mesmo kpisDoPeriodo do Início, e o custo por reunião vira fato abaixo da régua", () => {
     const data = cenario();
     const kp = kpisDe(data);
     const resumo = resumoDaMidia(kp, reguaDoPeriodo(kp, data, PERIODO, HOJE));
@@ -172,7 +172,11 @@ describe("resumo da Mídia", () => {
     const r1 = resumoDaMidia(kp1, reguaDoPeriodo(kp1, pouca, PERIODO, HOJE));
     expect(kp1.reunioesConversao.valor).toBe(1);
     expect(r1.custoPorReuniao.exibivel).toBe(false);
-    expect(r1.custoPorReuniao.texto).toMatch(/investidos em conversão · 1 reunião$/);
+    expect(r1.custoPorReuniao.texto).toMatch(/investidos em conversão · 1 reunião de conversão$/);
+    // O MESMO fato do cartão de Reuniões do Início (`fatoDoCustoPorReuniao`), e o n é o denominador.
+    expect(r1.custoPorReuniao.texto).toBe(fatoDoCustoPorReuniao(kp1).fato);
+    expect(r1.custoPorReuniao.n).toBe(fatoDoCustoPorReuniao(kp1).n);
+    expect(resumo.custoPorReuniao.texto).toBe(fatoDoCustoPorReuniao(kp).valor);
     expect(r1.custoPorReuniao.texto).not.toMatch(/por reunião/);
   });
 
@@ -803,13 +807,13 @@ describe("sem ?range=: motor e briefing julgam a saúde com o MESMO fim (hoje) e
     // Sem `fim`, o último dia da CONTA (08/10), nunca o do anúncio (14/08): não "fadiga".
     expect(creativePerformance(data, undefined).find((c) => c.adId === "100002")!.fatigue.level).not.toBe("fadigado");
 
-    // Bússola em ?range=all (range undefined): era "Renove a arte de “Anúncio B” (fadigando)".
+    // O motor em ?range=all (range undefined): era "Renove a arte de “Anúncio B” (fadigando)".
     const acoes = motorDeAcoes({ data, range: undefined, kpis: kpisDe(data, undefined), eventos: [], agora: AGORA, hoje: HOJE, cobertura: COBERTURA });
     expect(acoes.filter((a) => a.regra === "M3").map((a) => a.id)).not.toContain("M3:100002");
     expect(acoes.some((a) => /Anúncio B/.test(a.titulo) && /fadig/i.test(a.titulo))).toBe(false);
   });
 
-  it("o motor passa HOJE (não o último dia com dado): sync parado em 01/10 não vira “fadigando” na Bússola e “Sem dados” na Mídia", () => {
+  it("o motor passa HOJE (não o último dia com dado): sync parado em 01/10 não vira “fadigando” no motor e “Sem dados” na Mídia", () => {
     const data = cenario();
     // Toda a conta tem linhas só até 01/10 — e nos últimos 14 dias DELAS o anúncio A parece fadigar.
     data.adDaily = [

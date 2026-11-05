@@ -184,6 +184,14 @@ export interface SituacaoRobo {
   semPrimeiraMsg: boolean;
   /** A etapa no robô, ou null (sem registro, ou da conversa de antes do reaberto). */
   etapa: RoboEtapa | null;
+  /**
+   * A fala do robô NESTE episódio (ISO): a saudação do episódio ou, num lead
+   * reaberto cuja conversa o robô seguiu sem regravar a saudação, o reaberto (uma
+   * interação ou cobrança dele depois dele). `null` = o robô ainda não falou. A
+   * MESMA régua do resgate, da barra, do alerta "sem a 1ª mensagem" e do funil do
+   * Início ("1ª mensagem").
+   */
+  falouEm: string | null;
   /** A pessoa mandou mensagem ao robô (neste episódio). */
   respondeu: boolean;
   /** A data que a etapa conta (11.16). */
@@ -215,6 +223,7 @@ const DESLIGADA: SituacaoRobo = {
   naoRecebido: false,
   semPrimeiraMsg: false,
   etapa: null,
+  falouEm: null,
   respondeu: false,
   desde: null,
   balde: null,
@@ -417,6 +426,7 @@ export function situacaoDoRobo(l: Lead, ctx: ContextoSituacao): SituacaoRobo {
     naoRecebido,
     semPrimeiraMsg,
     etapa,
+    falouEm: falou ?? null,
     respondeu,
     desde,
     balde,
@@ -536,8 +546,9 @@ export interface SemMensagemDoRobo {
 }
 
 /**
- * A contagem ÚNICA de "sem a 1ª mensagem do robô" (11.6): a B1 (b), o alerta
- * `robo-sem-1a-msg` e Integrações usam ESTE número. Robô desligado = zero.
+ * A contagem ÚNICA de "sem a 1ª mensagem do robô" (11.6): a frase do Início, o
+ * alerta `robo-sem-1a-msg`, Integrações e a B1 (b) do motor (dormente) usam ESTE
+ * número. Robô desligado = zero.
  */
 export function semMensagemDoRobo(
   leads: readonly Lead[],

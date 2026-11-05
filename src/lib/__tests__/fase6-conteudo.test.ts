@@ -415,7 +415,7 @@ describe("6.5 — revisão 20: total 0 é desconhecido, não “Abaixo da meta (
     expect(r.fimNoUltimoDia).toBe(false);
     expect(resumoSeguidores(rows.slice(0, 2), range).fimNoUltimoDia).toBe(true);
     expect(r.liquido).toBe(10);
-    // Um número só: os totais da conta (Bússola, Funil, IA) leem a mesma regra.
+    // Um número só: os totais da conta (Início da awareness, Funil, IA) leem a mesma regra.
     expect(igAccountTotals(rows, range)).toMatchObject({ followersEnd: 1250, followersStart: 1240, netNew: 10 });
     // Contra a meta vale o 1.250 conhecido (verde), nunca o 0 do campo em branco (vermelho).
     expect(metaDeSeguidores([metaSeg], r.fim, r.temTotal).avaliacao?.status).toBe("verde");
@@ -501,8 +501,8 @@ describe("6.5 — metas dos cards de conteúdo", () => {
 
 /**
  * A regra do líquido mora em `seguidoresDoPeriodo` (metrics.ts) e `igAccountTotals`
- * a lê: a Bússola (cards, gráfico e o link do rodapé), o Funil de descoberta, a
- * IA e o Conteúdo imprimem o MESMO número. Antes da verificação, só o Conteúdo
+ * a lê: o Início da marca de seguidores (cards e gráfico), o Funil de descoberta,
+ * a IA e o Conteúdo imprimem o MESMO número. Antes da verificação, só o Conteúdo
  * via a véspera — a Bússola dizia "+0" ao lado de um gráfico que somava +8.
  */
 describe("6.5 — verificação: o líquido de seguidores é o mesmo em todas as telas", () => {
@@ -544,7 +544,7 @@ describe("6.5 — verificação: o líquido de seguidores é o mesmo em todas as
   const somaDoGrafico = (rows: IgAccountDaily[], r?: { from: string; to: string }) =>
     followerSeries(rows, r).reduce((s, p) => s + p.gain, 0);
 
-  it("Bússola (marca de awareness): os cards Seguidores e Novos seguidores dizem o que o gráfico soma", () => {
+  it("Início da marca de awareness: os cards Seguidores e Novos seguidores dizem o que o gráfico soma", () => {
     const a = awarenessKpis(dados(semana), range);
     expect(a.netNewFollowers).toBe(8); // antes: 0 nos cards, +8 no gráfico "Novos seguidores por dia"
     expect(a.netNewFollowers).toBe(somaDoGrafico(semana, range));
@@ -553,7 +553,7 @@ describe("6.5 — verificação: o líquido de seguidores é o mesmo em todas as
     expect(followerSeries(semana, range).map((p) => p.gain)).toEqual([8, 0, 0, 0, 0, 0, 0]);
   });
 
-  it("rodapé da Bússola: fim − início (o que o link imprime) é o “+8 no período” do card Seguidores que ele abre", () => {
+  it("igAccountTotals (Funil de descoberta, IA): fim − início é o “+8 no período” do card Seguidores do Conteúdo", () => {
     const ig = igAccountTotals(semana, range);
     const seg = resumoSeguidores(semana, range);
     expect(ig.followersEnd - ig.followersStart).toBe(8); // antes: 1008 − 1008 = 0

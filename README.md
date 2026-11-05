@@ -37,7 +37,7 @@ npm run build && npm start
 src/
   app/
     (dashboard)/            # grupo de rotas com o layout (sidebar + header)
-      page.tsx              # Bússola — placar, motores, onde trava, ações, resumo
+      page.tsx              # Início — cartões, leads chegando, atendimento, rodapé (ou o painel da live)
       funil/                # funis de conversão e descoberta, coortes, perdas
       midia/                # verba por campanha › conjunto, criativos, ritmo
       fila/                 # fila de contato única (painel + robô + especialista)
@@ -159,10 +159,12 @@ Ele tenta de novo os eventos que ainda não chegaram à Meta (ver "Caixa de saí
 CAPI", abaixo). Sem ele, a nova tentativa só acontece quando entra lead novo ou
 alguém aperta **Reenviar agora** em Configurações → Integrações.
 
-Ele lê a semana fechada anterior (segunda a domingo) — só a camada de métricas, a
-régua e as ações do motor — e grava a leitura, que aparece recolhida no rodapé da
-Bússola com as 12 anteriores. Custa cerca de US$ 0,09 por execução; `?brand=` gera
-para uma marca só. O botão "Gerar de novo" na Bússola faz o mesmo à mão.
+Ele lê a semana fechada anterior (segunda a domingo) pelo mesmo carregador do Início
+— os cartões, os leads por dia e o atendimento como a tela os escreve, sem o motor de
+ações — e grava a leitura, que aparece recolhida no Início com as 12 anteriores. Custa
+cerca de US$ 0,09 por execução; `?brand=` gera para uma marca só. Sem leitura, quem
+pode gerar vê no Início o botão "Gerar o resumo da semana" (com leitura, "Gerar de
+novo" fica dentro do cartão).
 
 ### Como a coleta funciona (e por que assim)
 

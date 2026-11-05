@@ -74,7 +74,7 @@ export interface Degrau {
   trocaDeSistema?: boolean;
   /** Quanto da verba de conversão foi gasto por unidade que chegou aqui. */
   custoUnitario?: number;
-  /** "≥" (piso) ou "≤" (teto): a mesma ressalva que o número tem no placar. */
+  /** "≥" (piso) ou "≤" (teto): a mesma ressalva que o investimento tem no cartão do Início. */
   custoPrefixo?: "≥" | "≤";
   /** Pessoas perdidas em relação ao degrau anterior. */
   perda?: number;
@@ -449,7 +449,7 @@ export function montarCascata(input: CascataInput): CascataResult {
     // Sem robô/comercial, o fundo do funil é o do painel — e quem espera o 1º
     // contato está parado AQUI, entre virar lead e ter reunião. Conta todos os
     // leads ainda sem nenhuma tentativa (sem recorte de período). Com o robô
-    // DESLIGADO é a aba "Novos" da Fila (o número do farol é o número da página) e
+    // DESLIGADO é a aba "Novos" da Fila (o número do marcador é o número da página) e
     // o marcador linka para ela — todo "Novo" conta, com `roboVistoEm` ou não (o
     // robô desligado depois de ter rodado devolve essas pessoas a "Novos"). Com o
     // robô LIGADO, quem o robô recebeu não espera o 1º contato humano (11.7), a
@@ -464,7 +464,8 @@ export function montarCascata(input: CascataInput): CascataResult {
       daAnterior: div(reunioesPainel, leadCount),
       daAncora: div(reunioesPainel, leadCount),
       // Sem "R$ X cada": o custo por reunião tem definição e régua próprias
-      // (dicionario.ts, MIN_REUNIOES) e mora no placar — um segundo, por coorte,
+      // (dicionario.ts, MIN_REUNIOES) e mora em `fatoDoCustoPorReuniao` (Início e
+      // Mídia) — um segundo, por coorte,
       // aqui, era o 5º custo por reunião do painel.
       perda: Math.max(0, leadCount - reunioesPainel),
       dono: "COM",

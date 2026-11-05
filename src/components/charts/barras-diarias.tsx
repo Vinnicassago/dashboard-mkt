@@ -4,6 +4,7 @@ import { Bar, BarChart, CartesianGrid, ReferenceArea, ResponsiveContainer, Toolt
 import { CHART } from "./colors";
 import { TooltipBox } from "./tooltip";
 import { formatBy, formatDateShort, type NumFmt } from "@/lib/format";
+import { intervaloDoEixo } from "./eixo";
 
 export interface DiaDaBarra {
   date: string;
@@ -19,6 +20,11 @@ export interface DiaDaBarra {
  * período tem o seu lugar — `dailySeries` já preenche os buracos), dias sem
  * dado com hachura âmbar e dias pausados com faixa cinza "pausado". Sem curva
  * suavizada: curva entre dois dias inventa um valor que não existiu.
+ *
+ * Telas com orçamento de palavras (o Início) enxugam o texto que o gráfico
+ * desenha: `semEixoY` (o valor fica na dica ao passar o mouse), `semRotuloNasFaixas`
+ * (a faixa continua; o "pausado" vai para o ⓘ da tela) e `maxDatasNoEixo` (teto
+ * de datas no eixo X, `intervaloDoEixo`). Sem essas props o gráfico é o de sempre.
  */
 export function BarrasDiarias({
   dados,
@@ -27,6 +33,9 @@ export function BarrasDiarias({
   yFormat = "currency0",
   height = 240,
   nome = "Investimento",
+  semEixoY = false,
+  semRotuloNasFaixas = false,
+  maxDatasNoEixo,
 }: {
   dados: DiaDaBarra[];
   /** Trechos marcados: `pausa` = faixa cinza "pausado"; `falha` = hachura "sem dados". */
@@ -35,6 +44,12 @@ export function BarrasDiarias({
   yFormat?: NumFmt;
   height?: number;
   nome?: string;
+  /** Esconde os números do eixo Y (a escala continua; o valor aparece na dica). */
+  semEixoY?: boolean;
+  /** A faixa sem o texto "pausado"/"sem dados" (a tela explica no ⓘ). */
+  semRotuloNasFaixas?: boolean;
+  /** Teto de datas no eixo X (uma a cada N dias, a partir da 1ª). Ausente = pela largura. */
+  maxDatasNoEixo?: number;
 }) {
   if (dados.length === 0) {
     return (
@@ -47,7 +62,8 @@ export function BarrasDiarias({
   const tipFn = (v: number) => formatBy(valueFormat, v);
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <BarChart data={dados} margin={{ top: 8, right: 12, bottom: 0, left: 0 }} barCategoryGap={dados.length > 60 ? 1 : 3}>
+      {/* Sem o eixo Y, a 1ª data (centrada na 1ª barra) precisa de folga à esquerda para não ser cortada. */}
+      <BarChart data={dados} margin={{ top: 8, right: 12, bottom: 0, left: semEixoY ? 16 : 0 }} barCategoryGap={dados.length > 60 ? 1 : 3}>
         <defs>
           <pattern id="hachura-sem-dado" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
             <line x1="0" y1="0" x2="0" y2="6" stroke="var(--warning)" strokeWidth="2" strokeOpacity={0.55} />
@@ -60,10 +76,17 @@ export function BarrasDiarias({
           tick={{ fontSize: 11, fill: CHART.axis }}
           tickLine={false}
           axisLine={{ stroke: CHART.grid }}
-          minTickGap={24}
-          interval="preserveStartEnd"
+          minTickGap={maxDatasNoEixo ? 0 : 24}
+          interval={maxDatasNoEixo ? intervaloDoEixo(dados.length, maxDatasNoEixo) : "preserveStartEnd"}
         />
-        <YAxis tickFormatter={(v) => yFn(Number(v))} tick={{ fontSize: 11, fill: CHART.axis }} tickLine={false} axisLine={false} width={56} />
+        <YAxis
+          hide={semEixoY}
+          tickFormatter={(v) => yFn(Number(v))}
+          tick={{ fontSize: 11, fill: CHART.axis }}
+          tickLine={false}
+          axisLine={false}
+          width={56}
+        />
         <Tooltip
           cursor={{ fill: "var(--foreground)", fillOpacity: 0.04 }}
           content={({ active, payload, label }) => {
@@ -88,7 +111,11 @@ export function BarrasDiarias({
             fill={f.tom === "falha" ? "url(#hachura-sem-dado)" : "var(--muted-foreground)"}
             fillOpacity={f.tom === "pausa" ? 0.08 : 1}
             stroke="none"
-            label={{ value: f.tom === "falha" ? "sem dados" : "pausado", position: "insideTop", fontSize: 10, fill: CHART.axis }}
+            label={
+              semRotuloNasFaixas
+                ? undefined
+                : { value: f.tom === "falha" ? "sem dados" : "pausado", position: "insideTop", fontSize: 10, fill: CHART.axis }
+            }
           />
         ))}
         <Bar dataKey="valor" name={nome} fill={CHART.series[0]} radius={[2, 2, 0, 0]} isAnimationActive={false} />

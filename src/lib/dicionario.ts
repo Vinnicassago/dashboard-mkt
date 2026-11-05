@@ -40,7 +40,7 @@ export type MetricaId =
   | "views"
   | "interacoes"
   | "visitas_perfil"
-  // ---- live de 01/12 (ficha, Fila e aba Live) ----
+  // ---- live de 01/12 (ficha, Fila e painel da live) ----
   | "qualificados"
   | "comunidade"
   | "custo_por_inscrito"

@@ -18,6 +18,7 @@ import { FILA_ETAPAS, formatEspera, type FilaEtapa, type FilaGrupo, type FilaIte
 import { RESGATE_MOTIVO_LABEL } from "@/lib/robo/situacao";
 import { CANAL_LABEL, linkWhatsapp, type CanalContato } from "@/lib/contato";
 import { formatDateTimeCurta } from "@/lib/format";
+import { telefoneUtilizavel } from "@/lib/phone";
 import { cn } from "@/lib/utils";
 
 /**
@@ -149,7 +150,12 @@ function FilaLinha({
   // O robô viu que o número não tem WhatsApp: sem o botão, e a tentativa começa por
   // ligação (o chip continua livre — quem bloqueia o canal é o opt-out, por LGPD).
   const semWhatsapp = item.motivo === "sem-whatsapp";
-  const [canalEscolhido, setCanal] = useState<CanalContato>(optOut || semWhatsapp ? "ligacao" : "whatsapp");
+  // Sem número utilizável ("sem telefone" no resgate, ou lixo como "123" fora dele):
+  // nada de botão, e a tentativa começa pelo e-mail quando há um.
+  const semNumero = !telefoneUtilizavel(item.telefone);
+  const [canalEscolhido, setCanal] = useState<CanalContato>(
+    semNumero && item.email ? "email" : optOut || semWhatsapp || semNumero ? "ligacao" : "whatsapp",
+  );
   // O opt-out pode chegar com a linha já na tela (a recarga de cada minuto mantém o
   // estado): o canal bloqueado nunca fica escolhido nem vai para o servidor.
   const canal: CanalContato = optOut && canalEscolhido === "whatsapp" ? "ligacao" : canalEscolhido;
@@ -249,7 +255,7 @@ function FilaLinha({
 
         {/* Sem `shrink-0`: a 375 px o bloco encolhe e os botões quebram dentro dele (sem rolagem lateral). */}
         <div className="ml-auto flex min-w-0 flex-wrap items-center gap-2">
-          {item.telefone && !optOut && !semWhatsapp ? (
+          {item.telefone && !semNumero && !optOut && !semWhatsapp ? (
             <a
               href={linkWhatsapp(item.telefone, mensagemWhatsapp, item.nome)}
               target="_blank"

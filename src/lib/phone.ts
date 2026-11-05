@@ -61,3 +61,13 @@ export function chaveTelefoneValida(phone?: string | null): string | null {
   const k = chaveTelefone(phone);
   return k && k.length >= 12 ? k : null;
 }
+
+/**
+ * Dá para abrir o WhatsApp (ou ligar) para este número? Só com telefone
+ * UTILIZÁVEL — a mesma régua de `chaveTelefoneValida`, a do motivo "sem
+ * telefone" do resgate. "123" ou "0" virariam um `wa.me` que não leva a lugar
+ * nenhum: a tela mostra o número como texto e não oferece o botão.
+ */
+export function telefoneUtilizavel(phone?: string | null): phone is string {
+  return chaveTelefoneValida(phone) != null;
+}

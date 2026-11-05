@@ -1,8 +1,7 @@
 "use client";
 
 import { usePathname, useSearchParams } from "next/navigation";
-import { comPeriodo } from "@/lib/range";
-import { periodoPadraoDe } from "./nav-items";
+import { periodoPadraoDe, comPeriodoDaTela } from "./nav-items";
 
 /**
  * O período escolhido acompanha a navegação.
@@ -11,11 +10,14 @@ import { periodoPadraoDe } from "./nav-items";
  * home e clicar em Funil voltava para a campanha inteira sem aviso — duas
  * páginas seguidas contando o mesmo fato em janelas diferentes.
  *
- * Sem `?range=`, vale o padrão da página (a Bússola olha a semana): o link leva
- * o período que a tela está MOSTRANDO, não o que a URL omitiu.
+ * Sem `?range=`, vale o padrão da página (o Início olha a semana): o link leva
+ * o período que a tela está MOSTRANDO, não o que a URL omitiu. Com a chave da
+ * live na URL, os links levam a chave (Funil e Mídia no período da live).
+ * "Campanha" vai explícita para o destino cujo padrão é outro (o Início):
+ * `comPeriodoDaTela`.
  */
 export function useComPeriodo(): (href: string) => string {
   const pathname = usePathname();
   const range = useSearchParams().get("range") ?? periodoPadraoDe(pathname);
-  return (href) => comPeriodo(href, range);
+  return (href) => comPeriodoDaTela(href, range);
 }

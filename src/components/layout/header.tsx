@@ -8,6 +8,8 @@ import { PeriodSelector } from "./period-selector";
 import { BrandSelector } from "./brand-selector";
 import { UserMenu } from "./user-menu";
 import { IndicadorAlertas } from "./alertas";
+import type { AtalhoDoSeletor } from "./periodo-do-seletor";
+import { Info } from "@/components/ui/info";
 import type { Frescor } from "@/lib/frescor";
 
 /** Depois disso na mesma tela, o número pode já não ser o do banco. */
@@ -17,6 +19,12 @@ const MINUTOS_ATE_AVISAR = 10;
  * "Dados de 12 min atrás — Atualizar" (D4). A aba que ficou aberta mostrava o
  * que o servidor mandou quando ela abriu — a Fila mostrou 62 esperando quando
  * já era 1. O relógio recomeça a cada navegação e a cada atualização.
+ *
+ * Encolhe com a tela (o grupo da direita do cabeçalho não encolhe): no celular só
+ * o ícone (com o `aria-label`), de `sm` o "Atualizar" e só a partir de 1.800 px o
+ * "dados de N min atrás —" (que está sempre no `title`) — com o texto inteiro, a
+ * 375 px o cabeçalho passava da tela (410 px) e, com o seletor em linha (`2xl`),
+ * cobria a data do dado do cabeçalho.
  */
 function AvisoDadosAntigos({ geradoEm }: { geradoEm: string }) {
   const router = useRouter();
@@ -46,10 +54,14 @@ function AvisoDadosAntigos({ geradoEm }: { geradoEm: string }) {
       type="button"
       onClick={() => router.refresh()}
       className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-[var(--warning)]/40 px-2.5 text-xs font-medium text-[var(--warning-text)]"
-      title="A tela está aberta há algum tempo — os números podem ter mudado no banco"
+      title={`Dados de ${minutos} min atrás — a tela está aberta há algum tempo e os números podem ter mudado no banco`}
+      aria-label={`Atualizar: dados de ${minutos} min atrás`}
     >
-      <RefreshCw className="size-3.5" />
-      <span className="hidden sm:inline">dados de {minutos} min atrás —</span> Atualizar
+      <RefreshCw className="size-3.5" aria-hidden />
+      <span className="hidden sm:inline" aria-hidden>
+        <span className="hidden min-[1800px]:inline">dados de {minutos} min atrás — </span>
+        Atualizar
+      </span>
     </button>
   );
 }
@@ -65,6 +77,8 @@ export function Header({
   username,
   brand,
   geradoEm,
+  atalhoLive = null,
+  chavesDaLive = [],
 }: {
   /** De quando é o dado de cada fonte — já formatado no servidor. */
   frescor: Frescor[];
@@ -72,6 +86,10 @@ export function Header({
   brand: string;
   /** Quando o servidor montou esta tela (muda a cada atualização). */
   geradoEm: string;
+  /** O atalho "Live 01/12" do seletor (`atalhoDaLive`); `null` sem régua. */
+  atalhoLive?: AtalhoDoSeletor | null;
+  /** As três chaves da régua da live (o popover "Escolher" abre vazio com elas). */
+  chavesDaLive?: string[];
 }) {
   const pathname = usePathname();
   const item = navItemFromPath(pathname);
@@ -79,37 +97,38 @@ export function Header({
   return (
     <header className="sticky top-0 z-10 flex h-16 items-center justify-between gap-3 border-b bg-background/85 px-4 shadow-sm backdrop-blur md:px-6 dark:shadow-none">
       <div className="min-w-0">
-        <h1 className="truncate text-base font-semibold md:text-lg">{item?.label ?? "Dashboard"}</h1>
-        {/* A pergunta da página fica colada ao título: é ela que diz o que
-            procurar aqui — e, por exclusão, o que procurar em outra aba. */}
-        {/* A pergunta pode ser cortada; a data do dado, nunca (B3). */}
-        <p className="hidden min-w-0 items-baseline gap-1.5 text-xs sm:flex">
-          {item ? <span className="truncate text-muted-foreground">{item.pergunta}</span> : null}
-          {frescor.length ? (
-            <span className="shrink-0 whitespace-nowrap">
-              {frescor.map((f, i) => (
-                <span
-                  key={f.fonte}
-                  title={f.detalhe}
-                  className={f.falhando ? "text-[var(--danger-text)]" : COR_FRESCOR[f.nivel]}
-                >
-                  {i > 0 || item ? " · " : ""}
-                  {f.fonte} {f.quando}
-                  {f.falhando ? " (falhando)" : ""}
-                </span>
-              ))}
-            </span>
-          ) : null}
-        </p>
+        {/* A pergunta da página é o ⓘ do título (D10/T2): diz o que procurar
+            aqui — e, por exclusão, o que procurar em outra aba — sem ocupar a
+            linha de baixo, que é da data do dado. */}
+        <div className="flex min-w-0 items-center gap-0.5">
+          <h1 className="truncate text-base font-semibold md:text-lg">{item?.label ?? "Dashboard"}</h1>
+          {item ? <Info texto={item.pergunta} rotulo={`Sobre ${item.label}`} /> : null}
+        </div>
+        {/* A data do dado nunca é cortada (B3). */}
+        {frescor.length ? (
+          <p className="hidden min-w-0 text-xs whitespace-nowrap sm:block">
+            {frescor.map((f, i) => (
+              <span
+                key={f.fonte}
+                title={f.detalhe}
+                className={f.falhando ? "text-[var(--danger-text)]" : COR_FRESCOR[f.nivel]}
+              >
+                {i > 0 ? " · " : ""}
+                {f.fonte} {f.quando}
+                {f.falhando ? " (falhando)" : ""}
+              </span>
+            ))}
+          </p>
+        ) : null}
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex shrink-0 items-center gap-2">
         <Suspense fallback={null}>
           <AvisoDadosAntigos geradoEm={geradoEm} />
           <IndicadorAlertas />
         </Suspense>
         <BrandSelector active={brand} />
         <Suspense fallback={null}>
-          <PeriodSelector />
+          <PeriodSelector atalho={atalhoLive} chavesDaLive={chavesDaLive} />
         </Suspense>
         {username ? <UserMenu username={username} /> : null}
       </div>

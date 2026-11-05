@@ -1,8 +1,11 @@
 /**
- * Fase 3 — um número por métrica. Fixture sintética (nenhum dado real).
+ * Fase 3 — um número por métrica. Fixture sintética (nenhum dado real). O portão
+ * confere também o Início (Fase 2, nov/26): cartões, funil curto e frases leem os
+ * MESMOS números; o Funil (`transicoesDoFunil`) e o motor (dormente até a Mídia)
+ * continuam conferidos direto. Instantes em Z ou pelo `brt(dia, "HH:MM")`.
  */
 import { describe, expect, it } from "vitest";
-import { buildSeedData } from "../data/seed";
+import { buildSeedData, buildSeedLeadEvents } from "../data/seed";
 import {
   adsetPerformance,
   creativePerformance,
@@ -15,9 +18,17 @@ import {
   trechosSemVeiculacao,
   type DateRange,
 } from "../metrics";
-import { custoExibivel, kpisDoPeriodo, mostrar } from "../kpis";
-import { montarCascata } from "../cascata";
+import { custoExibivel, fatoDoCustoPorReuniao, kpisDoPeriodo, mostrar } from "../kpis";
+import { AMOSTRA_MINIMA, montarCascata } from "../cascata";
 import { montarBussola } from "../bussola";
+import { transicoesDoFunil } from "../gargalo";
+import { motorDeAcoes } from "../motor";
+import { montarFila } from "../fila";
+import { montarFilaDaLive } from "../fila-live";
+import type { EntradaInicio, Inicio } from "../inicio";
+import { pageRange } from "../page-range";
+import { reabertosNoPainel, reabertosPorLead, semMensagemDoRobo, type RoboAgora } from "../robo/situacao";
+import { EXPEDIENTE_PADRAO } from "../turno";
 import { buildBriefing } from "../ai/briefing";
 import { buildRecommendations } from "../recommendations";
 import { assessTrust } from "../trust";
@@ -26,7 +37,7 @@ import { atribuidor, isPaidSource } from "../atribuicao";
 import { alertasDeAtribuicao } from "../alertas";
 import { brandForCampaign, CURINGA, NAO_CLASSIFICADO, type BrandMeta } from "../meta/config";
 import { DICIONARIO } from "../dicionario";
-import { formatCurrency } from "../format";
+import { formatCurrency, formatInt } from "../format";
 import type { AdDaily, Creative, DashboardData, Lead, SyncRun } from "../types";
 
 // ---------------------------------------------------------------- fixtures
@@ -136,10 +147,22 @@ describe("custo por reunião: uma régua só (MIN_REUNIOES) em toda a parte", ()
     expect("pago" in b && b.pago && "cpr" in b.pago ? b.pago.cpr : "x").toBeNull();
   });
 
-  it("o placar não imprime o custo por reunião e diz o fato (verba e reuniões)", () => {
-    const b = montarBussola({ data, range: OUT, kpis: k, eventos: [], agora: "2026-10-08T12:00:00.000Z", hoje: "2026-10-08" });
-    expect(b.placar.custo).not.toMatch(/por reunião/);
-    expect(b.placar.custo).toMatch(/investidos em conversão · 2 reuniões/);
+  it("o cartão de Reuniões do Início não imprime o custo por reunião e diz o fato (verba e reuniões de conversão)", () => {
+    const { inicio } = montarBussola({
+      data,
+      range: OUT,
+      rangeKey: "2026-10-01..2026-10-07",
+      kpis: k,
+      eventos: [],
+      filaLive: [],
+      agora: "2026-10-08T12:00:00.000Z",
+      hoje: "2026-10-08",
+    });
+    expect(inicio.cartoes.custoReuniao).not.toMatch(/por reunião/);
+    // O cartão encurta o fato (o "em conversão" do investimento está no cartão ao lado); o fato inteiro é o da Mídia.
+    expect(inicio.cartoes.custoReuniao).toMatch(/investidos · 2 reuniões de conversão$/);
+    expect(inicio.cartoes.custo.fato).toMatch(/investidos em conversão · 2 reuniões de conversão$/);
+    expect(inicio.cartoes.custo).toEqual(fatoDoCustoPorReuniao(k));
   });
 
   it("sem lead não há CPL: '—', nunca R$ 0,00", () => {
@@ -162,6 +185,69 @@ function porMarca(d: DashboardData, brand: string): DashboardData {
     leads: d.leads.filter((r) => r.brand === brand && !r.deletedAt),
     goals: d.goals.filter((r) => r.brand === brand),
   };
+}
+
+const brt = (dia: string, hhmm: string) => new Date(`${dia}T${hhmm}:00-03:00`).toISOString();
+
+/**
+ * Os invariantes do Início que são de NÚMERO (§6, 1, 2, 3, 4 e 6): os cartões são
+ * os kpis; o funil curto aninha (Leads e Agendaram = kpis, nenhuma taxa > 1, taxa
+ * só com base ≥ AMOSTRA_MINIMA); cada frase é o número da página que ela abre (o
+ * grupo da MESMA `montarFila` da /fila, a Fila da live, o `semMensagemDoRobo` do
+ * alerta); o custo por reunião nunca sai como razão abaixo da régua.
+ */
+function conferirInicio(e: EntradaInicio): Inicio {
+  const { inicio } = montarBussola(e);
+  const k = e.kpis;
+  // Cartões.
+  expect(inicio.cartoes.investimento.texto).toBe(mostrar(k.investimentoConversao, "moeda0"));
+  expect(inicio.cartoes.cpl.texto).toBe(mostrar(k.cpl, "moeda"));
+  expect(inicio.cartoes.leads.valor).toBe(k.leads.valor);
+  expect(inicio.cartoes.reunioes.valor).toBe(k.reunioesAgendadas.valor);
+  if (custoExibivel(k.custoPorReuniao)) expect(inicio.cartoes.custoReuniao).toContain(formatCurrency(k.custoPorReuniao.valor));
+  else {
+    expect(inicio.cartoes.custoReuniao).not.toMatch(/por reunião/);
+    const n = k.reunioesConversao.valor;
+    expect(inicio.cartoes.custoReuniao).toContain(`· ${formatInt(n)} ${n === 1 ? "reunião" : "reuniões"} de conversão`);
+  }
+  // Barras: Σ = o cartão de Leads.
+  expect(inicio.leadsChegando.dias.reduce((s, d) => s + d.leads, 0)).toBe(k.leads.valor);
+
+  // 3. O funil curto.
+  const f = inicio.atendimento.funil;
+  const degrau = (id: string) => f.find((d) => d.id === id);
+  expect(degrau("leads")?.valor).toBe(k.leads.valor);
+  expect(degrau("agendaram")?.valor).toBe(k.agendaram.valor);
+  if (degrau("agendaram")?.taxa != null) expect(k.leads.valor).toBeGreaterThanOrEqual(AMOSTRA_MINIMA);
+  for (const d of f) if (d.taxa != null) expect(d.taxa).toBeLessThanOrEqual(1);
+  const doRobo = f.filter((d) => d.doRobo);
+  if (doRobo.length) expect(doRobo[0].valor).toBeLessThanOrEqual(k.leads.valor);
+  for (let i = 1; i < doRobo.length; i++) {
+    expect(doRobo[i].valor).toBeLessThanOrEqual(doRobo[i - 1].valor);
+    if (doRobo[i].taxa != null) expect(doRobo[i - 1].valor).toBeGreaterThanOrEqual(AMOSTRA_MINIMA);
+  }
+  const realizadas = degrau("realizadas");
+  if (realizadas) {
+    expect(realizadas.valor).toBe(k.overview.attended);
+    if (realizadas.taxa != null) expect(k.agendaram.valor).toBeGreaterThanOrEqual(AMOSTRA_MINIMA);
+  }
+
+  // 4. As frases: o número do texto é o do grupo da Fila (a mesma entrada da /fila).
+  const ligado = Boolean(e.robo?.ligado);
+  const fila = montarFila({ nowIso: e.agora, leads: e.data.leads, eventos: e.eventos, robo: ligado ? e.robo : undefined });
+  expect(inicio.atendimento.frases.length).toBeLessThanOrEqual(3);
+  for (const fr of inicio.atendimento.frases) {
+    if (fr.id === "live") expect(fr.total).toBe(e.filaLive.length);
+    else if (fr.id === "sem-1a-msg") {
+      expect(ligado).toBe(true);
+      expect(fr.total).toBe(semMensagemDoRobo(e.data.leads, reabertosPorLead(e.eventos), e.robo, e.agora, reabertosNoPainel(e.eventos)).total);
+    } else {
+      const g = fila.grupos.find((x) => x.etapa === fr.id)!;
+      expect(fr.total).toBe(g.total);
+      expect(fr.texto).toContain(`· ${formatInt(g.total)}`);
+    }
+  }
+  return inicio;
 }
 
 describe("portão da Fase 3: mesmo nome, mesmo número (3 períodos × 2 marcas)", () => {
@@ -204,22 +290,49 @@ describe("portão da Fase 3: mesmo nome, mesmo número (3 períodos × 2 marcas)
         // E não imprime um segundo custo por reunião.
         expect(c.degraus.find((d) => d.key === "reunioes")?.custoUnitario).toBeUndefined();
 
-        // A Bússola (placar, motores, gargalo, ações) lê ESTES números.
-        const bu = montarBussola({ data, range, kpis: k, eventos: [], agora: "2026-10-08T12:00:00.000Z", hoje: "2026-10-08" });
-        expect(bu.placar.reunioes.valor).toBe(k.reunioesAgendadas.valor);
-        if (custoExibivel(k.custoPorReuniao)) expect(bu.placar.custo).toContain(formatCurrency(k.custoPorReuniao.valor));
-        else expect(bu.placar.custo).not.toMatch(/por reunião/);
-        const leadAgendada = bu.transicoes.find((t) => t.id === "lead_agendada")!;
+        const AGORA = "2026-10-08T12:00:00.000Z";
+        const HOJE = "2026-10-08";
+        // O Funil (`transicoesDoFunil`, que continua no /funil) lê ESTES números.
+        const leadAgendada = transicoesDoFunil(data, range, k, { agora: AGORA, hoje: HOJE }).find((t) => t.id === "lead_agendada")!;
         expect(leadAgendada.entradas).toBe(k.leads.valor);
         expect(leadAgendada.saidas).toBe(k.agendaram.valor);
 
+        // O Início (só a marca de conversão: a awareness tem a home dela) lê ESTES números.
+        let inicio: Inicio | undefined;
+        if (brand === "consorcio") {
+          const eventos = buildSeedLeadEvents(data.leads);
+          inicio = conferirInicio({
+            data,
+            range,
+            rangeKey: range ? `${range.from}..${range.to}` : "all",
+            kpis: k,
+            eventos,
+            expediente: EXPEDIENTE_PADRAO,
+            filaLive: montarFilaDaLive(data.leads, eventos, AGORA, EXPEDIENTE_PADRAO),
+            agora: AGORA,
+            hoje: HOJE,
+          });
+          // Robô desligado: o funil do painel.
+          expect(inicio.atendimento.funil.map((d) => d.id)).toEqual(["leads", "agendaram", "realizadas"]);
+        }
+
         // A IA recebe os mesmos números (ou null, onde a tela mostra "—").
-        const b = buildBriefing(data, range, { nowIso: "2026-10-08T12:00:00.000Z", warnings: [] });
+        const b = buildBriefing(data, range, { nowIso: AGORA, warnings: [] });
         if ("pago" in b && b.pago && "reunioesAgendadasNoPeriodo" in b.pago) {
           expect(b.pago.leads).toBe(k.leads.valor);
           expect(b.pago.reunioesAgendadasNoPeriodo).toBe(k.reunioesAgendadas.valor);
           expect(b.pago.cpr === null).toBe(!custoExibivel(k.custoPorReuniao));
           expect(b.pago.cpl === null).toBe(!custoExibivel(k.cpl));
+        }
+        // Com os kpis e o Início do carregador: o cartão e o `pago` saem do MESMO objeto.
+        if (inicio) {
+          const bi = buildBriefing(data, range, { nowIso: AGORA, warnings: [], kpis: k, inicio });
+          expect(bi.inicio?.cartoes.cpl).toBe(mostrar(k.cpl, "moeda"));
+          expect(bi.inicio?.cartoes.reunioesAgendadas).toBe(mostrar(k.reunioesAgendadas, "int"));
+          if ("pago" in bi && bi.pago && "reunioesAgendadasNoPeriodo" in bi.pago) {
+            expect(bi.pago.cpl === null).toBe(!custoExibivel(k.cpl));
+            expect(bi.pago.cpr === null).toBe(!custoExibivel(k.custoPorReuniao));
+          }
         }
 
         // Tabelas por anúncio/conjunto: os leads do painel atribuídos nunca passam do total.
@@ -228,15 +341,91 @@ describe("portão da Fase 3: mesmo nome, mesmo número (3 períodos × 2 marcas)
         const adsets = adsetPerformance(data, range);
         expect(adsets.reduce((s, x) => s + x.meetings, 0)).toBeLessThanOrEqual(k.reunioesAgendadas.valor);
 
-        // O motor de ações não decide por custo por reunião abaixo da régua.
+        // O motor de ações (dormente até a Mídia) não decide por custo por reunião abaixo da régua.
         if (!custoExibivel(k.custoPorReuniao)) {
-          expect(bu.acoes.some((a) => a.regra === "M2" || a.regra === "M6")).toBe(false);
+          const acoes = motorDeAcoes({ data, range, kpis: k, eventos: [], agora: AGORA, hoje: HOJE });
+          expect(acoes.some((a) => a.regra === "M2" || a.regra === "M6")).toBe(false);
         }
         // E as regras de conteúdo continuam fora do funil pago.
         const recs = buildRecommendations(data, range, "2026-10-08T12:00:00.000Z");
         expect(recs.every((r) => !["cpr-over", "cpl-over", "realloc", "pace-over", "pace-sub"].includes(r.id) && !r.id.startsWith("scale-") && !r.id.startsWith("fatigue-"))).toBe(true);
       });
     }
+  }
+});
+
+// ---------------------------------------------------------------- Início com o robô de fixture
+
+describe("portão da Fase 3 · Início com um robô de fixture (colunas robo_*), 3 períodos", () => {
+  const HOJE = "2026-11-04";
+  const AGORA = brt(HOJE, "15:00");
+  const LIDO = brt(HOJE, "14:55");
+  const ROBO: RoboAgora = { ligado: true, lidoAte: LIDO, confiavel: true, sync: { ultimoOk: LIDO, falha: null } };
+  let n = 0;
+  const doRobo = (dia: string, over: Partial<Lead> = {}): Lead => ({
+    id: `ROBO-${++n}`,
+    brand: "consorcio",
+    createdAt: brt(dia, "10:00"),
+    name: `Pessoa Robô ${n}`,
+    phone: `55119777${String(n).padStart(5, "0")}`,
+    status: "lead",
+    utmSource: "meta",
+    utmContent: "Anúncio A|100001",
+    ...over,
+  });
+  const saudado = (dia: string): Partial<Lead> => ({
+    roboVistoEm: brt(dia, "10:05"),
+    roboRecebidoEm: brt(dia, "10:00"),
+    roboSaudacaoEm: brt(dia, "10:01"),
+    roboEtapa: "nao_respondeu",
+  });
+  const respondeu = (dia: string): Partial<Lead> => ({
+    ...saudado(dia),
+    roboRespondeuEm: brt(dia, "10:20"),
+    roboUltimaMsgClienteEm: brt(dia, "10:20"),
+    roboUltimaInteracaoEm: brt(dia, "10:20"),
+    roboEtapa: "em_conversa",
+  });
+  const aceitou = (dia: string): Partial<Lead> => ({
+    ...respondeu(dia),
+    roboConviteEm: brt(dia, "11:00"),
+    roboAceitouEm: brt(dia, "11:10"),
+    roboEtapa: "transferido",
+  });
+  const seed = porMarca(buildSeedData(), "consorcio");
+  const leads: Lead[] = [
+    ...seed.leads,
+    doRobo("2026-10-30", saudado("2026-10-30")),
+    doRobo("2026-10-31", respondeu("2026-10-31")),
+    doRobo("2026-11-01", respondeu("2026-11-01")),
+    doRobo("2026-11-02", aceitou("2026-11-02")),
+    doRobo("2026-11-03", { ...aceitou("2026-11-03"), status: "agendado", bookedAt: brt("2026-11-03", "15:00"), meetingFor: brt("2026-11-06", "10:00") }),
+    doRobo("2026-11-03", aceitou("2026-11-03")),
+    doRobo(HOJE, { createdAt: brt(HOJE, "11:00") }), // 4 h sem registro no robô: resgate
+    doRobo(HOJE, { createdAt: brt(HOJE, "14:30") }), // 30 min: sem a 1ª mensagem
+    doRobo(HOJE, { classe: "A" }), // inscrito da live: fora do robô
+  ];
+  const data: DashboardData = { ...seed, leads, adDaily: [...seed.adDaily, ad("2026-11-02", "100001", 300), ad("2026-11-03", "100001", 300)] };
+  const eventos = buildSeedLeadEvents(seed.leads);
+
+  for (const chave of ["7d", "30d", "all"]) {
+    it(`consorcio · ${chave}`, () => {
+      const { range, rangeKey } = pageRange(data, chave, HOJE);
+      const kpis = kpisDoPeriodo(data, range, { hoje: HOJE, agora: AGORA, comparar: true });
+      const filaLive = montarFilaDaLive(data.leads, eventos, AGORA, EXPEDIENTE_PADRAO);
+      const ini = conferirInicio({ data, range, rangeKey, kpis, eventos, robo: ROBO, expediente: EXPEDIENTE_PADRAO, filaLive, agora: AGORA, hoje: HOJE });
+      expect(ini.atendimento.roboLigado).toBe(true);
+      expect(ini.atendimento.funilComRobo).toBe(true);
+      // Quem passou pelo robô tem amostra: as taxas do robô aparecem (≤ 1, aninhadas).
+      const funil = Object.fromEntries(ini.atendimento.funil.map((d) => [d.id, d]));
+      expect(funil["com-robo"].valor).toBe(8); // os 6 saudados + os de 11h e 14h30 (mais de 15 min); a live fica fora
+      expect(funil["primeira-msg"].valor).toBe(6);
+      expect(funil["responderam"].valor).toBe(5);
+      expect(funil["aceitaram"].valor).toBe(3);
+      expect(funil["primeira-msg"].taxa).toBeCloseTo(6 / 8, 6);
+      // As frases do robô ligado: live, Resgate, sem a 1ª mensagem — nessa ordem.
+      expect(ini.atendimento.frases.map((f) => f.id)).toEqual(["live", "resgate", "sem-1a-msg"]);
+    });
   }
 });
 

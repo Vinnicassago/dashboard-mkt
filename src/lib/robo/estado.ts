@@ -5,8 +5,8 @@ import { isRoboConfigured, roboLigado } from "./client";
 
 /**
  * O estado do robô AGORA, numa marca — a função ÚNICA que todos os leitores
- * usam (Fila, Bússola/motor, Leads, exportação, ficha, layout, Integrações e o
- * aviso de resgate), para que o número da Fila seja o mesmo da ação e do alerta.
+ * usam (Fila, Início, motor, Leads, exportação, ficha, layout, Integrações e o
+ * aviso de resgate), para que o número da Fila seja o mesmo do Início e do alerta.
  *
  * `ligado` = credencial presente, não desativado em Configurações e marca do
  * robô (só a padrão: o sync casa só os leads dela). Desligado não toca o store

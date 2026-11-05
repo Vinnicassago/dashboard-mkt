@@ -33,9 +33,11 @@ export function BrandSelector({ active }: { active: string }) {
     if (slug === active || pending) return;
 
     const root = document.documentElement;
+    // Escreve no <html> pelo `document` (não pela variável capturada: o lint de
+    // hooks trata `root` como valor do render e proíbe mutá-lo).
     const applyBrand = () => {
-      root.dataset.theme = brandTheme(slug);
-      root.dataset.brand = slug;
+      document.documentElement.dataset.theme = brandTheme(slug);
+      document.documentElement.dataset.brand = slug;
     };
 
     const reduceMotion = window.matchMedia(

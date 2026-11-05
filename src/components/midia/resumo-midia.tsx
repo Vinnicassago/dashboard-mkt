@@ -13,8 +13,9 @@ import { cn } from "@/lib/utils";
  * O RESUMO da Mídia — primeiro viewport, uma linha de resposta: quanto foi
  * investido, em quê, a quanto por lead e por reunião, e se a verba está no
  * ritmo combinado. Tudo de `kpisDoPeriodo` (via `resumoDaMidia`): o CPL daqui
- * é o da Bússola. Custo por reunião em quarentena vira o FATO ("R$ 160
- * investidos · 1 reunião"), nunca a razão.
+ * é o do Início. Custo por reunião em quarentena vira o FATO
+ * (`fatoDoCustoPorReuniao`: "R$ 160 investidos em conversão · 1 reunião de
+ * conversão"), nunca a razão.
  */
 
 function Numero({

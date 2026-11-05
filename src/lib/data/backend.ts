@@ -587,7 +587,7 @@ export interface ListAcoesEstadoOpts {
 
 export interface ListResumosOpts {
   brand: string;
-  /** Padrão 12 (o histórico que a Bússola guarda); 0 = sem limite. */
+  /** Padrão 12 (o histórico que o Início guarda); 0 = sem limite. */
   limit?: number;
 }
 

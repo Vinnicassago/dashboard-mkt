@@ -20,7 +20,7 @@ const DENIED: ResultadoLive = { ok: false, message: "Você não tem permissão p
 /**
  * Salva a régua da live (períodos, verba por linha, metas, tokens das campanhas).
  * Os números manuais (presentes, vendas) não passam por aqui — têm o botão deles
- * na aba Live — e ficam como estavam.
+ * no painel da live (atalho Live 01/12 no Início) — e ficam como estavam.
  */
 export async function salvarCampanhaDaLive(entrada: CampanhaDaLive): Promise<ResultadoLive> {
   if (!(await can("data:write"))) return DENIED;
@@ -34,7 +34,7 @@ export async function salvarCampanhaDaLive(entrada: CampanhaDaLive): Promise<Res
       `${nova.periodo.de}→${nova.periodo.ate} · verba ${nova.linhas.map((l) => `${l.rotulo} ${formatCurrency0(l.verba)}`).join(", ")} · metas ${nova.metas.inscricoes} inscrições, ${nova.metas.qualificados} qualificados, ${nova.metas.agendadas} agendadas`,
     );
     revalidatePath("/", "layout");
-    return { ok: true, message: "Campanha da live salva — a aba Live já usa os números novos." };
+    return { ok: true, message: "Campanha da live salva — o painel da live (atalho Live 01/12 no Início) já usa os números novos." };
   } catch (e) {
     console.error("[live] salvar campanha:", e);
     return { ok: false, message: mensagemHumana("banco de dados", e) };

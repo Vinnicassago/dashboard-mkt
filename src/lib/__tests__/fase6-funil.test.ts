@@ -521,7 +521,7 @@ describe("reunião realizada e venda: um número por fato no card, com o atendim
 
 // ---------------------------------------------------------------- a resposta
 
-describe("a resposta é o gargalo da Bússola, nas mesmas palavras", () => {
+describe("a resposta do Funil é o gargalo (lib/gargalo.ts), nas mesmas palavras", () => {
   const data = base({
     leads: [
       ...Array.from({ length: 49 }, () => lead("2026-10-05", { status: "sem_interesse", lostAt: "2026-10-06T18:00:00.000Z" })),

@@ -95,7 +95,59 @@ export function noHorarioComercial(iso: string, cfg: HorarioComercial = HORARIO_
   return t >= dia + cfg.inicio * 3_600_000 && t < dia + cfg.fim * 3_600_000;
 }
 
-/** Dia (AAAA-MM-DD) de um instante no calendário de Brasília. */
+/**
+ * Dia (AAAA-MM-DD) de um instante no calendário de Brasília. LANÇA com entrada
+ * vazia ou inválida — para dia de lead, evento ou post use `diaDoLead`.
+ */
 export function diaBrt(iso: string): string {
   return new Date(paraBrt(Date.parse(iso))).toISOString().slice(0, 10);
+}
+
+/** "AAAA-MM-DD" sozinho: já é um dia. */
+const DIA_PURO = /^\d{4}-\d{2}-\d{2}$/;
+/** Data e hora SEM fuso (seed, datetime-local, CSV antigo): é o relógio de Brasília. */
+const SEM_FUSO = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/;
+/** Data e hora com fuso só em horas (`+00`, `-03`). */
+const FUSO_CURTO = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?[+-]\d{2}$/;
+const cacheDoDia = new Map<string, string>();
+const CACHE_DO_DIA_MAX = 50_000;
+
+/**
+ * O DIA (AAAA-MM-DD) de um lead, evento ou post no calendário de Brasília — a
+ * régua do período (`range.ts` conta os presets a partir de hoje em Brasília).
+ * Antes o dia era o prefixo UTC (`dayOf`): o lead das 22h de quinta caía na
+ * sexta e ficava fora de um período que terminava na quinta (2.8).
+ *
+ * - `""`/`undefined` → `""`;
+ * - dia puro (`2026-10-08`) → ele mesmo;
+ * - data e hora sem fuso (`2026-10-08T23:30[:00[.000]]`, também com espaço) →
+ *   `slice(0, 10)`: é relógio de Brasília, e assim o resultado não depende do
+ *   fuso do processo (o `Date.parse` leria no fuso da máquina);
+ * - com fuso (`Z`, `±hh:mm`, `±hhmm`, `±hh`) → o dia em Brasília (UTC−3 fixo, como
+ *   `diaBrt`), SEM exceção de meia-noite: `T00:00:00.000Z` é 21:00 em Brasília,
+ *   hora real de reunião, e cai no dia anterior;
+ * - inválido → `slice(0, 10)` (nunca lança; `diaBrt` lança).
+ *
+ * Risco conhecido: lead antigo importado por CSV só com a data virou meia-noite
+ * UTC no banco e recua um dia; o importador agora grava `T12:00:00-03:00`.
+ * UTC−3 fixo e `hojeEmBrasilia` (Intl) só concordam enquanto o Brasil não tiver
+ * horário de verão. Puro; o cache por string é só desempenho (`filterLeads`
+ * roda dezenas de vezes por render).
+ */
+export function diaDoLead(iso?: string | null): string {
+  if (!iso) return "";
+  const guardado = cacheDoDia.get(iso);
+  if (guardado !== undefined) return guardado;
+  let dia: string;
+  if (DIA_PURO.test(iso) || SEM_FUSO.test(iso)) dia = iso.slice(0, 10);
+  else {
+    // Fuso curto (`+00`, `-03`, como o Postgres imprime `timestamptz`): o V8 não lê
+    // "T…+00" (NaN) mas lê " …+00" — completa os minutos para o separador não
+    // mudar o dia do mesmo instante.
+    const ms = Date.parse(FUSO_CURTO.test(iso) ? `${iso}:00` : iso);
+    dia = Number.isFinite(ms) ? new Date(paraBrt(ms)).toISOString().slice(0, 10) : iso.slice(0, 10);
+  }
+  if (cacheDoDia.size >= CACHE_DO_DIA_MAX) cacheDoDia.clear();
+  cacheDoDia.set(iso, dia);
+  return dia;
 }

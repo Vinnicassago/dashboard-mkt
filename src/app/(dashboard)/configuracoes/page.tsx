@@ -6,7 +6,8 @@ import { PendenciasCard } from "@/components/config/pendencias-card";
 import { SemPermissao } from "@/components/config/sem-permissao";
 import { StatusMetaBadge } from "@/components/kpi/status-meta";
 import { RolarParaAncora } from "@/components/ui/rolar-para-ancora";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Info } from "@/components/ui/info";
 import { getData } from "@/lib/data/store";
 import { contextoDeMarcas } from "@/lib/meta/config";
 import { coberturaDeAnuncios } from "@/lib/sincronizacao";
@@ -24,7 +25,7 @@ export const dynamic = "force-dynamic";
 
 /**
  * Configurações → Metas e orçamento (vista padrão, relatório §7.7 item 1).
- * Primeiro o que falta (a mesma avaliação de confiança da home), depois a régua:
+ * Primeiro o que falta (a mesma avaliação de confiança das telas), depois a régua:
  * orçamento, metas do funil com vigência e calculadora, metas de conteúdo.
  */
 export default async function MetasPage({ searchParams }: { searchParams: Promise<{ range?: string }> }) {
@@ -74,11 +75,11 @@ export default async function MetasPage({ searchParams }: { searchParams: Promis
                 <CardTitle className="flex items-center gap-2">
                   <Radio className="size-4 text-primary" />
                   Campanha da live 01/12
+                  <Info
+                    rotulo="Sobre a campanha da live"
+                    texto="Os números do briefing, já cadastrados: períodos, verba por linha, metas e como reconhecer o que é da live no Gerenciador. O painel da live (atalho Live 01/12 no Início) lê daqui."
+                  />
                 </CardTitle>
-                <CardDescription>
-                  Os números do briefing, já cadastrados: períodos, verba por linha, metas e como reconhecer o que é da
-                  live no Gerenciador. A aba Live da Bússola lê daqui.
-                </CardDescription>
               </CardHeader>
               <CardContent>
                 <LiveConfigForm atual={await campanhaDaLive()} podeEditar={ctx.papeis.dados} />
@@ -91,11 +92,11 @@ export default async function MetasPage({ searchParams }: { searchParams: Promis
               <CardTitle className="flex items-center gap-2">
                 <Wallet className="size-4 text-primary" />
                 Orçamento da campanha
+                <Info
+                  rotulo="Sobre o orçamento"
+                  texto="Sem ele, o painel não mostra quanto da verba já foi consumido nem projeta se ela acaba antes do fim. Com a data de fim, o ritmo de gasto vira projeção."
+                />
               </CardTitle>
-              <CardDescription>
-                Sem ele, o painel não mostra quanto da verba já foi consumido nem projeta se ela acaba antes do
-                fim. Com a data de fim, o ritmo de gasto vira projeção.
-              </CardDescription>
             </CardHeader>
             <CardContent>
               <BudgetForm
@@ -113,11 +114,11 @@ export default async function MetasPage({ searchParams }: { searchParams: Promis
               <CardTitle className="flex items-center gap-2">
                 <Target className="size-4 text-primary" />
                 Metas
+                <Info
+                  rotulo="Sobre as metas"
+                  texto="A régua do funil: a Mídia e as tabelas pintam cada número contra a meta que vale no período. Mudar uma meta não reescreve o passado — a nova vale a partir da data escolhida."
+                />
               </CardTitle>
-              <CardDescription>
-                A régua do funil: o placar, as ações e as tabelas pintam cada número contra a meta que vale no
-                período. Mudar uma meta não reescreve o passado — a nova vale a partir da data escolhida.
-              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
               {temMetas ? (
@@ -227,11 +228,11 @@ export default async function MetasPage({ searchParams }: { searchParams: Promis
               <CardTitle className="flex items-center gap-2">
                 <Target className="size-4 text-primary" />
                 Metas de conteúdo
+                <Info
+                  rotulo="Sobre as metas de conteúdo"
+                  texto="Seguidores e o plano de 90 dias do diagnóstico (retenção 40%, salvos/1k 8+, 4 posts/semana…) — lidas pela tela Conteúdo."
+                />
               </CardTitle>
-              <CardDescription>
-                Seguidores e o plano de 90 dias do diagnóstico (retenção 40%, salvos/1k 8+, 4 posts/semana…) —
-                lidas pela tela Conteúdo.
-              </CardDescription>
             </CardHeader>
             <CardContent>
               <GoalsForm current={currentGoals} />

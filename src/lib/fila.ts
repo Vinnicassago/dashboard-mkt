@@ -47,6 +47,8 @@ import {
   type RoboNaFila,
 } from "./robo/situacao";
 import type { Lead, LeadEvent, LeadStatus } from "./types";
+// Só o tipo (fila-live importa HORAS_APOS_CONVERSA daqui: nada de ciclo em runtime).
+import type { ItemDaFilaLive } from "./fila-live";
 
 // ---------------------------------------------------------------- vocabulário
 
@@ -154,7 +156,8 @@ export const DIAS_RETORNO_ANTES_DO_ROBO = 7;
 
 /**
  * Links antigos (`?etapa=`) → o grupo de hoje, ou `null` = o topo da Fila. Os avisos
- * já enviados por WhatsApp, o farol e as ações da semana continuam abrindo a Fila.
+ * já enviados por WhatsApp e os links guardados (do farol, das ações da semana)
+ * continuam abrindo a Fila; as frases do Atendimento do Início usam `?etapa=<grupo>`.
  *  - robô ligado: novo / retornar / sem-status → resgate; aguardando-contato →
  *    aceitou o convite; convite-pendente, quentes, todos → topo;
  *  - robô desligado: novo, retornar, as reuniões como sempre; sem-status → novo;
@@ -422,6 +425,26 @@ export function montarFila(input: FilaInput): FilaResult {
     comRobo,
     entradasDeResgate: [...entradas.values()].sort((a, b) => a.desde.localeCompare(b.desde) || a.id.localeCompare(b.id)),
   };
+}
+
+/**
+ * Quantas PESSOAS esperam o comercial agora — o número do título da Fila (a aba
+ * do navegador) e do bloco "Atendimento" do Início, a MESMA conta nas duas telas.
+ * Pessoas, não aparições: um A ou B da live que aceitou o convite está na Fila da
+ * live E em "Aceitou o convite" — conta uma vez. Entram: os A e B da live na 1ª
+ * tentativa; com o robô, o Resgate e o "Aceitou o convite"; sem o robô, os Novos.
+ * As reuniões (confirmar, sem desfecho) não são "esperando o 1º contato".
+ */
+export function esperandoOComercial(
+  fila: Pick<FilaResult, "grupos">,
+  filaLive: readonly Pick<ItemDaFilaLive, "leadId" | "etapa">[],
+  roboLigado: boolean,
+): number {
+  const etapas: readonly FilaEtapa[] = roboLigado ? ["resgate", "convite-aceito"] : ["novo"];
+  return new Set([
+    ...filaLive.filter((i) => i.etapa === "primeira").map((i) => i.leadId),
+    ...etapas.flatMap((e) => (fila.grupos.find((g) => g.etapa === e)?.itens ?? []).map((i) => i.leadId ?? i.id)),
+  ]).size;
 }
 
 /**

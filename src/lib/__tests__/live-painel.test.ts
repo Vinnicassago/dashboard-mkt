@@ -1,6 +1,6 @@
 /**
- * Live 01/12 — etapas 6 e 9: a régua da live (Configurações) e a aba Live da
- * Bússola. Fixture sintética: hoje é 24/11 (9 de 16 dias de captação).
+ * Live 01/12 — etapas 6 e 9: a régua da live (Configurações) e o painel da live
+ * (atalho Live 01/12 no Início). Fixture sintética: hoje é 24/11 (9 de 16 dias de captação).
  */
 import { describe, expect, it } from "vitest";
 import { LIVE_PADRAO, ehDoCarro, ehInscritoDaLive, lerCampanhaDaLive, linhaDaCampanha } from "../live";
@@ -81,7 +81,7 @@ describe("régua da live (Configurações)", () => {
   });
 });
 
-describe("aba Live — metas, atendimento, verba, custos e qualidade", () => {
+describe("painel da live — metas, atendimento, verba, custos e qualidade", () => {
   const tentativa = (leadId: string, em: string, resultado: string): LeadEvent => ({
     id: `t-${leadId}`,
     leadId,

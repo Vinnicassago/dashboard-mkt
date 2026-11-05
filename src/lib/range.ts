@@ -11,6 +11,13 @@ export const RANGE_PRESETS = [
 
 export type RangeKey = (typeof RANGE_PRESETS)[number]["key"];
 
+/**
+ * Sem `?range=`, o Início olha a semana (7 dias contra os 7 anteriores). Fonte
+ * ÚNICA: a navegação (`nav-items`, que o seletor e os links leem) e o carregador
+ * do Início (`PERIODO_PADRAO_DA_BUSSOLA`) leem daqui — eram duas constantes.
+ */
+export const PERIODO_PADRAO_DO_INICIO: RangeKey = "7d";
+
 const PRESET_DAYS: Record<string, number> = { "7d": 7, "14d": 14, "30d": 30, "90d": 90 };
 
 /**
@@ -77,13 +84,22 @@ export function hojeEmBrasilia(agora: Date = new Date()): string {
 
 /**
  * Resolve a preset key or a custom "from..to" into a concrete DateRange.
- * `undefined` means "all data".
+ * `undefined` means "all data" — e SÓ para `all`, sem chave ou chave inválida
+ * (Fase 2, C9): um período pedido nunca vira "tudo" em silêncio.
  *
  * Os presets contam a partir de HOJE, não do último dia com anúncio: ancorar no
  * dado fazia "7 dias" mostrar, sem aviso, uma semana velha sempre que o sync
  * parava (e todo preset virava "tudo" numa marca sem anúncio). Os dias sem
  * dado no fim do período aparecem — é a confiança (`trust.ts`) que diz o que
  * eles significam. `hoje` vem de fora para o cálculo seguir puro.
+ *
+ * Período livre: `from = max(pedido.from, span.from)`, `to = min(pedido.to, hoje)`.
+ * Quando isso inverte (`from > to`):
+ *   - período que ainda não começou (`pedido.from > hoje`) → o 1º dia pedido,
+ *     `{from: pedido.from, to: pedido.from}` (vazio; a página sabe pelo
+ *     `naoComecou` de `pageRange`) — antes virava "tudo";
+ *   - período inteiro antes do 1º dado → o pedido sem o clamp do span,
+ *     `{from: pedido.from, to: min(pedido.to, hoje)}` (vazio de verdade).
  */
 export function resolveRange(
   key: string | undefined,
@@ -95,13 +111,19 @@ export function resolveRange(
 
   const custom = parseCustomRange(key);
   if (custom) {
-    let from = custom.from ?? span.from;
     let to = custom.to ?? fim;
-    if (!from && !to) return undefined;
-    if (span.from && from && from < span.from) from = span.from;
     if (fim && to && to > fim) to = fim;
-    if (!from || !to || from > to) return undefined;
-    return { from, to };
+    let from = custom.from ?? span.from;
+    if (span.from && from && from < span.from) from = span.from;
+    // Sem dado e sem "hoje" de um dos lados: o período é a ponta que existe.
+    if (!from) from = to;
+    if (!to) to = from;
+    if (from <= to) return { from, to };
+    // Ainda não começou: o 1º dia pedido, vazio — nunca "tudo".
+    if (custom.from && fim && custom.from > fim) return { from: custom.from, to: custom.from };
+    // Antes do 1º dado: o que foi pedido, sem o clamp do span (vazio de verdade).
+    const de = custom.from && custom.from <= to ? custom.from : to;
+    return { from: de, to };
   }
 
   const days = Object.hasOwn(PRESET_DAYS, key) ? PRESET_DAYS[key] : 0;
@@ -109,7 +131,8 @@ export function resolveRange(
   const fromD = new Date(fim + "T00:00:00Z");
   fromD.setUTCDate(fromD.getUTCDate() - (days - 1));
   let from = fromD.toISOString().slice(0, 10);
-  if (span.from && from < span.from) from = span.from;
+  // O clamp no 1º dado nunca inverte o período (dado que só começa depois de hoje).
+  if (span.from && from < span.from && span.from <= fim) from = span.from;
   return { from, to: fim };
 }
 
@@ -118,9 +141,14 @@ export function resolveRange(
  * de período em silêncio. Respeita a query e a âncora que o link já tiver — e o
  * período que ele já tiver: o link que leva `range=` de propósito (a B1 e a barra
  * do robô abrem Leads com `range=all`, 11.5) sai intacto, sem um 2º `range`.
+ *
+ * `padraoDoDestino`: o período que o DESTINO abre sem `?range=` (`periodoPadraoDe`).
+ * "Campanha" (`all`) sai do link só quando é também o padrão do destino; para o
+ * Início (padrão = a semana) ela vai explícita — senão Funil (Campanha) → Início
+ * abria em 7 dias sem ninguém ter escolhido.
  */
-export function comPeriodo(href: string, rangeKey?: string | null): string {
-  if (!rangeKey || rangeKey === "all") return href;
+export function comPeriodo(href: string, rangeKey?: string | null, padraoDoDestino: string = "all"): string {
+  if (!rangeKey || (rangeKey === "all" && padraoDoDestino === "all")) return href;
   const [base, hash] = href.split("#");
   if (/[?&]range=/.test(base)) return href;
   const sep = base.includes("?") ? "&" : "?";

@@ -38,9 +38,17 @@ export const ORDEM_ALERTA: Record<NivelAlerta, number> = {
   config: 0,
 };
 
-/** As travas de confiança (`assessTrust`) do período da página. */
+/**
+ * As travas de confiança (`assessTrust`) do período da página — SEM as de
+ * configuração (`nivel: "config"`: meta e orçamento não cadastrados). Elas não
+ * desqualificam número nenhum e moram em Configurações → Pendências
+ * (`pendenciasDeConfiguracoes`, que lê as mesmas travas). Vale para o Início, a
+ * Mídia e o Funil de uma vez; `assessTrust` não muda.
+ */
 export function alertasDeConfianca(travas: Trava[]): Alerta[] {
-  return travas.map((t) => ({ id: `trava-${t.id}`, nivel: t.nivel, titulo: t.titulo, detalhe: t.detalhe, cta: t.cta }));
+  return travas
+    .filter((t) => t.nivel !== "config")
+    .map((t) => ({ id: `trava-${t.id}`, nivel: t.nivel, titulo: t.titulo, detalhe: t.detalhe, cta: t.cta }));
 }
 
 /** As checagens de saúde do dado (`dataQualityChecks`). */
@@ -115,7 +123,8 @@ export function alertaDeClasse(leads: Pick<Lead, "classe" | "classeN8n" | "statu
 /**
  * Gente sem a 1ª mensagem do robô (global, só com o robô ligado e a leitura em
  * dia): a contagem é a de `semMensagemDoRobo` (`lib/robo/situacao.ts`) — o MESMO
- * número da B1 e de Integrações. Com a leitura parada quem fala é o `sync-robo`.
+ * número da frase do Início, de Integrações e da B1 do motor (dormente). Com a
+ * leitura parada quem fala é o `sync-robo`.
  */
 export function alertaRoboSem1aMsg(c: { total: number; naoChegaram: number }): Alerta[] {
   if (c.total <= 0) return [];

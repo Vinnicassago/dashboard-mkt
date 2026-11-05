@@ -1,5 +1,6 @@
 import { ArrowDown, ArrowUp, Minus, type LucideIcon } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import { Info } from "@/components/ui/info";
 import { KpiSparkline } from "./kpi-sparkline";
 import { cn } from "@/lib/utils";
 import { aplicarConfianca, type Quarentena } from "@/lib/trust";
@@ -9,6 +10,8 @@ export interface KpiDelta {
   text: string;
   direction: "up" | "down" | "flat";
   intent: "good" | "bad" | "neutral";
+  /** Contra o que a seta compara, quando o texto é só a variação (`pctDelta(..., { curto: true })`). */
+  title?: string;
 }
 
 const intentClass: Record<KpiDelta["intent"], string> = {
@@ -27,6 +30,8 @@ export function KpiCard({
   spark,
   quarentena,
   meta,
+  info,
+  ressalvaNoInfo = false,
 }: {
   label: string;
   value: string;
@@ -48,6 +53,18 @@ export function KpiCard({
    * status some: número que não se sustenta não fica verde nem vermelho.
    */
   meta?: MetaExibida;
+  /**
+   * O ⓘ do cartão (régua de texto de nov/26): a explicação que era a linha de
+   * `hint` embaixo do número vai para cá, ao lado do rótulo. Texto pronto
+   * (serializável: o `Info` é client).
+   */
+  info?: string;
+  /**
+   * Com `quarentena`, a explicação (`motivo`) vai para o ⓘ em vez do corpo — o
+   * "—" fica colado no número e o motivo, no ⓘ e no ⚠ do cabeçalho (régua de
+   * texto). Sem ela, o corpo mostra o motivo como sempre.
+   */
+  ressalvaNoInfo?: boolean;
 }) {
   const DeltaIcon =
     delta?.direction === "up" ? ArrowUp : delta?.direction === "down" ? ArrowDown : Minus;
@@ -55,6 +72,8 @@ export function KpiCard({
   const suprimido = quarentena?.nivel === "quarentena";
   const mostrado = aplicarConfianca(value, quarentena);
   const deltaVisivel = suprimido ? undefined : delta;
+  const ressalvaNoCorpo = quarentena && !ressalvaNoInfo;
+  const textoDoInfo = quarentena && ressalvaNoInfo ? [`${quarentena.motivo}.`, info].filter(Boolean).join(" ") : info;
 
   return (
     <Card
@@ -64,7 +83,10 @@ export function KpiCard({
       )}
     >
       <div className="flex items-center justify-between">
-        <p className="text-sm font-medium text-muted-foreground">{label}</p>
+        <p className="flex min-w-0 items-center gap-0.5 text-sm font-medium text-muted-foreground">
+          <span className="min-w-0">{label}</span>
+          {textoDoInfo ? <Info texto={textoDoInfo} rotulo={`Sobre “${label}”`} className="-my-1" /> : null}
+        </p>
         {Icon ? <Icon className="size-4 text-muted-foreground" /> : null}
       </div>
       <p
@@ -83,12 +105,13 @@ export function KpiCard({
               "inline-flex items-center gap-0.5 font-medium",
               intentClass[deltaVisivel.intent],
             )}
+            title={deltaVisivel.title}
           >
             <DeltaIcon className="size-3.5" />
             {deltaVisivel.text}
           </span>
         ) : null}
-        {quarentena ? (
+        {ressalvaNoCorpo ? (
           <span className="text-[var(--warning-text)]">{quarentena.motivo}</span>
         ) : hint ? (
           <span className="text-muted-foreground">{hint}</span>

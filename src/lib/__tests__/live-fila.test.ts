@@ -1,7 +1,7 @@
 /**
  * Live 01/12 — etapa 5: a Fila de contato com a ficha da live. Os inscritos com
  * classe saem da Fila de sempre (A e B vão para a Fila da live; C e X ficam só em
- * Leads), as reuniões continuam lá, a Bússola (C1) conta os A e B atrasados e
+ * Leads), as reuniões continuam lá, a C1 do motor (dormente) conta os A e B atrasados e
  * Leads mostra a próxima ação pela mesma régua.
  */
 import { describe, expect, it } from "vitest";
@@ -81,7 +81,7 @@ describe("Fila de sempre × Fila da live", () => {
   });
 });
 
-describe("Bússola — a C1 conta os A e B sem a 1ª tentativa no prazo do turno", () => {
+describe("motor — a C1 conta os A e B sem a 1ª tentativa no prazo do turno", () => {
   it("o A atrasado entra na ação, com link para a Fila da live", () => {
     const data = base(leads.filter((l) => l.id !== "s"));
     const filaLive = montarFilaDaLive(data.leads, [], AGORA, EXPEDIENTE_PADRAO);

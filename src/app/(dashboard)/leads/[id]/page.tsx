@@ -34,7 +34,7 @@ import { ETAPA_MAXIMA_LABEL, etapaMaxima } from "@/lib/lead-status";
 import { mascararEmail, mascararNoTexto, mascararTelefone } from "@/lib/lgpd";
 import { everBooked } from "@/lib/metrics";
 import { origemDoLead } from "@/lib/origem";
-import { chaveTelefoneValida, normalizarTelefone } from "@/lib/phone";
+import { chaveTelefoneValida, normalizarTelefone, telefoneUtilizavel } from "@/lib/phone";
 import { comPeriodo } from "@/lib/range";
 import { formatCurrency, formatDateTime, formatarEspera } from "@/lib/format";
 import { estadoDoRoboAgora } from "@/lib/robo/estado";
@@ -330,7 +330,9 @@ export default async function FichaDoLead({
                 <Linha rotulo="Telefone">
                   {!telefone ? (
                     "—"
-                  ) : mascarar || optOut ? (
+                  ) : mascarar || optOut || !telefoneUtilizavel(telefone) ? (
+                    // Mascarado, opt-out ou número que não serve (o ⚠ de contato do topo
+                    // já diz por quê): texto, sem `wa.me`.
                     <span>
                       {telefone}
                       {optOut ? (

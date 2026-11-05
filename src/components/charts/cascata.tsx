@@ -111,7 +111,7 @@ export function Cascata({
   /*
    * Rótulo da âncora vigente por degrau, resolvido ANTES do render: a partir de
    * "Leads" os percentuais passam a ser sobre leads, e é o rótulo que impede a
-   * troca de base de passar despercebida. O resumo da home já começa em Leads.
+   * troca de base de passar despercebida.
    */
   const rotulos: string[] = [];
   let vigente = ancoraLabel;

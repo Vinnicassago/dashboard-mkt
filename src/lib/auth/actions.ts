@@ -18,7 +18,6 @@ import {
   createUser,
   deleteUser,
   getUser,
-  listUsers,
   setUserRole,
 } from "@/lib/data/store";
 

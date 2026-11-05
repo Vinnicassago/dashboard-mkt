@@ -10,7 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { getData, listConferencias } from "@/lib/data/store";
 import { activeBrandSlug } from "@/lib/active-brand";
 import { pageRange } from "@/lib/page-range";
-import { dailySeries, trechosSemDado, trechosSemVeiculacao } from "@/lib/metrics";
+import { dailySeries, fimDoPeriodo, trechosSemDado, trechosSemVeiculacao } from "@/lib/metrics";
 import { contextoDeMarcas } from "@/lib/meta/config";
 import { custoExibivel, kpisDoPeriodo, reguaDoPeriodo } from "@/lib/kpis";
 import {
@@ -53,7 +53,7 @@ export const dynamic = "force-dynamic";
  * viewport; a tendência diz se está melhorando; campanhas → conjuntos dizem
  * ONDE; criativos dizem O QUÊ escalar ou pausar; descoberta e o gráfico diário
  * fecham. Toda conta mora em `lib/midia.ts` (puro) e lê `kpisDoPeriodo` — o
- * CPL daqui é o da Bússola.
+ * CPL daqui é o do Início.
  */
 export default async function MidiaPage({ searchParams }: { searchParams: Promise<{ range?: string }> }) {
   const brand = await activeBrandSlug();
@@ -67,7 +67,8 @@ export default async function MidiaPage({ searchParams }: { searchParams: Promis
     can("data:write"),
   ]);
   const hoje = hojeEmBrasilia();
-  const fim = range?.to ?? hoje;
+  // O último dia que já aconteceu: min(fim do período, hoje) — dia futuro não é julgado (C9).
+  const fim = fimDoPeriodo(range, hoje);
 
   const kp = kpisDoPeriodo(data, range, { brandRules, campanhasDaConta, cobertura, hoje });
   const regua = reguaDoPeriodo(kp, data, range, hoje);
@@ -101,7 +102,7 @@ export default async function MidiaPage({ searchParams }: { searchParams: Promis
   const criativosLive =
     !isAwareness(brand) && rangeLive.de <= rangeLive.ate ? criativosDaLive(data, cfgLive, rangeLive, hoje) : null;
 
-  const serie = dailySeries(data, range, cobertura);
+  const serie = dailySeries(data, range, cobertura, hoje);
   const faixas = [
     ...trechosSemVeiculacao(serie).map((t) => ({ ...t, tom: "pausa" as const })),
     ...trechosSemDado(serie).map((t) => ({ ...t, tom: "falha" as const })),

@@ -1,16 +1,15 @@
 /**
- * Fase 5 — a Bússola: motor de ações v2, gargalo, placar e semanas. Fixture
+ * Fase 5 — motor de ações v2 (dormente até a Mídia da Fase 4), gargalo (Funil) e
+ * semanas; o placar e a série semanal saíram com o Início (Fase 2, nov/26). Fixture
  * sintética (nenhum dado real). Datas em UTC; Brasília = UTC−3.
  */
 import { describe, expect, it } from "vitest";
-import { kpisDoPeriodo, serieSemanal, type KpisDoPeriodo } from "../kpis";
+import { kpisDoPeriodo } from "../kpis";
 import { montarBussola } from "../bussola";
 import { motorDeAcoes, resumoDasAcoes, semanaDaAcao, type Acao } from "../motor";
 import { gargalo, impactoEstimado, textoDoImpacto, transicoesDoFunil, type Transicao } from "../gargalo";
-import { montarPlacar } from "../placar";
 import { diasDoPeriodo, janelaAnterior, segundaDaSemana, semanaAnteriorFechada, ultimasSemanas } from "../semana";
 import { buildBriefing } from "../ai/briefing";
-import { formatCurrency, formatCurrency0 } from "../format";
 import type { AcaoEstado, AdDaily, Creative, DashboardData, Lead, LeadEvent, LpDaily, Meta } from "../types";
 
 // ---------------------------------------------------------------- fixtures
@@ -112,7 +111,7 @@ const regra = (acoes: Acao[], id: string) => acoes.find((a) => a.regra === id);
 
 // ---------------------------------------------------------------- semanas
 
-describe("semanas da Bússola (segunda a domingo, Brasília)", () => {
+describe("semanas (segunda a domingo, Brasília)", () => {
   it("segunda-feira da semana de qualquer dia", () => {
     expect(segundaDaSemana("2026-10-08")).toBe("2026-10-05"); // quinta
     expect(segundaDaSemana("2026-10-11")).toBe("2026-10-05"); // domingo
@@ -127,24 +126,6 @@ describe("semanas da Bússola (segunda a domingo, Brasília)", () => {
     expect(ultimasSemanas("2026-10-08", 3).map((s) => s.semana)).toEqual(["2026-09-21", "2026-09-28", "2026-10-05"]);
     expect(diasDoPeriodo(SEMANA)).toBe(7);
     expect(janelaAnterior(SEMANA, 28)).toEqual({ from: "2026-09-04", to: "2026-10-01" });
-  });
-});
-
-describe("tendência semanal: os mesmos números do placar, semana a semana", () => {
-  const data = base({
-    leads: [
-      lead("2026-09-22", { status: "agendado", bookedAt: "2026-09-23T12:00:00.000Z" }),
-      lead("2026-10-01", { status: "agendado", bookedAt: "2026-10-06T12:00:00.000Z" }),
-      lead("2026-10-06"),
-    ],
-  });
-  it("10 pontos, a semana corrente marcada como incompleta, reuniões pela data do agendamento", () => {
-    const s = serieSemanal(data, HOJE, 10);
-    expect(s).toHaveLength(10);
-    expect(s.at(-1)).toMatchObject({ semana: "2026-10-05", reunioesAgendadas: 1, leads: 1, incompleta: true });
-    expect(s.find((p) => p.semana === "2026-09-21")?.reunioesAgendadas).toBe(1);
-    expect(s.find((p) => p.semana === "2026-09-28")?.reunioesAgendadas).toBe(0);
-    for (const p of s) expect(p.reunioesAgendadas).toBe(kpisDoPeriodo(data, { from: p.semana, to: ultimasSemanas(HOJE, 10).find((x) => x.semana === p.semana)!.to }).reunioesAgendadas.valor);
   });
 });
 
@@ -306,7 +287,7 @@ describe("motor v2 — cada regra dispara pelo seu gatilho, com dono e amostra",
     expect(c2.severidade).toBe("alta");
     expect(c2.dono).toBe("COM");
     expect(c2.semImpacto).toBeDefined();
-    // Sem meta não há régua — a regra não dispara (o placar diz "SEM META").
+    // Sem meta não há régua — a regra não dispara.
     expect(regra(rodar(base({ leads })), "C2")).toBeUndefined();
   });
 
@@ -475,7 +456,7 @@ describe("motor v2 — cada regra dispara pelo seu gatilho, com dono e amostra",
     expect(regra(rodar(base(), { fontes: { gastoSemMarca: 735 } }), "D2")?.titulo).toMatch(/R\$\s735 de gasto sem marca classificada/);
   });
 
-  it("G1 retirada (nov/26): sem metas ou sem orçamento, nenhuma ação manda cadastrar meta — isso é do placar (SEM META) e de Configurações", () => {
+  it("G1 retirada (nov/26): sem metas ou sem orçamento, nenhuma ação manda cadastrar meta — isso é de Configurações (Pendências)", () => {
     const semNada = base({ campaign: { ...base().campaign, budgetTotal: 0 } });
     for (const acoes of [rodar(base()), rodar(semNada)]) {
       expect(regra(acoes, "G1")).toBeUndefined();
@@ -574,90 +555,21 @@ describe("motor v2 — ordem, impacto e estado por semana", () => {
   });
 });
 
-// ---------------------------------------------------------------- placar
-
-describe("placar — o veredito contra a meta, e o custo como fato", () => {
-  const placarDe = (data: DashboardData, range = SEMANA as { from: string; to: string } | undefined, extra: Partial<Parameters<typeof kpisDe>[2]> = {}) => {
-    const k = kpisDe(data, range, extra);
-    return montarBussola({ data, range, kpis: k, eventos: [], agora: AGORA, hoje: HOJE }).placar;
-  };
-
-  it("FORA DO RITMO: 0 de 7 reuniões agendadas na semana, com o fato no lugar do custo", () => {
-    const p = placarDe(base({ adDaily: [ad("2026-10-05", "100001", 160)], metas: [meta("reunioes_agendadas", 7)] }));
-    expect(p).toMatchObject({ estado: "fora", verbo: "FORA DO RITMO", frase: "0 de 7 reuniões agendadas na semana" });
-    expect(p.custo).toBe(`${formatCurrency0(160)} investidos em conversão · 0 reuniões de conversão`);
-    expect(p.campanha).toMatch(/^Campanha: R\$\s160 investidos · 0 reuniões de conversão · 0 agendadas$/);
-    expect(p.comparecimento).toMatchObject({ texto: "—", motivo: "nenhuma reunião com data passada no período" });
-  });
-
-  it("NO RITMO e PERTO DO RITMO seguem a régua (verde ≥ 100%, âmbar 80–99%)", () => {
-    const sete = Array.from({ length: 7 }, () => lead("2026-10-05", { status: "agendado", bookedAt: "2026-10-06T12:00:00.000Z", meetingFor: "2026-11-01T12:00:00.000Z" }));
-    expect(placarDe(base({ leads: sete, metas: [meta("reunioes_agendadas", 7)] })).verbo).toBe("NO RITMO");
-    expect(placarDe(base({ leads: sete.slice(0, 6), metas: [meta("reunioes_agendadas", 7)] })).verbo).toBe("PERTO DO RITMO");
-  });
-
-  it("sem meta: SEM META com o link para cadastrar; meta que começa no meio do período não julga", () => {
-    const semMeta = placarDe(base());
-    expect(semMeta).toMatchObject({ estado: "sem-meta", verbo: "SEM META", acao: { href: "/configuracoes#metas" } });
-    expect(semMeta.frase).toMatch(/sem meta para comparar/);
-    const parcial = placarDe(base({ metas: [meta("reunioes_agendadas", 7, "2026-10-05")] }));
-    expect(parcial.estado).toBe("sem-meta");
-    expect(parcial.motivo).toMatch(/a meta vale só a partir de 05\/10/);
-  });
-
-  it("SEM LEITURA quando as fontes discordam — nunca 'no ritmo' por silêncio", () => {
-    const data = base({ adDaily: [ad("2026-10-05", "100001", 160)], metas: [meta("reunioes_agendadas", 7)] });
-    const p = placarDe(data, undefined, { roboReunioes: 3 });
-    expect(p).toMatchObject({ estado: "sem-dado", verbo: "SEM LEITURA" });
-    expect(p.motivo).toBeDefined();
-  });
-
-  it("com 3 reuniões de conversão o custo por reunião aparece, com o n", () => {
-    const tres = Array.from({ length: 3 }, () => lead("2026-10-05", { status: "agendado", bookedAt: "2026-10-06T12:00:00.000Z", meetingFor: "2026-11-01T12:00:00.000Z" }));
-    const p = placarDe(base({ adDaily: [ad("2026-10-05", "100001", 900)], leads: tres, metas: [meta("reunioes_agendadas", 3)] }));
-    expect(p.custo).toBe(`${formatCurrency(300)} por reunião (n = 3)`);
-    expect(p.verbo).toBe("NO RITMO");
-  });
-
-  it("o gargalo e o impacto entram no placar com o dono e a origem da régua", () => {
-    const leads = [...leadsEncerrados(49, "2026-10-05"), lead("2026-10-05", { status: "agendado", bookedAt: "2026-10-06T12:00:00.000Z", meetingFor: "2026-11-01T12:00:00.000Z" })];
-    const p = placarDe(base({ leads, metas: [meta("taxa_lead_agendada", 0.1), meta("reunioes_agendadas", 7)] }));
-    expect(p.gargalo).toMatchObject({ rotulo: "Lead → Agendada", dono: "COM", origem: "meta", href: "/funil" });
-    expect(p.gargalo?.impactoTexto).toBe("+4 reuniões por semana se batesse a meta");
-  });
-
-  it("a linha do minigráfico é a meta SEMANAL, mesmo com 30 dias selecionados (o alvo da frase soma o período)", () => {
-    const data = base({ metas: [meta("reunioes_agendadas", 7)] });
-    const trinta = { from: "2026-09-09", to: "2026-10-08" };
-    const p = placarDe(data, trinta);
-    expect(p.alvo).toBeCloseTo(30, 6);
-    expect(p.alvoSemanal).toBe(7);
-    const mensal = base({ metas: [{ ...meta("reunioes_agendadas", 30), periodo: "mes" }] });
-    expect(placarDe(mensal).alvoSemanal).toBeCloseTo(30 / 4.33, 6);
-  });
-
-  it("montarPlacar é pura: a mesma entrada dá a mesma saída", () => {
-    const data = base({ metas: [meta("reunioes_agendadas", 7)] });
-    const k: KpisDoPeriodo = kpisDe(data);
-    const b = montarBussola({ data, range: SEMANA, kpis: k, eventos: [], agora: AGORA, hoje: HOJE });
-    const de = montarPlacar({ kpis: k, campanha: b.campanha, regua: b.regua, gargalo: b.gargalo, range: SEMANA, alvoSemanal: 7 });
-    expect(de).toEqual(b.placar);
-  });
-});
-
 // ---------------------------------------------------------------- briefing
 
-describe("o briefing da IA recebe as ações do motor e o veredito da Bússola", () => {
-  it("alertasJaDetectados traz regra, dono e estado; o veredito vai inteiro", () => {
+describe("o briefing da IA: o Início no lugar do placar, sem as ações do motor", () => {
+  it("sem 'bussola', nenhuma regra do motor em alertasJaDetectados (só conteúdo) e o bloco 'inicio' presente", () => {
+    // O cenário que acendia a C1 (gente esperando o comercial fora do prazo) e o "FORA DO RITMO".
     const data = base({ leads: [lead(brt("2026-10-08", "09:00"))], metas: [meta("reunioes_agendadas", 7)] });
-    const b = montarBussola({ data, range: SEMANA, kpis: kpisDe(data), eventos: [], agora: AGORA, hoje: HOJE });
-    const briefing = buildBriefing(data, SEMANA, {
-      nowIso: AGORA,
-      warnings: [],
-      acoes: resumoDasAcoes(b.acoes),
-      bussola: { veredito: `${b.placar.verbo} — ${b.placar.frase}`, gargalo: b.placar.gargalo?.rotulo },
-    });
-    expect(briefing.alertasJaDetectados[0]).toMatchObject({ regra: "C1", dono: "COM", severidade: "agora" });
-    expect(briefing.bussola).toEqual({ veredito: "FORA DO RITMO — 0 de 7 reuniões agendadas na semana", gargalo: undefined });
+    const kpis = kpisDe(data);
+    const { inicio } = montarBussola({ data, range: SEMANA, rangeKey: "2026-10-02..2026-10-08", kpis, eventos: [], filaLive: [], agora: AGORA, hoje: HOJE });
+    const briefing = buildBriefing(data, SEMANA, { nowIso: AGORA, warnings: [], kpis, inicio });
+    expect("bussola" in briefing).toBe(false);
+    expect(briefing.alertasJaDetectados.every((a) => a.regra === "conteudo")).toBe(true);
+    expect(JSON.stringify(briefing)).not.toMatch(/FORA DO RITMO|SEM META/);
+    expect(briefing.inicio).not.toBeNull();
+    // A frase do atendimento é a da tela (o mesmo grupo da Fila): o lead das 09:00 espera o 1º contato.
+    expect(briefing.inicio?.atendimento.frases).toEqual(inicio.atendimento.frases.map((f) => f.texto));
+    expect(briefing.inicio?.atendimento.frases[0]).toMatch(/^Novos — ligar agora · 1/);
   });
 });

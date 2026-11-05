@@ -14,7 +14,7 @@ import type { ResumoLeituraRobo } from "@/lib/robo/casar";
 import { fatoDoEpisodio, reabertosPorLead, type FiltroRobo } from "@/lib/robo/situacao";
 import { after } from "next/server";
 import { mensagemWhatsapp } from "@/lib/integracoes";
-import { montarFila, grupoDaUrl, type FilaEtapa } from "@/lib/fila";
+import { esperandoOComercial, montarFila, grupoDaUrl } from "@/lib/fila";
 import { diaBrt } from "@/lib/horario-util";
 import { quando } from "@/lib/contato";
 import { can } from "@/lib/auth/guard";
@@ -62,7 +62,7 @@ export default async function FilaPage({
   // (job de sistema; a página não espera e nunca vê erro dele).
   after(() => dispararCaronaDoRobo(brand));
 
-  // O robô pelo store (o sync grava os fatos no lead): o MESMO estado da Bússola e do aviso.
+  // O robô pelo store (o sync grava os fatos no lead): o MESMO estado do Início e do aviso.
   const [robo, eventos, mensagem, expediente] = await Promise.all([
     estadoDoRoboAgora(brand),
     listLeadEvents({ brand, limit: 0 }),
@@ -89,7 +89,6 @@ export default async function FilaPage({
   // Robô desligado (sem credencial, desativado em Configurações, outra marca): o
   // processo antigo (Novos, Retornar). A leitura falhando é o ⚠ do cabeçalho.
   const fila = montarFila({ nowIso: agora, leads: data.leads, eventos, robo: roboLigado ? robo : undefined });
-  const doGrupo = (e: FilaEtapa) => fila.grupos.find((r) => r.etapa === e);
 
   // Por lead: o que a linha precisa além do item (do store, sem PII nova).
   const extras: Record<string, ExtrasDaLinha> = {};
@@ -116,14 +115,9 @@ export default async function FilaPage({
   const tentativasHoje = meus.filter((e) => e.action === "tentativa").length;
   const agendamentosHoje = meus.filter((e) => e.action === "status_changed" && e.toStatus === "agendado").length;
 
-  // Pessoas, não aparições: um A ou B da live que aceitou o convite está na Fila
-  // da live E em "Aceitou o convite" — conta uma vez (a mesma regra da C1).
-  const esperando = new Set([
-    ...filaLive.filter((i) => i.etapa === "primeira").map((i) => i.leadId),
-    ...(roboLigado ? ["resgate", "convite-aceito"] : ["novo"]).flatMap((e) =>
-      (doGrupo(e as FilaEtapa)?.itens ?? []).map((i) => i.leadId ?? i.id),
-    ),
-  ]).size;
+  // Pessoas, não aparições (a live e "Aceitou o convite" contam uma vez): o MESMO
+  // número do título "Atendimento · N esperando o comercial" do Início.
+  const esperando = esperandoOComercial(fila, filaLive, roboLigado);
 
   const grupoInicial = grupoDaUrl(etapa, roboLigado);
   const grupos = fila.grupos.map((g) => ({ ...g, itens: g.itens.map((i) => semContato(i, i.leadId)) }));

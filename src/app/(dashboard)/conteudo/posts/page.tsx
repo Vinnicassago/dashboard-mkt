@@ -221,9 +221,11 @@ export default async function PostsPage({
             <CadenceStat
               label="Último post"
               value={
-                cadence.daysSinceLast === 0
-                  ? "hoje"
-                  : `há ${formatInt(cadence.daysSinceLast)} dia${cadence.daysSinceLast === 1 ? "" : "s"}`
+                cadence.daysSinceLast === null
+                  ? "nenhum post ainda"
+                  : cadence.daysSinceLast === 0
+                    ? "hoje"
+                    : `há ${formatInt(cadence.daysSinceLast)} dia${cadence.daysSinceLast === 1 ? "" : "s"}`
               }
             />
           </div>

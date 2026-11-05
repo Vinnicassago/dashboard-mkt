@@ -11,7 +11,8 @@
  */
 
 import type { DashboardData, EntradasCalculadora, Meta, MetricaComMeta } from "./types";
-import { dayOf, isAttended, isBooked, isClient, type DateRange } from "./metrics";
+import { isAttended, isBooked, isClient, type DateRange } from "./metrics";
+import { diaDoLead } from "./horario-util";
 import { formatCurrency, formatCurrency0, formatInt, formatPercent } from "./format";
 
 // ---------------------------------------------------------------- definições
@@ -125,7 +126,11 @@ function somarDias(dia: string, n: number): string {
  */
 export function taxasObservadas(data: DashboardData, hoje: string, agoraIso: string): TaxasObservadas {
   const de = somarDias(hoje, -(DIAS_DE_CALIBRACAO - 1));
-  const naJanela = (iso?: string) => Boolean(iso && dayOf(iso) >= de && dayOf(iso) <= hoje);
+  // O dia de Brasília do instante (`diaDoLead`): a janela é contada em dias de Brasília.
+  const naJanela = (iso?: string) => {
+    const dia = diaDoLead(iso);
+    return Boolean(dia && dia >= de && dia <= hoje);
+  };
   const coorte = data.leads.filter((l) => naJanela(l.createdAt));
   const agendadasNoPeriodo = data.leads.filter((l) => isBooked(l) && naJanela(l.bookedAt ?? l.meetingAt ?? l.createdAt));
   // Comparecimento: só reuniões cuja DATA já passou (as futuras ainda não podiam acontecer).

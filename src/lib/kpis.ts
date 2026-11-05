@@ -7,12 +7,11 @@
  * (`assessTrust`: quarentena, piso, teto) e, se pedido, o valor do período
  * anterior. Uma tela que mostra "CPL" mostra ESTE CPL — o lint proíbe as páginas
  * de montar KPI com os helpers de baixo nível, e o teste de consistência confere
- * que cascata, farol, motor de ações e IA leem os mesmos números.
+ * que cascata, Início, Mídia, motor de ações e IA leem os mesmos números.
  */
 
 import {
   adKpis,
-  dayOf,
   filterAds,
   filterLeads,
   inRange,
@@ -27,9 +26,8 @@ import {
   type OverviewKpis,
 } from "./metrics";
 import { SLA_PRIMEIRO_CONTATO_HORAS } from "./fila";
-import { horasUteisEntre, somarHorasUteis } from "./horario-util";
+import { diaDoLead, horasUteisEntre, somarHorasUteis } from "./horario-util";
 import { hojeEmBrasilia } from "./range";
-import { ultimasSemanas } from "./semana";
 import {
   META_DEF,
   METRICAS_COM_META,
@@ -140,7 +138,7 @@ function primeiroContato(data: DashboardData, range: DateRange | undefined, agor
 /** Comparecimento: das reuniões MARCADAS PARA o período cuja data já passou, quantas aconteceram. */
 function comparecimentoDoPeriodo(data: DashboardData, range: DateRange | undefined, agoraIso: string) {
   const passadas = data.leads.filter(
-    (l) => isBooked(l) && l.meetingFor && l.meetingFor < agoraIso && inRange(dayOf(l.meetingFor), range),
+    (l) => isBooked(l) && l.meetingFor && l.meetingFor < agoraIso && inRange(diaDoLead(l.meetingFor), range),
   );
   const foram = passadas.filter(isAttended).length;
   return { valor: passadas.length > 0 ? foram / passadas.length : 0, n: passadas.length };
@@ -216,37 +214,6 @@ export function kpisDoPeriodo(
   };
 }
 
-// ---------------------------------------------------------------- tendência semanal
-
-export interface PontoSemanal {
-  /** Segunda-feira da semana (AAAA-MM-DD). */
-  semana: string;
-  reunioesAgendadas: number;
-  leads: number;
-  investimentoConversao: number;
-  /** A semana de hoje ainda não fechou. */
-  incompleta: boolean;
-}
-
-/**
- * A tendência das últimas `n` semanas (segunda a domingo), terminando na semana
- * de `hoje`. Cada ponto é `kpisDoPeriodo` daquela semana — o minigráfico do
- * placar mostra as MESMAS reuniões agendadas do número ao lado dele, não uma
- * contagem própria (ADR-03).
- */
-export function serieSemanal(data: DashboardData, hoje: string, n = 10): PontoSemanal[] {
-  return ultimasSemanas(hoje, n).map((s) => {
-    const k = kpisDoPeriodo(data, { from: s.from, to: s.to }, { hoje });
-    return {
-      semana: s.semana,
-      reunioesAgendadas: k.reunioesAgendadas.valor,
-      leads: k.leads.valor,
-      investimentoConversao: k.investimentoConversao.valor,
-      incompleta: s.to >= hoje,
-    };
-  });
-}
-
 // ---------------------------------------------------------------- exibição
 
 /** Custo com denominador zero não existe (CLAUDE.md): "—", nunca "R$ 0,00". */
@@ -283,6 +250,41 @@ export function mostrar(m: Medida, formato: FormatoMedida): string {
   return `${m.confianca.nivel === "piso" ? "≥" : "≤"} ${v}`;
 }
 
+/** O custo por reunião pronto para a tela — a razão quando se sustenta, senão o FATO. */
+export interface FatoDoCustoPorReuniao {
+  /** `custoExibivel(custoPorReuniao)`: a razão pode aparecer (≥ `MIN_REUNIOES`, fora de quarentena). */
+  exibivel: boolean;
+  /** `mostrar(custoPorReuniao, "moeda")` — com "≥"/"≤"; "—" quando não se exibe. */
+  valor: string;
+  /** O denominador de verdade: reuniões de CONVERSÃO agendadas no período. */
+  n: number;
+  /** "R$ 160 investidos em conversão · 1 reunião de conversão" (o "≥"/"≤" do investimento vem do `mostrar`). */
+  fato: string;
+}
+
+/**
+ * UMA leitura do custo por reunião para o Início e a Mídia (decisão 4.2): abaixo
+ * da régua (`MIN_REUNIOES`) ou em quarentena a tela mostra o FATO — quanto foi
+ * investido e quantas reuniões de conversão houve —, nunca a razão. Cada tela
+ * monta a sua frase a partir daqui (a Mídia: `valor` ou `fato` no número e `n` no
+ * rodapé; o Início: `valor + " por reunião de conversão"` ou `fato`).
+ */
+export function fatoDoCustoPorReuniao(k: KpisDoPeriodo): FatoDoCustoPorReuniao {
+  const n = k.reunioesConversao.valor;
+  // Reuniões em quarentena (fontes divergem): a contagem é o número que a trava
+  // manda não exibir ("—" no cartão) — o fato não a imprime.
+  const reunioes =
+    k.reunioesConversao.confianca?.nivel === "quarentena"
+      ? "reuniões sem leitura confiável"
+      : `${formatInt(n)} ${n === 1 ? "reunião" : "reuniões"} de conversão`;
+  return {
+    exibivel: custoExibivel(k.custoPorReuniao),
+    valor: mostrar(k.custoPorReuniao, "moeda"),
+    n,
+    fato: `${mostrar(k.investimentoConversao, "moeda0")} investidos em conversão · ${reunioes}`,
+  };
+}
+
 // ---------------------------------------------------------------- régua (metas)
 
 export interface LinhaDaRegua {
@@ -315,7 +317,7 @@ const MEDIDA_DA_META: Record<MetricaComMeta, (k: KpisDoPeriodo) => Medida> = {
  */
 export function periodoDaRegua(data: DashboardData, range: DateRange | undefined, hoje: string): DateRange {
   if (range) return range;
-  const primeiro = [data.campaign.startDate, ...data.adDaily.map((r) => r.date), ...data.leads.map((l) => dayOf(l.createdAt))]
+  const primeiro = [data.campaign.startDate, ...data.adDaily.map((r) => r.date), ...data.leads.map((l) => diaDoLead(l.createdAt))]
     .filter(Boolean)
     .sort()[0];
   return { from: primeiro ?? hoje, to: hoje };
@@ -325,6 +327,9 @@ export function periodoDaRegua(data: DashboardData, range: DateRange | undefined
  * Cada métrica com meta, contra a meta que vale no período. Taxa sem amostra,
  * custo que não se exibe ("—") e período que a meta não cobre inteiro ficam sem
  * status — cor sobre comparação que não se sustenta seria pior que nenhuma cor.
+ * Período que ainda não começou (`range.from > hoje`, C9) também: zero contra o
+ * alvo de um dia que não aconteceu não é "abaixo da meta" — o alvo fica, o status
+ * não.
  */
 export function reguaDoPeriodo(
   k: KpisDoPeriodo,
@@ -333,6 +338,7 @@ export function reguaDoPeriodo(
   hoje: string = hojeEmBrasilia(),
 ): LinhaDaRegua[] {
   const periodo = periodoDaRegua(data, range, hoje);
+  const naoComecou = Boolean(range && hoje && range.from > hoje);
   return METRICAS_COM_META.map((metrica) => {
     const medida = MEDIDA_DA_META[metrica](k);
     const a = alvoNoPeriodo(data.metas, metrica, periodo);
@@ -351,7 +357,7 @@ export function reguaDoPeriodo(
       parcial: a?.parcial ?? false,
       // Parte do período sem meta: comparar o total do período com o alvo de
       // poucos dias (ou julgar o passado pela meta de hoje) mente — sem status.
-      avaliacao: a && !a.parcial && sustenta ? statusContraMeta(medida.valor, a.alvo, def.regra) : undefined,
+      avaliacao: a && !a.parcial && sustenta && !naoComecou ? statusContraMeta(medida.valor, a.alvo, def.regra) : undefined,
     };
   });
 }

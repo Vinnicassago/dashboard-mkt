@@ -10,7 +10,6 @@ import { estadoDoRoboAgora } from "../robo/estado";
 import { leituraDoRoboParada } from "../robo/situacao";
 import { formatarEspera } from "../format";
 import { carregarBussola } from "../bussola-server";
-import { resumoDasAcoes } from "../motor";
 import { isAiConfigured } from "./config";
 import { buildBriefing } from "./briefing";
 import { analyzeBriefing } from "./analyst";
@@ -18,9 +17,10 @@ import type { ResumoSemanal } from "../types";
 
 /**
  * O resumo da semana (H7): a IA lê a semana FECHADA mais recente (segunda a
- * domingo anteriores) — só a camada de métricas, a régua e as ações do motor —
- * e escreve a leitura. Uma linha por geração; a Bússola mostra a última e
- * guarda as 12 anteriores.
+ * domingo anteriores) — a camada de métricas, a régua e o que o Início mostra
+ * (cartões, leads chegando, o atendimento como está NA HORA da geração, o
+ * último post) — e escreve a leitura. Uma linha por geração; o Início mostra a
+ * última e guarda as 12 anteriores.
  *
  * Quem chama: o cron de segunda 08:00 (`/api/resumo-semanal`) ou o botão
  * "Gerar de novo" (ação, `data:write`). Nunca o render: cada chamada custa.
@@ -45,17 +45,17 @@ export async function gerarResumoSemanal(
       ? [{ level: "warn" as const, message: `Anúncios sincronizados há ${Math.round(horas)}h — os números podem estar defasados.` }]
       : []),
   ];
-  // O robô (só a marca dele, só ligado): a C1 do resgate e a B1 leem a última leitura.
+  // O robô (só a marca dele, só ligado): o resgate e o atendimento leem a última leitura.
   const robo = await estadoDoRoboAgora(brand.slug, new Date(nowIso));
   if (robo.ligado && leituraDoRoboParada(robo, nowIso)) {
     const lidoHa = robo.sync.ultimoOk ? (Date.parse(nowIso) - Date.parse(robo.sync.ultimoOk)) / 3_600_000 : null;
     avisosDeSync.push({
       level: "warn",
       message: robo.sync.falha
-        ? `A leitura do robô de WhatsApp está falhando: ${robo.sync.falha.erro} O resgate e as ações do robô usam o último dado lido.`
+        ? `A leitura do robô de WhatsApp está falhando: ${robo.sync.falha.erro} O resgate e o atendimento usam o último dado lido.`
         : lidoHa != null
-          ? `O robô de WhatsApp foi lido há ${formatarEspera(lidoHa)} — o resgate e as ações do robô podem estar defasados.`
-          : "O painel ainda não leu o robô de WhatsApp — o resgate e as ações do robô estão sem dado.",
+          ? `O robô de WhatsApp foi lido há ${formatarEspera(lidoHa)} — o resgate e o atendimento podem estar defasados.`
+          : "O painel ainda não leu o robô de WhatsApp — o resgate e o atendimento estão sem dado do robô.",
     });
   }
   const drafts = await listDrafts(brand.slug);
@@ -65,20 +65,15 @@ export async function gerarResumoSemanal(
     const data = await getData(brand.slug);
     briefing = buildBriefing(data, { from, to }, { nowIso, drafts, warnings: [...avisosDeSync, ...dataQualityChecks(data)] });
   } else {
-    // O MESMO caminho da home: placar, gargalo e ações que a tela mostra.
-    // Os estados (feita/ignorada) são os da semana RESUMIDA, não os da semana nova.
-    const b = await carregarBussola(brand.slug, buildCustomKey(from, to), { semanaDosEstados: semana });
+    // O MESMO caminho da home: os kpis e os blocos que o Início mostra. A semana
+    // fechada nunca abre o painel da live, mesmo que coincida com uma janela da régua.
+    const b = await carregarBussola(brand.slug, buildCustomKey(from, to), { semModoLive: true });
     briefing = buildBriefing(b.data, b.range ?? { from, to }, {
       nowIso,
       drafts,
       warnings: [...avisosDeSync, ...dataQualityChecks(b.data)],
-      acoes: resumoDasAcoes(b.acoes),
-      bussola: {
-        veredito: `${b.placar.verbo} — ${b.placar.frase}`,
-        gargalo: b.placar.gargalo
-          ? `${b.placar.gargalo.rotulo} (${b.placar.gargalo.dono})${b.placar.gargalo.impactoTexto ? ` — ${b.placar.gargalo.impactoTexto}` : ""}`
-          : undefined,
-      },
+      kpis: b.kpis,
+      inicio: b.inicio ?? undefined,
     });
   }
 

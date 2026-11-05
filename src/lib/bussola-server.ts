@@ -1,81 +1,99 @@
 import "server-only";
-import { getData, listAcoesEstado, listLeadEvents, listResumosSemanais } from "./data/store";
+import { getData, listLeadEvents, listResumosSemanais } from "./data/store";
 import { brandDef, type BrandDef } from "./brands";
 import { pageRange } from "./page-range";
-import { hojeEmBrasilia } from "./range";
-import { kpisDoPeriodo } from "./kpis";
-import { montarBussola, type Bussola } from "./bussola";
-import { semanaDaAcao } from "./motor";
-import { temLpNoPeriodo } from "./gargalo";
-import { NAO_CLASSIFICADO, contextoDeMarcas, integrationStatus } from "./meta/config";
+import { PERIODO_PADRAO_DO_INICIO, hojeEmBrasilia } from "./range";
+import { kpisDoPeriodo, type KpisDoPeriodo } from "./kpis";
+import { alertasDaLive, alertasDoInicio, montarBussola, montarModoLive, type ModoLive } from "./bussola";
+import type { Inicio } from "./inicio";
+import { periodoDaLive } from "./atalho-live";
+import { campanhaDaLive } from "./live-server";
+import type { CampanhaDaLive } from "./live";
+import { contextoDeMarcas } from "./meta/config";
 import { montarFilaDaLive } from "./fila-live";
 import { expedienteAtual } from "./atendimento-server";
-import { coberturaDeAnuncios, estadoDaFonte } from "./sincronizacao";
-import { estadoDoRoboAgora } from "./robo/estado";
-import { dataQualityChecks, type DateRange } from "./metrics";
-import { alertasDeAtribuicao, alertasDeConfianca, alertasDeQualidade, type Alerta } from "./alertas";
-import type { AcaoEstado, DashboardData, ResumoSemanal } from "./types";
+import { coberturaDeAnuncios } from "./sincronizacao";
+import { estadoDoRoboAgora, type EstadoDoRobo } from "./robo/estado";
+import type { DateRange } from "./metrics";
+import type { Alerta } from "./alertas";
+import type { Expediente } from "./turno";
+import type { DashboardData, LeadEvent, ResumoSemanal } from "./types";
 
-/** Sem `?range=`, a Bússola olha a semana: 7 dias contra os 7 anteriores. */
-export const PERIODO_PADRAO_DA_BUSSOLA = "7d";
+/** Sem `?range=`, o Início olha a semana: 7 dias contra os 7 anteriores. */
+export const PERIODO_PADRAO_DA_BUSSOLA = PERIODO_PADRAO_DO_INICIO;
 
-export interface BussolaCarregada extends Bussola {
+interface CarregadoComum {
   brand: BrandDef;
+  /** A base da marca (com contato: fica no servidor — nunca vai inteira a um componente client). */
   data: DashboardData;
+  /** O período resolvido (`pageRange`, C9): período que ainda não começou = o 1º dia, vazio. */
   range: DateRange | undefined;
   rangeKey: string;
+  /** O período pedido ainda não começou (`range.from > hoje`). */
+  naoComecou: boolean;
   hoje: string;
   agora: string;
+  /** Os KPIs do período, com o contexto (marcas, cobertura) e `comparar` — os da tela e da IA. */
+  kpis: KpisDoPeriodo;
+  /** Todos os eventos da marca (`limit: 0`) — tentativas, reabertos. Têm o nome do lead: só servidor. */
+  eventos: LeadEvent[];
+  /** O turno da live (`expedienteAtual`). */
+  expediente: Expediente;
+  /** O robô (`estadoDoRoboAgora`, inteiro): o MESMO objeto da Fila e de Leads. */
+  robo: EstadoDoRobo;
+  /** A régua da live (`campanhaDaLive`, editável). */
+  cfgDaLive: CampanhaDaLive;
   /** Os alertas do período (para o "⚠ N" do cabeçalho). */
   alertas: Alerta[];
-  /** Últimas decisões sobre ações (qualquer semana), mais recentes primeiro. */
-  historicoAcoes: AcaoEstado[];
   /** Os resumos semanais da IA, mais recente primeiro (até 12). */
   resumos: ResumoSemanal[];
 }
 
 /**
- * Carrega tudo o que a Bússola precisa de fora (store, syncs, estados) e
- * entrega a visão montada pela função pura. É o MESMO caminho da home e do
- * resumo semanal: a IA lê o que a tela mostra.
+ * O que o Início carrega: no modo normal, os quatro blocos (`inicio`); no modo
+ * live (a chave do período é uma das três da régua), o painel da live (`live`).
+ */
+export type BussolaCarregada =
+  | (CarregadoComum & { modo: "normal"; inicio: Inicio; live: null })
+  | (CarregadoComum & { modo: "live"; inicio: null; live: ModoLive });
+
+/**
+ * Carrega tudo o que o Início precisa de fora (store, syncs, robô, turno, régua
+ * da live) e entrega a visão montada pelas funções puras de `bussola.ts`. É o
+ * MESMO caminho da home e do resumo semanal: a IA lê o que a tela mostra.
  *
  * O robô entra pelo store: os fatos que o sync gravou no lead e o estado da
  * leitura (`estadoDoRoboAgora`, o MESMO objeto da /fila) — nunca o banco do robô
- * no render. A falha da leitura é o alerta `sync-robo` do cabeçalho e a B1.
+ * no render. A falha da leitura é o alerta `sync-robo` do cabeçalho.
+ *
+ * Funciona sem sessão nem cookie (o cron não tem usuário): permissões ficam na página.
  */
 export async function carregarBussola(
   brandSlug: string,
   rangeKeyParam?: string,
   opts: {
-    /** Semana (segunda, AAAA-MM-DD) cujos estados de ação valem — o resumo semanal lê a semana que resume. */
-    semanaDosEstados?: string;
+    /** A régua da live já lida (a página lê antes, para o redirect do comercial). */
+    cfgDaLive?: CampanhaDaLive;
+    /** Nunca o modo live — o resumo semanal lê a semana fechada, mesmo que ela coincida com uma janela da régua. */
+    semModoLive?: boolean;
   } = {},
 ): Promise<BussolaCarregada> {
   const brand = brandDef(brandSlug);
-  const data = await getData(brand.slug);
-  const { range, rangeKey } = pageRange(data, rangeKeyParam ?? PERIODO_PADRAO_DA_BUSSOLA);
   const agoraDate = new Date();
   const agora = agoraDate.toISOString();
   const hoje = hojeEmBrasilia(agoraDate);
-  const status = integrationStatus();
-  const semanaDosEstados = opts.semanaDosEstados ?? semanaDaAcao(hoje);
 
-  const [{ brandRules, campanhasDaConta }, cobertura, eventos, robo, ads, estados, historicoAcoes, resumos, semMarca] =
-    await Promise.all([
-      contextoDeMarcas(),
-      coberturaDeAnuncios(brand.slug),
-      listLeadEvents({ brand: brand.slug, limit: 0 }),
-      estadoDoRoboAgora(brand.slug, agoraDate),
-      estadoDaFonte("ads", brand.slug),
-      listAcoesEstado({ brand: brand.slug, semana: semanaDosEstados, limit: 0 }),
-      listAcoesEstado({ brand: brand.slug, limit: 30 }),
-      listResumosSemanais({ brand: brand.slug, limit: 12 }),
-      // Gasto que nenhuma regra de marca reivindica (30 dias) — a regra D2.
-      status.ads ? getData(NAO_CLASSIFICADO) : null,
-    ]);
-
-  const corte = new Date(agoraDate.getTime() - 30 * 86_400_000).toISOString().slice(0, 10);
-  const gastoSemMarca = (semMarca?.adDaily ?? []).filter((r) => r.date >= corte).reduce((s, r) => s + r.spend, 0);
+  const [data, cfgDaLive, { brandRules, campanhasDaConta }, cobertura, eventos, robo, expediente, resumos] = await Promise.all([
+    getData(brand.slug),
+    opts.cfgDaLive ?? campanhaDaLive(),
+    contextoDeMarcas(),
+    coberturaDeAnuncios(brand.slug),
+    listLeadEvents({ brand: brand.slug, limit: 0 }),
+    estadoDoRoboAgora(brand.slug, agoraDate),
+    expedienteAtual(),
+    listResumosSemanais({ brand: brand.slug, limit: 12 }),
+  ]);
+  const { range, rangeKey, naoComecou } = pageRange(data, rangeKeyParam ?? PERIODO_PADRAO_DA_BUSSOLA, hoje);
 
   // A trava "fontes divergem" (reuniões do atendimento × do painel) fica dormente
   // até a Fase 3: as reuniões do atendimento vinham da leitura AO VIVO da mesa do
@@ -87,51 +105,36 @@ export async function carregarBussola(
     campanhasDaConta,
     cobertura,
     roboReunioes,
-    comparar: true,
+    // Período que ainda não começou (C9: o 1º dia, vazio) não tem "anterior": o dia
+    // antes dele é HOJE, parcial, e a seta mostraria uma queda que não aconteceu.
+    comparar: !naoComecou,
     hoje,
     agora,
   });
-  // O acumulado da campanha com o MESMO contexto (marca, cobertura, robô): é o
-  // número que a Mídia imprime em "Campanha", com os mesmos "≥"/"≤".
-  const campanha = range ? kpisDoPeriodo(data, undefined, { brandRules, campanhasDaConta, cobertura, roboReunioes, hoje, agora }) : kpis;
+  const comum = { brand, data, range, rangeKey, naoComecou, hoje, agora, kpis, eventos, expediente, robo, cfgDaLive, resumos };
 
-  const bussola = montarBussola({
+  // O modo live casa SÓ pela chave (sem data): depois do fim as três chaves continuam abrindo o painel.
+  const periodo = brand.type !== "awareness" && !opts.semModoLive ? periodoDaLive(rangeKeyParam, cfgDaLive) : null;
+  if (periodo && rangeKeyParam) {
+    const live = montarModoLive({ data, eventos, cfg: cfgDaLive, expediente, chave: rangeKeyParam, periodo, hoje, agora });
+    return { ...comum, modo: "live", inicio: null, live, alertas: alertasDaLive({ data, range, kpis, live, hoje }) };
+  }
+
+  const { inicio } = montarBussola({
     data,
     range,
+    rangeKey,
     kpis,
-    campanha,
-    cobertura,
     eventos,
     // Robô DESLIGADO (sem credencial, desativado, ou outra marca) é ausência, não
-    // falha: o processo antigo volta inteiro.
-    robo: robo.ligado ? robo : undefined,
-    fontes: { adsFalha: ads.falha, gastoSemMarca },
-    estados,
-    // Os inscritos da live (A e B) saem da Fila de sempre: a C1 os conta por aqui.
-    filaLive: montarFilaDaLive(data.leads, eventos, agora, await expedienteAtual()),
+    // falha: o processo antigo volta inteiro (`montarInicio` lê `robo.ligado`).
+    robo,
+    cobertura,
+    expediente,
+    // Os inscritos da live (A e B): a frase da live e o "esperando" da Fila.
+    filaLive: montarFilaDaLive(data.leads, eventos, agora, expediente),
     agora,
     hoje,
   });
-
-  const alertas: Alerta[] = [
-    ...alertasDeConfianca(kpis.trust.travas),
-    ...alertasDeQualidade(dataQualityChecks(data)),
-    ...alertasDeAtribuicao(data, range),
-    // A LP registrava e parou: no período não há linha dela — as duas primeiras
-    // transições saem de "Onde trava" (não viram "0%"), e o aviso diz por quê.
-    ...(data.lpDaily.length > 0 && range && !temLpNoPeriodo(data, range)
-      ? [
-          {
-            id: "lp-sem-dado",
-            nivel: "aviso" as const,
-            titulo: "A landing page não registrou visitas no período",
-            detalhe:
-              "Há histórico da landing page, mas nenhuma linha neste período: o rastreio (/api/track) pode ter parado — chave trocada, script fora da página. Visita → lead fica fora do funil até voltar.",
-            cta: { label: "Ver integrações", href: "/configuracoes/integracoes" },
-          },
-        ]
-      : []),
-  ];
-
-  return { ...bussola, brand, data, range, rangeKey, hoje, agora, alertas, historicoAcoes, resumos };
+  return { ...comum, modo: "normal", inicio, live: null, alertas: alertasDoInicio({ data, range, kpis, hoje }) };
 }

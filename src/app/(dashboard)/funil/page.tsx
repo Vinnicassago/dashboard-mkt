@@ -52,7 +52,7 @@ const SEMANAS_TENDENCIA = 12;
 /**
  * Funil — onde exatamente estamos perdendo reuniões (7.1 do relatório).
  *
- * Abre com a resposta: o gargalo, com dono e impacto — o MESMO da Bússola. Em
+ * Abre com a resposta: o gargalo (`lib/gargalo.ts`), com dono e impacto. Em
  * seguida, dois funis com escopo próprio (conversão × descoberta), a alternância
  * período × coorte, a tendência das três taxas, as coortes semana a semana, as
  * perdas confiáveis e, recolhidas, as notas de medição. O robô aparece quando
@@ -86,7 +86,7 @@ export default async function FunilPage({
   const kp = kpisDoPeriodo(data, range, { brandRules, campanhasDaConta, cobertura, comparar: true, hoje, agora });
   const k = kp.overview;
 
-  // A resposta: o gargalo da Bússola, calculado do mesmo jeito.
+  // A resposta: o gargalo (`lib/gargalo.ts`).
   const transicoes = transicoesDoFunil(data, range, kp, { agora, hoje });
   const g = gargalo(transicoes, periodoDaRegua(data, range, hoje));
   const resposta = fraseDoGargalo(g);
@@ -122,7 +122,7 @@ export default async function FunilPage({
     <div className="space-y-6">
       <RegistrarAlertas alertas={[...alertasDeConfianca(kp.trust.travas), ...alertasDeAtribuicao(data, range)]} />
 
-      {/* 1. A resposta — o mesmo gargalo da Bússola, com dono e impacto. */}
+      {/* 1. A resposta — o gargalo, com dono e impacto. */}
       <p className="max-w-3xl text-base leading-relaxed">
         <span className={g ? "font-semibold text-[var(--status-fora-text)]" : "font-semibold"}>
           {g ? "► " : ""}

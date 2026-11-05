@@ -142,7 +142,7 @@ export function temLpNoPeriodo(data: DashboardData, range: DateRange | undefined
   return data.lpDaily.some((r) => inRange(r.date, range));
 }
 
-/** "+3 reuniões por semana se batesse a meta" — um texto, uma fonte (placar e Onde trava). */
+/** "+3 reuniões por semana se batesse a meta" — um texto, uma fonte (a resposta do Funil, `fraseDoGargalo`). */
 export function textoDoImpacto(g: Gargalo): string {
   const origem = g.transicao.referencia?.origem === "meta" ? "meta" : "média";
   if (!g.impacto) return g.semImpacto ?? "estimativa indisponível";

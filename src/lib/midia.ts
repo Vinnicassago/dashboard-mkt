@@ -6,7 +6,7 @@
  * Cinco peças, na ordem da tela:
  *   1. `resumoDaMidia` — investimento, conversão × descoberta, CPL, custo por
  *      reunião e ritmo contra o orçamento, TODOS de `kpisDoPeriodo` (ADR-03: o
- *      CPL daqui é o da Bússola);
+ *      CPL daqui é o do Início);
  *   2. `tendenciaSemanalMidia` — gasto, leads e CPL por semana (seg–dom), cada
  *      ponto um `kpisDoPeriodo` da semana;
  *   3. `conjuntosPorId` — campanhas → conjuntos agrupados por ID (S20: dois
@@ -48,6 +48,7 @@ import {
 } from "./metrics";
 import {
   custoExibivel,
+  fatoDoCustoPorReuniao,
   kpisDoPeriodo,
   mostrar,
   type KpisDoPeriodo,
@@ -82,9 +83,9 @@ export interface ResumoMidia {
   descoberta: number;
   cpl: { texto: string; medida: Medida; meta?: MetaDoResumo };
   /**
-   * O custo por reunião quando se sustenta; senão o FATO (decisão 4.2):
-   * "R$ 160 investidos em conversão · 1 reunião" — nunca a razão abaixo de
-   * `MIN_REUNIOES`.
+   * O custo por reunião quando se sustenta; senão o FATO (decisão 4.2,
+   * `fatoDoCustoPorReuniao`): "R$ 160 investidos em conversão · 1 reunião de
+   * conversão" — nunca a razão abaixo de `MIN_REUNIOES`.
    */
   custoPorReuniao: { exibivel: boolean; texto: string; n: number; medida: Medida; meta?: MetaDoResumo };
   /**
@@ -113,10 +114,9 @@ function metaDaLinha(linha: LinhaDaRegua | undefined, prefixo: string): MetaDoRe
 
 export function resumoDaMidia(kp: KpisDoPeriodo, regua: LinhaDaRegua[]): ResumoMidia {
   const linha = (m: LinhaDaRegua["metrica"]) => regua.find((l) => l.metrica === m);
-  const n = kp.reunioesConversao.valor;
-  const exibivel = custoExibivel(kp.custoPorReuniao);
-  const pisoInvest = kp.investimentoConversao.confianca?.nivel === "piso" ? "≥ " : "";
-  const fato = `${pisoInvest}${formatCurrency0(kp.investimentoConversao.valor)} investidos em conversão · ${formatInt(n)} ${n === 1 ? "reunião" : "reuniões"}`;
+  // O MESMO fato do cartão de Reuniões do Início (`fatoDoCustoPorReuniao`): a razão
+  // no número quando se sustenta, senão o investido e as reuniões de conversão.
+  const custo = fatoDoCustoPorReuniao(kp);
   const ritmo = linha("investimento_conversao");
   return {
     investimento: { texto: mostrar(kp.investimento, "moeda0"), medida: kp.investimento },
@@ -124,11 +124,11 @@ export function resumoDaMidia(kp: KpisDoPeriodo, regua: LinhaDaRegua[]): ResumoM
     descoberta: kp.investimentoDescoberta.valor,
     cpl: { texto: mostrar(kp.cpl, "moeda"), medida: kp.cpl, meta: metaDaLinha(linha("cpl"), "alvo") },
     custoPorReuniao: {
-      exibivel,
-      texto: exibivel ? mostrar(kp.custoPorReuniao, "moeda") : fato,
-      n,
+      exibivel: custo.exibivel,
+      texto: custo.exibivel ? custo.valor : custo.fato,
+      n: custo.n,
       medida: kp.custoPorReuniao,
-      meta: exibivel ? metaDaLinha(linha("custo_por_reuniao"), "alvo") : undefined,
+      meta: custo.exibivel ? metaDaLinha(linha("custo_por_reuniao"), "alvo") : undefined,
     },
     ritmo:
       ritmo && ritmo.alvo != null
@@ -667,7 +667,7 @@ export function criativosAgregados(
   data: DashboardData,
   range: DateRange | undefined,
   opts: {
-    /** Fim do período (hoje na vista padrão): onde as janelas da saúde terminam. */
+    /** Onde as janelas da saúde terminam: `fimDoPeriodo` = min(fim do período, hoje); hoje na vista padrão. */
     fim?: string;
     /** Dias cobertos por syncs bem-sucedidos: sem eles a janela vazia é "Sem dados", não "Parado" (ADR-06). */
     cobertura?: Intervalo[];

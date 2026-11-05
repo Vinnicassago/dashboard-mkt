@@ -164,8 +164,9 @@ export default async function ConteudoPage({
   }));
 
   // As ações de conteúdo (cadência, formato, CTA, grade) moram AQUI desde a
-  // Bússola (Fase 5): a home de conversão só lista o motor v2, que é o funil
-  // pago. A marca de seguidores já as mostra na home dela — um fato, um lugar.
+  // Fase 5: o Início de conversão não lista ações (o motor v2, do funil pago,
+  // está dormente até a Mídia). A marca de seguidores já as mostra no Início
+  // dela — um fato, um lugar.
   const acoesDeConteudo =
     brand.type === "awareness" ? [] : buildRecommendations(data, range, new Date().toISOString());
 

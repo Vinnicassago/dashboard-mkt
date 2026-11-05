@@ -4,4 +4,4 @@
  * constante, atualizada em todo commit que vai para produção. É o jeito de saber,
  * sem login, se a produção está rodando o código novo: GET /api/health.
  */
-export const VERSAO = "2026-11-04a · robô no painel · Fila do comercial por grupo · resgate 24 h";
+export const VERSAO = "2026-11-05b · Início em 4 blocos · atalho da live · dia do lead em Brasília";

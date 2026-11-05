@@ -59,7 +59,7 @@ export interface Quarentena {
 
 export interface Trava {
   id: string;
-  /** `config` não é culpa da campanha — é campo em branco. Não colore o farol. */
+  /** `config` não é culpa da campanha — é campo em branco. Fora do ⚠: mora em Configurações → Pendências. */
   nivel: NivelConfianca | "config";
   titulo: string;
   detalhe: string;
@@ -131,7 +131,10 @@ function linhasDoPeriodo(input: TrustInput) {
 /**
  * Dias do intervalo sem nenhuma linha de anúncio (o buraco que vira "piso").
  * HOJE não conta: o dia ainda está acontecendo e o sync roda de manhã — com os
- * presets ancorados em hoje, ele seria um "buraco" em todo período.
+ * presets ancorados em hoje, ele seria um "buraco" em todo período. Dia antes da
+ * 1ª linha de anúncio da marca também não (C9): é o mesmo corte do `resolveRange`
+ * (o período começa no 1º dado) — um período pedido INTEIRO antes dele é vazio de
+ * verdade, não um buraco do sync.
  */
 function diasSemDado(
   data: DashboardData,
@@ -145,6 +148,9 @@ function diasSemDado(
   if (range) {
     from = range.from;
     to = range.to;
+    let primeiro: string | undefined;
+    for (const d of dates) if (!primeiro || d < primeiro) primeiro = d;
+    if (primeiro && from < primeiro) from = primeiro;
     if (to >= hoje) {
       const ontem = new Date(hoje + "T00:00:00Z");
       ontem.setUTCDate(ontem.getUTCDate() - 1);
@@ -316,14 +322,18 @@ export function assessTrust(input: TrustInput): TrustReport {
     });
   }
 
-  // 2b. Mesmo raciocínio um degrau acima: sem lead, CPL não é R$ 0,00.
+  // 2b. Mesmo raciocínio um degrau acima: sem lead, CPL não é R$ 0,00. O título diz
+  //     QUAL lead falta: com orgânicos no período, "nenhum lead" contradiz o cartão
+  //     de Leads ao lado (a trava olha só os de conversão, o denominador do CPL).
   if (leadsCpl === 0 && kpis.spendConversao > 0) {
+    const outros = kpis.leads > 0 && kpis.leadsConversao !== undefined;
     travas.push({
       id: "sem-lead",
       nivel: "quarentena",
-      titulo: "Nenhum lead registrado no período",
-      detalhe:
-        "Houve investimento em conversão e nenhum cadastro. O custo por lead fica sem denominador — e vale checar o rastreio da landing page antes de concluir que a mídia não performou.",
+      titulo: outros ? "Nenhum lead de conversão no período" : "Nenhum lead registrado no período",
+      detalhe: outros
+        ? "Houve investimento em conversão e nenhum cadastro veio dele — os leads do período são de outras origens. O custo por lead fica sem denominador — e vale checar o rastreio da landing page antes de concluir que a mídia não performou."
+        : "Houve investimento em conversão e nenhum cadastro. O custo por lead fica sem denominador — e vale checar o rastreio da landing page antes de concluir que a mídia não performou.",
       afeta: ["cpl", "cplBlended"],
       cta: { label: "Ver integrações", href: "/configuracoes/integracoes" },
     });

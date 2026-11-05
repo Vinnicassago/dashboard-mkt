@@ -17,6 +17,7 @@ import { avisarLeadNovo } from "@/lib/avisos";
 import { estadoDoRoboAgora } from "@/lib/robo/estado";
 import { enviarParaMeta, reenviarPendentes } from "@/lib/meta/capi-envios";
 import { sendGa4Event } from "@/lib/ga4/measurement-protocol";
+import { hojeEmBrasilia } from "@/lib/range";
 
 /**
  * O robô está ligado para a marca do lead (`estadoDoRoboAgora`, a função única)?
@@ -127,8 +128,14 @@ function clientIp(request: Request): string | undefined {
 
 let avisouSemChave = false;
 
+/**
+ * O dia do `lp_daily` (visitas, cliques, envios): o de Brasília, o mesmo
+ * calendário do lead (`diaDoLead`) — senão o envio das 22h caía num dia e o lead
+ * no outro, e "envios → leads" divergia nas bordas. Vale a partir de 05/11/2026;
+ * o histórico anterior ficou no dia UTC (contador não se redistribui).
+ */
 function today(): string {
-  return new Date().toISOString().slice(0, 10);
+  return hojeEmBrasilia();
 }
 
 export async function OPTIONS(request: Request) {

@@ -10,7 +10,15 @@ import type { KpiDelta } from "./kpi-card";
 export function pctDelta(
   current: number,
   previous: number,
-  opts: { lowerIsBetter?: boolean } = {},
+  opts: {
+    lowerIsBetter?: boolean;
+    /**
+     * Só a variação ("+12,3%"), com o "vs. período anterior" no `title` — para
+     * telas com orçamento de palavras (o Início, régua de nov/26); o ⓘ do cartão
+     * diz contra o que a seta compara.
+     */
+    curto?: boolean;
+  } = {},
 ): KpiDelta | undefined {
   if (!(previous > 0)) return undefined;
   const d = computeDelta(current, previous);
@@ -18,11 +26,10 @@ export function pctDelta(
   const intent: KpiDelta["intent"] =
     d.direction === "flat" ? "neutral" : good ? "good" : "bad";
   const sign = d.abs > 0 ? "+" : "";
-  return {
-    text: `${sign}${formatPercent(d.pct)} vs. anterior`,
-    direction: d.direction,
-    intent,
-  };
+  const variacao = `${sign}${formatPercent(d.pct)}`;
+  return opts.curto
+    ? { text: variacao, title: "vs. período anterior", direction: d.direction, intent }
+    : { text: `${variacao} vs. anterior`, direction: d.direction, intent };
 }
 
 /** Absolute signed change, e.g. "+12 no período" for new followers. */

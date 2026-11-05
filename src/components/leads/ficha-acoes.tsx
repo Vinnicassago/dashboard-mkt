@@ -12,6 +12,7 @@ import {
 import { RegistrarStatus } from "@/components/tables/lead-status";
 import { CANAL_LABEL, linkWhatsapp, type CanalContato } from "@/lib/contato";
 import { TRANSICOES, encerrado } from "@/lib/lead-status";
+import { telefoneUtilizavel } from "@/lib/phone";
 import { RESULTADOS_CONTATO, type ResultadoContato } from "@/lib/qualificacao";
 import type { LeadStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -52,7 +53,9 @@ export function FichaAcoes({
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
-  const [canalEscolhido, setCanal] = useState<CanalContato>(optOut ? "ligacao" : "whatsapp");
+  // Sem número utilizável não há o botão do WhatsApp: a tentativa começa por ligação.
+  const temWhatsapp = telefoneUtilizavel(telefone) && !optOut;
+  const [canalEscolhido, setCanal] = useState<CanalContato>(temWhatsapp ? "whatsapp" : "ligacao");
   // O opt-out pode chegar depois da montagem (`router.refresh` mantém o estado): o
   // canal bloqueado nunca fica escolhido nem vai para o servidor.
   const canal: CanalContato = optOut && canalEscolhido === "whatsapp" ? "ligacao" : canalEscolhido;
@@ -134,7 +137,7 @@ export function FichaAcoes({
 
   return (
     <div className="space-y-5">
-      {telefone && !optOut ? (
+      {temWhatsapp && telefone ? (
         <a
           href={linkWhatsapp(telefone, mensagemWhatsapp, name)}
           target="_blank"

@@ -5,7 +5,7 @@
  * em `components/layout/nav-items.ts`). O resto do painel aponta para uma
  * ÂNCORA — `/configuracoes#metas`, `#orcamento`, `#utm`, `#diagnostico-leads` —
  * e cada âncora mora numa vista. Este módulo é a fonte única de "qual vista
- * abre qual âncora": o link da Bússola, da trava de confiança e do alerta cai
+ * abre qual âncora": o link da trava de confiança, do alerta e da pendência cai
  * na aba certa, nunca no topo da errada. Âncora nova = entrada em
  * `VISTA_DA_ANCORA` + `id` no card.
  */
@@ -105,9 +105,10 @@ export interface Pendencias {
 }
 
 /**
- * "O que falta aqui": a mesma avaliação de confiança da home, filtrada pelo que
- * se conserta em Configurações. O número do link da home é o do grupo
- * "preencher". Cada link já sai na vista da sua âncora, com o período.
+ * "O que falta aqui": a mesma avaliação de confiança das telas (`assessTrust`),
+ * filtrada pelo que se conserta em Configurações. As travas `config` (meta,
+ * orçamento em branco) moram SÓ aqui — o ⚠ não as mostra (`alertasDeConfianca`).
+ * Cada link já sai na vista da sua âncora, com o período.
  */
 export function pendenciasDeConfiguracoes(travas: Trava[], rangeKey?: string | null): Pendencias {
   const converter = (t: Trava): PendenciaLink => ({
@@ -190,7 +191,7 @@ export interface ContagensDaLeitura {
  * "Ativo · lido há X" ou "Nunca lido"; o detalhe é UMA linha: "N casaram · N do
  * robô sem lead no painel (K aceitaram o convite) · N sem a 1ª mensagem do robô (M
  * não chegaram ao robô)" — o 3º número é `semMensagemDoRobo`, o MESMO do alerta e
- * da B1, e por isso só sai com a leitura em dia (parada, o alerta e a B1 (b) somem:
+ * da frase do Início, e por isso só sai com a leitura em dia (parada, os dois somem:
  * o dado velho culparia o robô por uma falha da leitura). Sem `registro`, o
  * comportamento de antes (falha = "Falhando agora").
  */
@@ -201,7 +202,7 @@ export function estadoDoRobo(r: {
   registro?: RegistroDaFonte;
   /** A última leitura que deu certo (`STATE_KEYS.roboUltimaLeitura`). */
   leitura?: ContagensDaLeitura | null;
-  /** `semMensagemDoRobo` — a contagem do alerta `robo-sem-1a-msg` e da B1 (b). */
+  /** `semMensagemDoRobo` — a contagem do alerta `robo-sem-1a-msg` e da frase do Início (e da B1 do motor, dormente). */
   semMensagem?: { total: number; naoChegaram: number };
   agora?: string;
 }): EstadoExibido {

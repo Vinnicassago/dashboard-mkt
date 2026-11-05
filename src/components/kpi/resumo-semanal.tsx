@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { RefreshCw, Sparkles } from "lucide-react";
+import { ChevronDown, RefreshCw, Sparkles } from "lucide-react";
 import { gerarResumoSemanalAction, type ActionState } from "@/app/(dashboard)/ai-actions";
 import { Badge } from "@/components/ui/badge";
 import { formatDateShort, formatDateTime } from "@/lib/format";
@@ -62,25 +62,11 @@ function Analise({ r }: { r: ResumoSemanal }) {
   );
 }
 
-/**
- * RESUMO DA SEMANA (H7) — recolhido por padrão, no rodapé da Bússola. Mostra a
- * leitura mais recente, guarda as 12 últimas e deixa gerar de novo.
- */
-export function ResumoSemanalCard({
-  resumos,
-  canWrite,
-  aiEnabled,
-}: {
-  resumos: ResumoSemanal[];
-  canWrite: boolean;
-  aiEnabled: boolean;
-}) {
+/** Gerar o resumo à mão (só com `data:write` e a IA ligada — a ação confere de novo no servidor). */
+function useGerarResumo() {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [state, setState] = useState<ActionState | null>(null);
-  const ultimo = resumos[0];
-  const anteriores = resumos.slice(1);
-
   function gerar() {
     startTransition(async () => {
       const res = await gerarResumoSemanalAction();
@@ -88,23 +74,76 @@ export function ResumoSemanalCard({
       if (res.ok) router.refresh();
     });
   }
+  return { pending, state, gerar };
+}
+
+function Mensagem({ state }: { state: ActionState | null }) {
+  if (!state) return null;
+  return <span className={cn("text-xs", state.ok ? "text-muted-foreground" : "text-[var(--danger-text)]")}>{state.message}</span>;
+}
+
+/**
+ * RESUMO DA SEMANA (H7) — recolhido por padrão. Só existe na tela quando há
+ * leitura (Fase 2, F17): mostra a mais recente, guarda as 12 últimas ("leituras
+ * anteriores", dentro dele) e deixa gerar de novo. Sem leitura nenhuma, sobra UMA
+ * linha — o botão "Gerar o resumo da semana" — para quem pode (`canWrite` e a IA
+ * ligada); sem poder, nada. A instrução do cron mora em Configurações →
+ * Integrações, não aqui.
+ */
+export function ResumoSemanalCard({
+  resumos,
+  canWrite,
+  aiEnabled,
+  className,
+}: {
+  resumos: ResumoSemanal[];
+  canWrite: boolean;
+  aiEnabled: boolean;
+  className?: string;
+}) {
+  const { pending, state, gerar } = useGerarResumo();
+  const ultimo = resumos[0];
+  const anteriores = resumos.slice(1);
+  const podeGerar = canWrite && aiEnabled;
+
+  if (!ultimo) {
+    if (!podeGerar) return null;
+    return (
+      <div className={cn("flex flex-wrap items-center gap-2", className)} data-bloco="resumo">
+        <button
+          type="button"
+          onClick={gerar}
+          disabled={pending}
+          className="inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+        >
+          <Sparkles className={cn("size-3.5", pending && "animate-pulse")} />
+          {pending ? "Gerando…" : "Gerar o resumo da semana"}
+        </button>
+        <Mensagem state={state} />
+      </div>
+    );
+  }
 
   return (
-    <details className="rounded-xl border bg-card text-card-foreground shadow-sm" data-bloco="resumo">
-      <summary className="flex cursor-pointer flex-wrap items-center gap-2 p-4 text-sm">
-        <Sparkles className="size-4 text-muted-foreground" />
-        <span className="font-medium">Resumo da semana (IA)</span>
-        <span className="text-xs text-muted-foreground">
-          {ultimo
-            ? `semana de ${formatDateShort(ultimo.periodo.de)} a ${formatDateShort(ultimo.periodo.ate)} · ${ultimo.origem === "cron" ? "seg 08:00" : "à mão"}`
-            : aiEnabled
-              ? "ainda não gerado — sai toda segunda às 08:00 pelo cron"
-              : "IA desligada (sem ANTHROPIC_API_KEY)"}
+    <details className={cn("group rounded-xl border bg-card text-card-foreground shadow-sm", className)} data-bloco="resumo">
+      <summary
+        className="flex cursor-pointer items-center gap-2 px-4 py-2.5 text-sm"
+        title={`Semana de ${formatDateShort(ultimo.periodo.de)} a ${formatDateShort(ultimo.periodo.ate)} · ${
+          ultimo.origem === "cron" ? "automático (segunda 08:00)" : "gerado à mão"
+        }`}
+      >
+        <Sparkles className="size-4 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 truncate">
+          <span className="font-medium">Resumo da IA</span>
+          <span className="text-muted-foreground">
+            {" "}
+            · {formatDateShort(ultimo.periodo.de)}–{formatDateShort(ultimo.periodo.ate)}
+          </span>
         </span>
-        <span className="ml-auto text-xs text-muted-foreground">▸ abrir</span>
+        <ChevronDown aria-hidden className="ml-auto size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
       </summary>
       <div className="space-y-4 border-t p-4">
-        {canWrite && aiEnabled ? (
+        {podeGerar ? (
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
@@ -113,22 +152,13 @@ export function ResumoSemanalCard({
               className="inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
             >
               <RefreshCw className={cn("size-3.5", pending && "animate-spin")} />
-              {pending ? "Gerando…" : ultimo ? "Gerar de novo" : "Gerar agora"}
+              {pending ? "Gerando…" : "Gerar de novo"}
             </button>
             <span className="text-xs text-muted-foreground">lê a semana fechada mais recente (segunda a domingo)</span>
-            {state && !state.ok ? <span className="text-xs text-[var(--danger-text)]">{state.message}</span> : null}
-            {state?.ok ? <span className="text-xs text-muted-foreground">{state.message}</span> : null}
+            <Mensagem state={state} />
           </div>
         ) : null}
-        {ultimo ? (
-          <Analise r={ultimo} />
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            {aiEnabled
-              ? "Sem leitura ainda. O cron chama /api/resumo-semanal toda segunda às 08:00 (veja Configurações → Integrações); ou gere agora."
-              : "Defina ANTHROPIC_API_KEY no servidor para ligar o resumo semanal."}
-          </p>
-        )}
+        <Analise r={ultimo} />
         {anteriores.length > 0 ? (
           <details>
             <summary className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">

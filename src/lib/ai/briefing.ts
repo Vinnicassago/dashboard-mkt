@@ -7,7 +7,8 @@
  *     funções que desenham a tela. Assim o texto da IA nunca diverge do painel.
  *   • NENHUM dado de lead entra. Só contagens e razões — nome, e-mail e telefone
  *     ficam no servidor (LGPD). Legenda de post entra truncada: é conteúdo
- *     público do próprio perfil, não dado de terceiro.
+ *     público do próprio perfil, não dado de terceiro. Do Início entram só os
+ *     textos e as contagens (`inicioParaIA`): a lista de pessoas fica de fora.
  *   • ~3 KB de JSON em vez de milhares de linhas: barato, rápido e cacheável.
  */
 
@@ -19,6 +20,7 @@ import {
   campaignPacing,
   creativePerformance,
   ctaDistribution,
+  fimDoPeriodo,
   formatPerformance,
   igAccountTotals,
   inRange,
@@ -33,7 +35,8 @@ import {
 } from "../metrics";
 import { MIN_REUNIOES } from "../trust";
 import { hojeEmBrasilia } from "../range";
-import { custoExibivel, kpisDoPeriodo, reguaDoPeriodo } from "../kpis";
+import { custoExibivel, kpisDoPeriodo, reguaDoPeriodo, type KpisDoPeriodo } from "../kpis";
+import type { Inicio } from "../inicio";
 import { META_DEF } from "../metas";
 import { DICIONARIO } from "../dicionario";
 import { buildRecommendations } from "../recommendations";
@@ -70,13 +73,58 @@ export interface BriefingOptions {
   /** Avisos de qualidade de dados (vêm de fora: dependem do último sync). */
   warnings: DataWarning[];
   /**
-   * As ações do motor v2 (`resumoDasAcoes`), quando quem chama já montou a
-   * Bússola — a IA recebe o que a tela decidiu, com dono e estado, e não
-   * reinventa a lista. Ausente, entram só as regras de conteúdo.
+   * Os KPIs do período como a tela os calculou (`carregarBussola`: regras de
+   * marca, cobertura do sync, "hoje"). Com eles, `pago`, `regua` e o custo por
+   * reunião em quarentena são os MESMOS números dos cartões do Início (com a
+   * mesma confiança). Ausentes (marca awareness, testes), calcula-se aqui.
    */
-  acoes?: { regra: string; dono: string; severidade: string; titulo: string; estado?: string }[];
-  /** O veredito do placar e o gargalo, como a Bússola os escreve. */
-  bussola?: { veredito: string; gargalo?: string };
+  kpis?: KpisDoPeriodo;
+  /**
+   * O Início montado (`montarInicio`) — entra só a projeção sem pessoas
+   * (`inicioParaIA`): os cartões como a tela os escreve, leads por dia, o funil
+   * curto, as frases do atendimento e o último post.
+   */
+  inicio?: Inicio;
+}
+
+/**
+ * O bloco `inicio` do briefing: o que o Início MOSTRA, só textos e contagens —
+ * nunca a lista de pessoas (`leadsChegando.ultimos`), nome, telefone ou e-mail.
+ * O atendimento (título, frases) é a foto do MOMENTO da geração (segunda 08:00),
+ * não da semana resumida; o funil curto é a coorte do período.
+ */
+export function inicioParaIA(i: Inicio) {
+  return {
+    cartoes: {
+      investimentoConversao: i.cartoes.investimento.texto,
+      cpl: i.cartoes.cpl.texto,
+      leads: i.cartoes.leads.texto,
+      reunioesAgendadas: i.cartoes.reunioes.texto,
+      custoPorReuniao: i.cartoes.custoReuniao,
+    },
+    leadsChegando: {
+      porDia: i.leadsChegando.dias.map((d) => ({ dia: d.date, leads: d.leads, campanhaPausada: d.pausado })),
+      ultimoLead: i.leadsChegando.ultimos[0]?.ha ?? null,
+    },
+    atendimento: {
+      titulo: i.atendimento.titulo,
+      esperandoOComercial: i.atendimento.esperando,
+      leituraDoRobo: i.atendimento.leituraParada?.texto ?? null,
+      funil: {
+        recorte: i.atendimento.recorte,
+        degraus: i.atendimento.funil.map((d) => ({
+          degrau: d.rotulo,
+          contagem: d.valor,
+          minimo: d.piso,
+          taxaPct: d.taxa == null ? null : pct(d.taxa),
+          taxaSobre: d.taxa == null ? null : d.base === "leads" ? "leads" : "degrau anterior",
+        })),
+      },
+      frases: i.atendimento.frases.map((f) => f.texto),
+      nadaEsperando: i.atendimento.vazio,
+    },
+    diasDesdeOUltimoPost: i.rodape.diasDesdeUltimoPost,
+  };
 }
 
 /**
@@ -230,6 +278,7 @@ export function buildBriefing(
         carrosseisPorSemana: r1(cadencia.carrosseisPerWeek),
         gradeEsperada: `${WEEKLY_MIX.reels} reels + ${WEEKLY_MIX.carrosseis} carrosséis`,
         maiorIntervaloDias: cadencia.maxGapDays,
+        // null = nunca houve post da grade (não é "postou hoje").
         diasDesdeOUltimoPost: cadencia.daysSinceLast,
         diasComDuasOuMaisPecas: cadencia.daysWithPileup,
       },
@@ -238,25 +287,17 @@ export function buildBriefing(
     },
 
     metas,
-    // O que o painel já decidiu sozinho: as ações do motor (com dono e estado)
-    // e as regras de conteúdo — a IA prioriza ou discorda, não redescobre.
-    alertasJaDetectados: [
-      ...(opts.acoes ?? []).map((a) => ({
-        severidade: a.severidade,
-        titulo: a.titulo,
-        dono: a.dono,
-        regra: a.regra,
-        estado: a.estado,
-      })),
-      ...buildRecommendations(data, range, opts.nowIso).map((r) => ({
-        severidade: r.severity,
-        titulo: r.title,
-        dono: r.dono,
-        regra: "conteudo",
-        estado: undefined,
-      })),
-    ],
-    bussola: opts.bussola ?? null,
+    // O que o painel já detectou sozinho: as regras de conteúdo — a IA prioriza
+    // ou discorda, não redescobre. As ações do motor saíram (não têm tela até a
+    // Mídia da Fase 4: a IA não recebe o que nenhuma tela mostra).
+    alertasJaDetectados: buildRecommendations(data, range, opts.nowIso).map((r) => ({
+      severidade: r.severity,
+      titulo: r.title,
+      dono: r.dono,
+      regra: "conteudo",
+    })),
+    // O que o Início mostra (cartões, leads chegando, atendimento, último post) — sem pessoas.
+    inicio: opts.inicio ? inicioParaIA(opts.inicio) : null,
     rotinaDePresenca: (() => {
       const r = presenceRoutine(data.igAccountDaily.filter((x) => inRange(x.date, range)));
       if (!r.temDados) return null;
@@ -324,9 +365,10 @@ export function buildBriefing(
     };
   }
 
-  // Os MESMOS números do placar (kpisDoPeriodo) — a IA não argumenta com um CPL
-  // ou um custo por reunião diferente do que a tela mostra.
-  const kp = kpisDoPeriodo(data, range);
+  // Os MESMOS números dos cartões do Início (kpisDoPeriodo, com o contexto do
+  // carregador quando ele os passa) — a IA não argumenta com um CPL ou um custo
+  // por reunião diferente do que a tela mostra.
+  const kp = opts.kpis ?? kpisDoPeriodo(data, range);
   const k = kp.overview;
   const kpPrev = prevRange ? kpisDoPeriodo(data, prevRange) : undefined;
   const obj = objectiveBreakdown(data, range);
@@ -334,7 +376,7 @@ export function buildBriefing(
   // As janelas da saúde terminam no fim do período (hoje sem `range`), como na
   // tabela de /midia e no motor: a IA não chama de "fadigando" o anúncio que a
   // tela mostra parado.
-  const criativos = creativePerformance(data, range, { fim: range?.to ?? hojeEmBrasilia(new Date(opts.nowIso)) });
+  const criativos = creativePerformance(data, range, { fim: fimDoPeriodo(range, hojeEmBrasilia(new Date(opts.nowIso))) });
   // Com menos de MIN_REUNIOES o custo por reunião está em quarentena na tela: a
   // IA recebe null e o motivo, nunca o valor — senão argumenta com um número que
   // o painel esconde. A régua vale também por criativo.
@@ -402,7 +444,7 @@ export function buildBriefing(
     },
     // A régua (Fase 4): cada número do funil contra a meta que vale no período.
     // Sem status quando o número não se sustenta — a IA não julga o que a tela não julga.
-    regua: reguaDoPeriodo(kp, data, range, opts.nowIso.slice(0, 10))
+    regua: reguaDoPeriodo(kp, data, range, hojeEmBrasilia(new Date(opts.nowIso)))
       .filter((l) => l.alvo != null)
       .map((l) => ({
         metrica: META_DEF[l.metrica].nome,

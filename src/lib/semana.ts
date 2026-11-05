@@ -1,5 +1,5 @@
 /**
- * Semanas da Bússola — puro.
+ * Semanas (segunda a domingo, Brasília) — puro.
  *
  * A semana começa na SEGUNDA (Brasília): é quando a head lê o painel, quando o
  * resumo da IA sai (08:00) e quando o estado das ações é reavaliado do zero.

@@ -32,8 +32,8 @@
  *   rótulo fixo por status; a confiança do registro cai quando os status do
  *   período entraram em lote ou com atraso (as réguas são as do motor, C5).
  *
- * A resposta da página — onde trava, com dono e impacto — é o MESMO gargalo da
- * Bússola (`lib/gargalo.ts`); aqui só a frase é montada.
+ * A resposta da página — onde trava, com dono e impacto — é o gargalo de
+ * `lib/gargalo.ts`; aqui só a frase é montada.
  */
 
 import { AMOSTRA_MINIMA, montarCascata, type CascataComercial, type CascataResult, type CascataRobo, type Degrau, type Fonte } from "./cascata";
@@ -42,7 +42,7 @@ import { DONO_LABEL, type Dono } from "./dono";
 import type { FilaEtapa } from "./fila";
 import { SLA_PRIMEIRO_CONTATO_HORAS } from "./fila";
 import { textoDoImpacto, type Gargalo } from "./gargalo";
-import { somarHorasUteis } from "./horario-util";
+import { diaDoLead, somarHorasUteis } from "./horario-util";
 import { gruposDuplicados, pareceTeste } from "./identidade";
 import { custoExibivel, kpisDoPeriodo, reguaDoPeriodo, type KpisDoPeriodo } from "./kpis";
 import { LEAD_STATUS_META, LOST_STATUSES, MOTIVOS_CONTATO_INVALIDO, TENTATIVAS_PARA_SEM_RESPOSTA, isLostStatus } from "./lead-status";
@@ -52,7 +52,6 @@ import {
   cohortWeekly,
   countAttended,
   countClients,
-  dayOf,
   everBooked,
   filterAds,
   filterLeads,
@@ -106,8 +105,8 @@ export function vistaDoFunil(raw?: string | null): VistaFunil {
 // ---------------------------------------------------------------- a resposta
 
 /**
- * A linha de resposta — o gargalo com dono e impacto, nas MESMAS palavras do
- * bloco "Onde trava" da Bússola (`components/kpi/onde-trava.tsx`).
+ * A linha de resposta do Funil — o gargalo com dono e impacto (`lib/gargalo.ts`;
+ * o texto do impacto é o de `textoDoImpacto`, uma fonte só).
  */
 export function fraseDoGargalo(g: Gargalo | null): { titulo: string; detalhe: string } {
   if (!g) {
@@ -120,7 +119,7 @@ export function fraseDoGargalo(g: Gargalo | null): { titulo: string; detalhe: st
   const regua = t.referencia!.origem === "meta" ? "meta de" : "média de 8 semanas de";
   return {
     titulo: `Gargalo: ${t.rotulo}`,
-    // As mesmas casas do "Onde trava": uma abaixo de 10%, nenhuma acima.
+    // Casas decimais: uma abaixo de 10%, nenhuma acima.
     detalhe: `(${DONO_LABEL[t.dono]}) — ${formatPercent(t.taxa!, t.taxa! < 0.1 ? 1 : 0)} contra ${regua} ${formatPercent(t.referencia!.taxa, t.referencia!.taxa < 0.1 ? 1 : 0)}. ${textoDoImpacto(g)}.`,
   };
 }
@@ -218,13 +217,13 @@ const ROTULO_CUSTO: Record<string, string> = {
 /** Leads com 1ª tentativa registrada — na coorte (quem entrou) ou no período (quando aconteceu). */
 function primeiroContatoRegistrado(data: DashboardData, range: DateRange | undefined, vista: VistaFunil): number {
   if (vista === "coorte") return filterLeads(data.leads, range).filter((l) => l.firstContactAt).length;
-  return data.leads.filter((l) => l.firstContactAt && inRange(dayOf(l.firstContactAt), range)).length;
+  return data.leads.filter((l) => l.firstContactAt && inRange(diaDoLead(l.firstContactAt), range)).length;
 }
 
 /** Reuniões que ACONTECERAM no período (pela data da reunião) e vendas fechadas nele. */
 function eventosNoPeriodo(data: DashboardData, range: DateRange | undefined) {
-  const realizadas = data.leads.filter((l) => isAttended(l) && inRange(dayOf(l.attendedAt ?? l.meetingFor ?? l.createdAt), range)).length;
-  const vendas = data.leads.filter((l) => isClient(l) && inRange(dayOf(l.closedAt ?? l.createdAt), range)).length;
+  const realizadas = data.leads.filter((l) => isAttended(l) && inRange(diaDoLead(l.attendedAt ?? l.meetingFor ?? l.createdAt), range)).length;
+  const vendas = data.leads.filter((l) => isClient(l) && inRange(diaDoLead(l.closedAt ?? l.createdAt), range)).length;
   return { realizadas, vendas };
 }
 
@@ -242,7 +241,7 @@ function etapasDaLive(data: DashboardData, range: DateRange | undefined, vista: 
   const comClasse = doPeriodo.filter((l) => classeDoLead(l));
   const cliques =
     vista === "periodo"
-      ? data.leads.filter((l) => l.comunidadeEm && inRange(dayOf(l.comunidadeEm), range)).length
+      ? data.leads.filter((l) => l.comunidadeEm && inRange(diaDoLead(l.comunidadeEm), range)).length
       : doPeriodo.filter((l) => l.comunidadeEm).length;
   if (comClasse.length === 0 && cliques === 0) return [];
 
@@ -818,11 +817,25 @@ export interface CoorteSemana {
 const max = (a: string, b?: string) => (b && b > a ? b : a);
 const min = (a: string, b?: string) => (b && b < a ? b : a);
 
-/** A classificação ADR-06 de uma semana sem linha de anúncio. */
-function veiculacaoDaSemana(r: DateRange, semVeiculacao: boolean, cobertura?: Intervalo[]): VeiculacaoDaSemana {
-  if (!semVeiculacao) return "ok";
+/**
+ * A classificação ADR-06 de uma semana sem linha de anúncio. Só os dias até
+ * `hoje` contam: dia depois de hoje é FUTURO, nem "sem dados" nem "pausada" (C9)
+ * — a semana em curso não vira "sem dados" pelos dias que ainda não chegaram, e
+ * a que nem começou não tem marca. Dia antes da 1ª linha de anúncio da marca
+ * (`primeiroDado`) também não conta: a semana toda de antes da campanha não tem
+ * marca (o mesmo corte do `resolveRange` e da trava de cobertura).
+ */
+function veiculacaoDaSemana(
+  r: DateRange,
+  semVeiculacao: boolean,
+  hoje: string,
+  cobertura?: Intervalo[],
+  primeiroDado?: string,
+): VeiculacaoDaSemana {
+  if (!semVeiculacao || r.from > hoje || (primeiroDado && r.to < primeiroDado)) return "ok";
   if (!cobertura) return "pausada";
-  for (let d = r.from; d <= r.to; d = somarDias(d, 1)) if (!diaCoberto(cobertura, d)) return "sem_dados";
+  const ate = min(r.to, hoje);
+  for (let d = max(r.from, primeiroDado); d <= ate; d = somarDias(d, 1)) if (!diaCoberto(cobertura, d)) return "sem_dados";
   return "pausada";
 }
 
@@ -849,6 +862,7 @@ export function coortesDoFunil(
   if (semanas.length === 0) return [];
 
   const adsPorSemana = new Set(filterAds(data.adDaily, range).map((r) => segundaDaSemana(r.date)));
+  const primeiroDado = data.adDaily.reduce<string | undefined>((m, r) => (!m || r.date < m ? r.date : m), undefined);
   const agoraMs = Date.parse(opts.agora);
 
   return semanas.map((semana) => {
@@ -858,7 +872,7 @@ export function coortesDoFunil(
     const k = kpisDoPeriodo(data, r, { hoje: opts.hoje, agora: opts.agora });
     const ganhos = leads.filter(everBooked).length;
     const perdas = leads.filter((l) => isLostStatus(l.status) && !everBooked(l)).length;
-    const semVeiculacao = c ? c.semVeiculacao : !adsPorSemana.has(semana);
+    const semVeiculacao = r.from <= opts.hoje && (c ? c.semVeiculacao : !adsPorSemana.has(semana));
     return {
       semana,
       label: `${semana.slice(8, 10)}/${semana.slice(5, 7)}`,
@@ -871,7 +885,7 @@ export function coortesDoFunil(
       leadAgendada: leads.length > 0 ? k.taxaLeadAgendada.valor : null,
       immature: c?.immature ?? agoraMs - Date.parse(`${semana}T00:00:00Z`) < 7 * 86_400_000,
       semVeiculacao,
-      veiculacao: veiculacaoDaSemana(r, semVeiculacao, opts.cobertura),
+      veiculacao: veiculacaoDaSemana(r, semVeiculacao, opts.hoje, opts.cobertura, primeiroDado),
       perdas,
       abertos: leads.length - ganhos - perdas,
       ganhos,
@@ -1071,7 +1085,7 @@ export interface ConfiancaRegistro {
 export function confiancaDoRegistro(data: DashboardData, range: DateRange | undefined, eventos: LeadEvent[]): ConfiancaRegistro {
   const porLead = new Map(data.leads.map((l) => [l.id, l]));
   const mudancas = eventos
-    .filter((e) => e.action === "status_changed" && porLead.has(e.leadId) && inRange(dayOf(e.createdAt), range))
+    .filter((e) => e.action === "status_changed" && porLead.has(e.leadId) && inRange(diaDoLead(e.createdAt), range))
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   const total = mudancas.length;
 

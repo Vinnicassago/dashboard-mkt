@@ -21,9 +21,11 @@ vi.mock("next/link", async () => {
 });
 // As server actions não rodam aqui: a tela só as chama no clique.
 vi.mock("@/app/(dashboard)/leads/actions", () => ({
+  anotarLead: vi.fn(),
   changeLeadStatus: vi.fn(),
   desfazerTentativa: vi.fn(),
   marcarReuniao: vi.fn(),
+  registrarResultadoDoContato: vi.fn(),
   registrarTentativa: vi.fn(),
   reabrirLead: vi.fn(),
 }));
@@ -70,6 +72,25 @@ describe("a linha da Fila", () => {
     expect(linha(html, "Pessoa comzap")).toContain("wa.me");
   });
 
+  it("“sem telefone” ou número que não serve: sem o botão de WhatsApp — com e sem o robô", async () => {
+    // Em produção (05/11) o resgate "sem telefone" mostrava o botão: o campo tinha
+    // texto, mas não um número (um `wa.me` que não abre nada).
+    const html = await tela([
+      grupo("resgate", [
+        item("lixo", "resgate", { motivo: "sem-telefone", telefone: "123" }),
+        item("vazio", "resgate", { motivo: "sem-telefone", telefone: undefined }),
+        item("bom", "resgate", { motivo: "robo-nao-falou", telefone: "(11) 98765-0001" }),
+      ]),
+    ]);
+    expect(linha(html, "Pessoa lixo")).not.toContain("wa.me");
+    expect(linha(html, "Pessoa lixo")).toContain("sem telefone");
+    expect(linha(html, "Pessoa vazio")).not.toContain("wa.me");
+    expect(linha(html, "Pessoa bom")).toContain("wa.me/5511987650001");
+    // Robô desligado: a mesma régua nos grupos de antes.
+    const desligado = await tela([grupo("novo", [item("zero", "novo", { status: "lead", telefone: "0" })])], { roboLigado: false });
+    expect(linha(desligado, "Pessoa zero")).not.toContain("wa.me");
+  });
+
   it("opt-out: sem WhatsApp e com a etiqueta “não quer mensagens” (11.12)", async () => {
     const html = await tela([grupo("resgate", [item("optout", "resgate", { motivo: "retorno" })])], {
       extras: { optout: { optOut: true } },
@@ -110,5 +131,40 @@ describe("a linha da Fila", () => {
     const html = await tela([grupo("convite-aceito", [])], { transferidosSemLead: 3 });
     expect(html).toContain('href="/configuracoes/integracoes?range=7d#robo"');
     expect(html).toContain("3 aceitaram pelo robô sem cadastro no painel");
+  });
+});
+
+describe("o botão de WhatsApp só com número utilizável", () => {
+  it("a régua é a do “sem telefone” do resgate (`chaveTelefoneValida`)", async () => {
+    const { telefoneUtilizavel, chaveTelefoneValida } = await import("../phone");
+    for (const t of ["", "0", "123", "1198765", null, undefined]) {
+      expect(telefoneUtilizavel(t)).toBe(false);
+      expect(chaveTelefoneValida(t)).toBeNull();
+    }
+    for (const t of ["(11) 98765-0001", "5511987650001", "11 8765-0001", "+55 21 3333-4444"]) {
+      expect(telefoneUtilizavel(t)).toBe(true);
+    }
+  });
+
+  it("a ficha: sem “Abrir o WhatsApp” quando o número não serve", async () => {
+    const { FichaAcoes } = await import("@/components/leads/ficha-acoes");
+    const ficha = (telefone?: string) =>
+      renderToStaticMarkup(
+        createElement(FichaAcoes, {
+          id: "L1",
+          name: "Pessoa Ficha",
+          status: "em_contato",
+          jaAgendou: false,
+          tentativas: 0,
+          diasComTentativa: 0,
+          telefone,
+          mensagemWhatsapp: "Oi {nome}",
+          canEdit: true,
+          podeReabrir: false,
+        }),
+      );
+    expect(ficha("123")).not.toContain("wa.me");
+    expect(ficha(undefined)).not.toContain("wa.me");
+    expect(ficha("(11) 98765-0001")).toContain("wa.me/5511987650001");
   });
 });

@@ -66,8 +66,8 @@ export default async function IntegracoesPage({ searchParams }: { searchParams: 
     roboConfigurado ? getState<string>(STATE_KEYS.roboUltimoCron) : null,
     avisoDeResgateConfigurado() ? getState<unknown>(STATE_KEYS.avisoResgate) : null,
   ]);
-  // "Sem a 1ª mensagem do robô": a MESMA contagem do alerta e da B1 (b) — e com a
-  // MESMA guarda: com a leitura parada ou falhando os dois somem (o dado velho
+  // "Sem a 1ª mensagem do robô": a MESMA contagem do alerta e da frase do Início (e
+  // da B1 do motor, dormente) — e com a MESMA guarda: com a leitura parada ou falhando os dois somem (o dado velho
   // culparia o robô por uma falha da leitura), então aqui também não sai.
   const reabertos =
     estadoRobo.ligado && !leituraDoRoboParada(estadoRobo, agoraRoboIso)
