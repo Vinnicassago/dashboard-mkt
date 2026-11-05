@@ -16,6 +16,7 @@ import {
 import { pageRange } from "@/lib/page-range";
 import { expedienteAtual } from "@/lib/atendimento-server";
 import { isRangeKey, rangeLabel } from "@/lib/range";
+import { estadoDoRoboAgora } from "@/lib/robo/estado";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +30,8 @@ const erro = (status: number, message: string) => Response.json({ ok: false, mes
  *  1. confere `leads:write` (comercial e administrador — Marketing vê o contato
  *     mascarado e não exporta);
  *  2. recalcula as linhas como a página (`montarLinhasDeLeads`, mesma marca,
- *     mesmo período) e aplica o filtro PEDIDO, conferido (`filtroDoPedido`);
+ *     mesmo período, o MESMO estado do robô e os mesmos eventos — o `reaberto`
+ *     vem deles) e aplica o filtro PEDIDO, conferido (`filtroDoPedido`);
  *  3. grava em `audit_log` a contagem e o filtro do que vai sair — direto no
  *     store, sem o `registrarAuditoria` que engole o erro;
  *  4. só então devolve o arquivo. Insert falhou → erro e nenhum byte de CSV.
@@ -62,10 +64,17 @@ export async function POST(request: Request): Promise<Response> {
   let n: number;
   let descricao: string;
   try {
-    const [data, eventos] = await Promise.all([getData(brand), listLeadEvents({ brand, limit: 0 })]);
+    const [data, eventos, robo] = await Promise.all([
+      getData(brand),
+      listLeadEvents({ brand, limit: 0 }),
+      estadoDoRoboAgora(brand),
+    ]);
     const { range, rangeKey } = pageRange(data, rangeParam);
     const expediente = await expedienteAtual();
-    const linhas = aplicarFiltro(montarLinhasDeLeads(data, eventos, new Date().toISOString(), { range, expediente }), filtro);
+    const linhas = aplicarFiltro(
+      montarLinhasDeLeads(data, eventos, new Date().toISOString(), { range, expediente, robo }),
+      filtro,
+    );
     n = linhas.length;
     descricao = descreverFiltro(filtro, periodoDoRegistro(rangeLabel(rangeKey), range));
     csv = montarCsvDeLeads(linhas);

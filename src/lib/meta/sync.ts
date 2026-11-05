@@ -29,6 +29,8 @@ export interface SyncReport {
   ranAt: string;
   ads?: SourceOutcome;
   instagram?: SourceOutcome;
+  /** A leitura do robô (`lib/robo/sync.ts`), quando o pedido a incluiu e o robô está ligado. */
+  robo?: SourceOutcome;
   token?: string;
   skipped: string[];
 }

@@ -23,7 +23,9 @@ import {
 import { STATE_KEYS } from "@/lib/data/backend";
 import { parseAdsCsv } from "@/lib/csv";
 import { parseLeadsCsv } from "@/lib/leads-csv";
-import { resyncAdsHistory, runSync, type SyncSource } from "@/lib/meta/sync";
+import { resyncAdsHistory, runSync, type SyncReport } from "@/lib/meta/sync";
+import { incluirRoboNoRelatorio } from "@/lib/robo/sync";
+import { ERRO_FONTE_DESCONHECIDA, lerFonteDoSync } from "@/lib/fonte-do-sync";
 import { resolveMetaBrands, brandForCampaign, NAO_CLASSIFICADO } from "@/lib/meta/config";
 import { tokensDoCampo } from "@/lib/regra-de-marca";
 import { BRANDS } from "@/lib/brands";
@@ -602,18 +604,24 @@ export async function reclassifyAdsAction(): Promise<ActionState> {
   }
 }
 
-/** Run the Meta collection on demand (same code path as the daily cron). */
+/** Run the collection on demand (same code path as the cron: Meta, Instagram e o robô). */
 export async function syncNowAction(
   _prev: ActionState | null,
   formData: FormData,
 ): Promise<ActionState> {
   if (!(await can("data:write"))) return DENIED;
-  const raw = String(formData.get("source") ?? "all");
-  const source: SyncSource =
-    raw === "ads" || raw === "instagram" ? raw : "all";
+  // A mesma regra da rota: fonte desconhecida é erro de uso, nunca "tudo".
+  const source = lerFonteDoSync(formData.get("source") ?? "all");
+  if (!source) return { ok: false, message: ERRO_FONTE_DESCONHECIDA };
 
   try {
-    const report = await runSync({ source });
+    const report: SyncReport =
+      source === "robo" ? { ranAt: new Date().toISOString(), skipped: [] } : await runSync({ source });
+    if (source === "robo" || source === "all") {
+      const robo = await incluirRoboNoRelatorio(report, "manual");
+      // Desligado não é erro (§0): "só o robô" com ele desligado é um aviso neutro.
+      if (source === "robo" && robo.desligado) return { ok: true, message: "Robô desligado — nada para ler." };
+    }
     const parts: string[] = [];
     if (report.ads) {
       parts.push(`Anúncios: ${report.ads.ok ? report.ads.detail : `erro — ${report.ads.detail}`}`);
@@ -623,13 +631,15 @@ export async function syncNowAction(
         `Instagram: ${report.instagram.ok ? report.instagram.detail : `erro — ${report.instagram.detail}`}`,
       );
     }
+    if (report.robo) parts.push(`Robô: ${report.robo.ok ? report.robo.detail : `erro — ${report.robo.detail}`}`);
     if (report.token) parts.push(`Token: ${report.token}`);
     if (report.skipped.length) parts.push(`Ignorado: ${report.skipped.join(", ")}`);
 
     const ok =
       (report.ads?.ok ?? true) &&
       (report.instagram?.ok ?? true) &&
-      Boolean(report.ads || report.instagram);
+      (report.robo?.ok ?? true) &&
+      Boolean(report.ads || report.instagram || report.robo);
 
     revalidateAll();
     return {

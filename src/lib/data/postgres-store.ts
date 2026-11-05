@@ -20,10 +20,14 @@ import {
   type CapiEnvioPatch,
   type ListCapiEnviosOpts,
   type LeadFichaPatch,
+  type LeadRoboPatch,
   FICHA_SOBRESCREVE,
   FICHA_UMA_VEZ,
+  ROBO_SOBRESCREVE,
+  ROBO_UMA_VEZ,
   chaveDeLinhaDeAnuncio,
   emFilaNoProcesso,
+  recomecaNoReaberto,
 } from "./backend";
 import type {
   AcaoEstado,
@@ -101,7 +105,7 @@ const POST_COLS = ["id", "brand", "published_at", "type", "caption", "permalink"
 const CREATIVE_COLS = ["ad_id", "brand", "name", "format", "creative_id", "thumbnail_url", "video_plays", "thru_plays", "instagram_media_id", "instagram_permalink"];
 const AD_COLS = ["brand", "date", "ad_id", "campaign", "campaign_id", "adset", "adset_id", "objective", "spend", "impressions", "reach", "frequency", "clicks", "leads"];
 const LP_COLS = ["brand", "date", "visits", "clicks", "form_submits"];
-const LEAD_COLS = ["id", "brand", "created_at", "name", "email", "phone", "utm_source", "utm_campaign", "utm_content", "utm_medium", "utm_term", "fbclid", "ad_id", "adset_id", "campaign_id", "status", "meeting_at", "meeting_for", "first_contact_at", "lost_reason_detail", "value", "booked_at", "attended_at", "closed_at", "lost_at", "robo_session_id", "fbc", "fbp", "ga_client_id", "ga_session_id", "deleted_at", "deleted_by", "deleted_reason", "bem", "faixa_valor", "finalidade", "faixa_parcela", "prazo_compra", "classe", "classe_n8n", "aceite_mensagens", "msg1_enviada_em", "msg1_status", "horario_preferido", "atendimento_avisado_em", "escalado_em", "comunidade_em", "diagnostico", "reuniao_confirmada_em", "reuniao_remarcar_em"];
+const LEAD_COLS = ["id", "brand", "created_at", "name", "email", "phone", "utm_source", "utm_campaign", "utm_content", "utm_medium", "utm_term", "fbclid", "ad_id", "adset_id", "campaign_id", "status", "meeting_at", "meeting_for", "first_contact_at", "lost_reason_detail", "value", "booked_at", "attended_at", "closed_at", "lost_at", "robo_session_id", "fbc", "fbp", "ga_client_id", "ga_session_id", "deleted_at", "deleted_by", "deleted_reason", "bem", "faixa_valor", "finalidade", "faixa_parcela", "prazo_compra", "classe", "classe_n8n", "aceite_mensagens", "msg1_enviada_em", "msg1_status", "horario_preferido", "atendimento_avisado_em", "escalado_em", "comunidade_em", "diagnostico", "reuniao_confirmada_em", "reuniao_remarcar_em", "robo_visto_em", "robo_recebido_em", "robo_saudacao_em", "robo_respondeu_em", "robo_ultima_msg_cliente_em", "robo_ultima_interacao_em", "robo_etapa", "robo_cobrancas", "robo_ultima_cobranca_em", "robo_convite_em", "robo_aceitou_em", "robo_sem_whatsapp_em", "robo_encerrado_em", "robo_opt_out_em", "robo_pausado"];
 const GOAL_COLS = ["brand", "metric", "period", "target", "lower_is_better"];
 const META_COLS = ["id", "brand", "metrica", "periodo", "alvo", "vigente_desde", "provisoria", "origem", "entradas", "criada_em", "criada_por"];
 const EVENT_COLS = ["id", "lead_id", "brand", "lead_name", "actor", "action", "from_status", "to_status", "payload", "occurred_at", "created_at"];
@@ -457,6 +461,51 @@ export const postgresBackend: DataBackend = {
   },
 
   /**
+   * Lote numa transação: SET dinâmico só com as colunas `robo_*` do patch —
+   * `coalesce` nas UMA VEZ, valor direto (null limpa) nas que sobrescrevem. Nada
+   * de status nem de `robo_session_id` (o índice único derrubaria o lote). Termina
+   * com `touch()` SEM argumento, e só se algo mudou: `touch(false)` apagaria o selo
+   * "dados de exemplo" a cada 15 min.
+   */
+  async updateLeadsRobo(itens: { id: string; patch: LeadRoboPatch }[]) {
+    if (itens.length === 0) return 0;
+    const alcancados = await inTransaction(async (client) => {
+      let n = 0;
+      for (const { id, patch } of itens) {
+        const sets: string[] = [];
+        const params: unknown[] = [];
+        for (const f of ROBO_SOBRESCREVE) {
+          if (patch[f] === undefined) continue;
+          params.push(patch[f]);
+          sets.push(`${snake(f)} = $${params.length}`);
+        }
+        for (const f of ROBO_UMA_VEZ) {
+          if (patch[f] == null) continue;
+          params.push(patch[f]);
+          const v = params.length;
+          const col = snake(f);
+          if (recomecaNoReaberto(patch, f)) {
+            // de antes do último `reaberto` conta como vazio (11.3); depois, UMA VEZ de novo
+            params.push(patch.reabertoEm);
+            sets.push(
+              `${col} = case when ${col} is null or ${col} < $${params.length}::timestamptz then $${v}::timestamptz else ${col} end`,
+            );
+          } else {
+            sets.push(`${col} = coalesce(${col}, $${v})`);
+          }
+        }
+        if (sets.length === 0) continue;
+        params.push(id);
+        const r = await client.query(`update leads set ${sets.join(", ")} where id = $${params.length}`, params);
+        n += r.rowCount ?? 0;
+      }
+      return n;
+    });
+    if (alcancados > 0) await touch();
+    return alcancados;
+  },
+
+  /**
    * Duas camadas: a fila do processo (o painel roda num processo só, e é ela que
    * ordena os pedidos dele) e um advisory lock de SESSÃO num cliente reservado,
    * que vale entre processos e dura enquanto `fn` roda (`fn` lê e grava por
@@ -509,7 +558,6 @@ export const postgresBackend: DataBackend = {
     if (patch?.meetingFor !== undefined) set("meeting_for", patch.meetingFor);
     if (patch?.lostReasonDetail !== undefined) set("lost_reason_detail", patch.lostReasonDetail);
     if (patch?.value !== undefined) set("value", patch.value);
-    if (patch?.roboSessionId !== undefined) set("robo_session_id", patch.roboSessionId);
     if (patch?.firstContactAt === null) set("first_contact_at", null);
     else stamp("first_contact_at", patch?.firstContactAt);
     stamp("booked_at", patch?.bookedAt);
@@ -660,6 +708,10 @@ export const postgresBackend: DataBackend = {
     if (opts?.brand) {
       params.push(opts.brand);
       where.push(`(brand = $${params.length} or brand is null)`);
+    }
+    if (opts?.action) {
+      params.push(opts.action);
+      where.push(`action = $${params.length}`);
     }
     const limit = opts?.limit ?? 200;
     let sql = "select * from lead_events";

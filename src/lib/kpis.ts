@@ -26,7 +26,7 @@ import {
   type ObjectiveBreakdown,
   type OverviewKpis,
 } from "./metrics";
-import { FILA_ETAPAS } from "./fila";
+import { SLA_PRIMEIRO_CONTATO_HORAS } from "./fila";
 import { horasUteisEntre, somarHorasUteis } from "./horario-util";
 import { hojeEmBrasilia } from "./range";
 import { ultimasSemanas } from "./semana";
@@ -106,17 +106,22 @@ export interface OpcoesKpis {
 }
 
 /**
- * 1º contato no prazo (1 hora útil, FILA_ETAPAS.novo). Entra quem já teve a 1ª
- * tentativa ou quem ainda espera com o prazo vencido; quem espera dentro do
- * prazo ainda não perdeu nada, e quem foi encerrado sem tentativa registrada
- * (legado de antes da Fase 2) não tem como ser julgado — fica fora do n.
+ * 1º contato no prazo (1 hora útil, `SLA_PRIMEIRO_CONTATO_HORAS`). Entra quem já
+ * teve a 1ª tentativa ou quem ainda espera com o prazo vencido; quem espera
+ * dentro do prazo ainda não perdeu nada, e quem foi encerrado sem tentativa
+ * registrada (legado de antes da Fase 2) não tem como ser julgado — fica fora do n.
+ *
+ * O lead que o robô recebeu (`roboVistoEm`) SAI da base (11.7): o 1º contato dele
+ * é do robô, não do comercial. Dirigido pelo dado, sem flag — robô desligado ou
+ * lead que o robô nunca viu continuam como antes.
  */
 function primeiroContato(data: DashboardData, range: DateRange | undefined, agoraIso: string) {
-  const sla = FILA_ETAPAS.novo.slaHoras;
+  const sla = SLA_PRIMEIRO_CONTATO_HORAS;
   let base = 0;
   let noPrazo = 0;
   const horas: number[] = [];
   for (const l of filterLeads(data.leads, range)) {
+    if (l.roboVistoEm) continue;
     const prazo = somarHorasUteis(l.createdAt, sla);
     if (l.firstContactAt) {
       base += 1;

@@ -575,4 +575,30 @@ create table if not exists conferencias_gasto (
 create index if not exists conferencias_gasto_idx on conferencias_gasto (brand, criada_em desc);
 -- Como as demais: fechada por RLS (o painel acessa com a chave de serviço).
 alter table conferencias_gasto enable row level security;
+
+-- 0023 — o robô de WhatsApp no lead (Fase 1, nov/26). Só colunas novas, todas
+-- opcionais, sem índice e sem backfill: nenhum lead existente muda, e este bloco
+-- roda inteiro a cada boot (nada aqui pode falhar com o dado de hoje).
+-- • Só o sync do robô grava (lib/robo/sync.ts, a cada 15 min): fatos gravados
+--   UMA VEZ (visto, recebido, 1ª mensagem, respondeu, convite, aceitou, sem
+--   WhatsApp, opt-out) e o estado da última leitura, que SOBRESCREVE (última
+--   mensagem, última interação, etapa, cobranças, encerrado, pausado).
+-- • O robô NÃO é tentativa: nada disto entra na cadência nem no 1º contato.
+-- • Sem texto de conversa, nome ou telefone do robô (LGPD): só datas, a etapa
+--   e contagens. O status do lead nunca muda pelo sync.
+alter table leads add column if not exists robo_visto_em timestamptz;
+alter table leads add column if not exists robo_recebido_em timestamptz;
+alter table leads add column if not exists robo_saudacao_em timestamptz;
+alter table leads add column if not exists robo_respondeu_em timestamptz;
+alter table leads add column if not exists robo_ultima_msg_cliente_em timestamptz;
+alter table leads add column if not exists robo_ultima_interacao_em timestamptz;
+alter table leads add column if not exists robo_etapa text;
+alter table leads add column if not exists robo_cobrancas integer;
+alter table leads add column if not exists robo_ultima_cobranca_em timestamptz;
+alter table leads add column if not exists robo_convite_em timestamptz;
+alter table leads add column if not exists robo_aceitou_em timestamptz;
+alter table leads add column if not exists robo_sem_whatsapp_em timestamptz;
+alter table leads add column if not exists robo_encerrado_em timestamptz;
+alter table leads add column if not exists robo_opt_out_em timestamptz;
+alter table leads add column if not exists robo_pausado boolean;
 `;

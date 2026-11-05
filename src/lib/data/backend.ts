@@ -13,6 +13,7 @@ import type {
   IgPost,
   Lead,
   LeadEvent,
+  LeadEventAction,
   LeadStatus,
   Meta,
   PostDraft,
@@ -31,6 +32,7 @@ import type {
   HorarioPreferido,
   PrazoCompra,
 } from "../qualificacao";
+import type { RoboEtapa } from "../robo/etapa";
 
 /**
  * The contract every storage backend implements. The app only ever talks to
@@ -68,7 +70,8 @@ export interface LeadStatusPatch {
   closedAt?: string;
   /** `null` limpa a marca (lead voltou ao caminho feliz). */
   lostAt?: string | null;
-  roboSessionId?: string;
+  // `roboSessionId` saiu em nov/26: o único escritor era a ponte do robô (apagada).
+  // A coluna `robo_session_id` e o mapper ficam só para ler o dado antigo.
 }
 
 /**
@@ -133,6 +136,105 @@ export function aplicarFicha(l: Lead, p: LeadFichaPatch): void {
   }
   for (const f of FICHA_UMA_VEZ) {
     if (p[f] !== undefined && alvo[f] == null) alvo[f] = p[f];
+  }
+}
+
+/**
+ * O que o sync do robô de WhatsApp grava num lead (0023). Ausente = fica como
+ * está; `null` = limpa — só os campos que SOBRESCREVEM (o estado da última
+ * leitura); os fatos `ROBO_UMA_VEZ` não aceitam null: o 1º que chegou vale.
+ * Status, marcos humanos, tentativas, contato e `roboSessionId` NÃO passam por
+ * aqui (o índice único da sessão derrubaria o lote; o casamento é pelo telefone).
+ */
+export interface LeadRoboPatch {
+  roboVistoEm?: string;
+  roboRecebidoEm?: string;
+  roboSaudacaoEm?: string;
+  roboRespondeuEm?: string;
+  roboConviteEm?: string;
+  roboAceitouEm?: string;
+  roboSemWhatsappEm?: string;
+  roboOptOutEm?: string;
+  roboUltimaMsgClienteEm?: string | null;
+  roboUltimaInteracaoEm?: string | null;
+  roboEtapa?: RoboEtapa | null;
+  roboCobrancas?: number | null;
+  roboUltimaCobrancaEm?: string | null;
+  roboEncerradoEm?: string | null;
+  roboPausado?: boolean | null;
+  /**
+   * NÃO é coluna: o último evento `reaberto` do lead (ISO). Com ele, um fato de
+   * `ROBO_RECOMECA_NO_REABERTO` gravado ANTES desse instante conta como vazio e é
+   * substituído pelo do patch — é a conversa de um episódio anterior, que a
+   * leitura ignora (11.3). Dentro do episódio, UMA VEZ continua UMA VEZ.
+   */
+  reabertoEm?: string;
+}
+
+/** Fatos do robô gravados na 1ª vez, nunca sobrescritos (`coalesce` no Postgres). */
+export const ROBO_UMA_VEZ = [
+  "roboVistoEm",
+  "roboRecebidoEm",
+  "roboSaudacaoEm",
+  "roboRespondeuEm",
+  "roboConviteEm",
+  "roboAceitouEm",
+  "roboSemWhatsappEm",
+  "roboOptOutEm",
+] as const satisfies readonly (keyof LeadRoboPatch)[];
+
+/** O estado do robô na última leitura: a leitura nova vale; `null` limpa. */
+export const ROBO_SOBRESCREVE = [
+  "roboUltimaMsgClienteEm",
+  "roboUltimaInteracaoEm",
+  "roboEtapa",
+  "roboCobrancas",
+  "roboUltimaCobrancaEm",
+  "roboEncerradoEm",
+  "roboPausado",
+] as const satisfies readonly (keyof LeadRoboPatch)[];
+
+/**
+ * Os fatos UMA VEZ que recomeçam num `reaberto` (11.3: os de antes dele são
+ * ignorados na leitura; sem recomeçar, quem voltou nunca teria a saudação nem o
+ * aceite da conversa nova). Opt-out e "sem WhatsApp" NÃO: valem sempre.
+ */
+export const ROBO_RECOMECA_NO_REABERTO = [
+  "roboVistoEm",
+  "roboRecebidoEm",
+  "roboSaudacaoEm",
+  "roboRespondeuEm",
+  "roboConviteEm",
+  "roboAceitouEm",
+] as const satisfies readonly (typeof ROBO_UMA_VEZ)[number][];
+
+/** O fato UMA VEZ `f` recomeça neste patch (tem `reabertoEm` e é dos que recomeçam)? */
+export function recomecaNoReaberto(p: LeadRoboPatch, f: (typeof ROBO_UMA_VEZ)[number]): boolean {
+  return Boolean(p.reabertoEm) && (ROBO_RECOMECA_NO_REABERTO as readonly string[]).includes(f);
+}
+
+/** O patch não muda nada (todos os campos ausentes)? `reabertoEm` sozinho não é mudança. */
+export function patchRoboVazio(p: LeadRoboPatch): boolean {
+  return [...ROBO_UMA_VEZ, ...ROBO_SOBRESCREVE].every((f) => p[f] === undefined);
+}
+
+/** O patch do robô aplicado a um lead em memória (backend local, Supabase e testes). */
+export function aplicarRobo(l: Lead, p: LeadRoboPatch): void {
+  const alvo = l as unknown as Record<string, unknown>;
+  for (const f of ROBO_SOBRESCREVE) {
+    const v = p[f];
+    if (v === undefined) continue;
+    if (v === null) delete alvo[f];
+    else alvo[f] = v;
+  }
+  const reaberto = p.reabertoEm ? Date.parse(p.reabertoEm) : NaN;
+  for (const f of ROBO_UMA_VEZ) {
+    const v = p[f];
+    if (v == null) continue;
+    const atual = alvo[f];
+    if (atual == null) alvo[f] = v;
+    // de um episódio anterior ao reaberto: o fato novo o substitui (o `case` do Postgres)
+    else if (recomecaNoReaberto(p, f) && Date.parse(String(atual)) < reaberto) alvo[f] = v;
   }
 }
 
@@ -317,6 +419,14 @@ export interface DataBackend {
   /** Grava a ficha da live (`LeadFichaPatch`): sobrescreve respostas, grava fatos uma vez. */
   updateLeadFicha(id: string, patch: LeadFichaPatch): Promise<void>;
   /**
+   * Grava os fatos do robô em LOTE (`LeadRoboPatch`, uma transação no Postgres, um
+   * commit no JSON local): `ROBO_UMA_VEZ` só se vazio, `ROBO_SOBRESCREVE` troca e
+   * `null` limpa. Não toca status nem nada fora das colunas `robo_*`; lead excluído
+   * também recebe (a linha segue a pessoa). Devolve quantos leads o lote alcançou
+   * (patch não vazio e id existente) — o casamento só manda o que mudou.
+   */
+  updateLeadsRobo(itens: { id: string; patch: LeadRoboPatch }[]): Promise<number>;
+  /**
    * Roda `fn` com a trava da PESSOA (chave do telefone ou do e-mail): duas
    * entradas da mesma pessoa ao mesmo tempo (a LP e o n8n mandam juntos) esperam
    * uma pela outra — a segunda acha o lead que a primeira criou, em vez de criar
@@ -462,6 +572,8 @@ export interface ListSyncRunsOpts {
 export interface ListEventsOpts {
   leadId?: string;
   brand?: string;
+  /** Só os eventos desta ação (ex.: `reaberto`, o relógio do robô — sem ler o histórico inteiro). */
+  action?: LeadEventAction;
   limit?: number;
 }
 
@@ -543,6 +655,22 @@ export const STATE_KEYS = {
   expediente: "atendimento_expediente",
   /** A campanha da live de 01/12: períodos, verba, metas, tokens e os números manuais (`lib/live.ts`). */
   campanhaDaLive: "live_campanha",
+  /**
+   * A última leitura do robô que deu certo (`ResumoLeituraRobo`, `lib/robo/casar.ts`):
+   * só contagens, nunca telefone. Gravada no sucesso; é o "último ok" quando as 60
+   * execuções que `estadoDaFonte` lê são todas falhas.
+   */
+  roboUltimaLeitura: "robo_ultima_leitura",
+  /** Última execução do cron `/api/sync?source=robo` (ISO) — gravada SÓ por essa chamada. */
+  roboUltimoCron: "robo_ultimo_cron",
+  /**
+   * ISO da 1ª falha da leitura do robô depois do último ok; limpo no sucesso com
+   * `""` (NÃO `null`: `app_state.value` é `jsonb not null` e o PostgREST manda o
+   * null do JSON como NULL do SQL — o Supabase recusaria). Vazio = sem falha.
+   */
+  roboFalhaDesde: "robo_falha_desde",
+  /** Estado do aviso de resgate ao n8n (quem já foi avisado, último envio) — etapa B. */
+  avisoResgate: "aviso_resgate",
 } as const;
 
 export interface StoredToken {

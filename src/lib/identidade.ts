@@ -9,7 +9,7 @@
  */
 
 import { chaveNome } from "./lead-id";
-import { chaveTelefone, mesmoTelefone, normalizarTelefone } from "./phone";
+import { chaveTelefoneValida, mesmoTelefone, normalizarTelefone } from "./phone";
 import { LEAD_STATUS_META, isLostStatus } from "./lead-status";
 import { everBooked } from "./metrics";
 import type { Lead } from "./types";
@@ -65,11 +65,8 @@ export function pareceTeste(l: Pick<Lead, "name" | "email" | "phone">): string |
   return null;
 }
 
-/** Chave do telefone para agrupar — só se tiver dígitos de telefone (lixo não agrupa). */
-function chaveFone(phone?: string | null): string | null {
-  const k = chaveTelefone(phone);
-  return k && k.length >= 12 ? k : null;
-}
+/** Chave do telefone para agrupar — só se tiver dígitos de telefone (lixo não agrupa). A régua é a de `lib/phone.ts`. */
+const chaveFone = chaveTelefoneValida;
 
 /**
  * Mesma pessoa pelo CONTATO (telefone ou e-mail) — nunca pelo nome: nomes se

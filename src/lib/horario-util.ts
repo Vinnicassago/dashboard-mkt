@@ -81,6 +81,20 @@ export function somarHorasUteis(
   return new Date(t - OFFSET_BRT_MS).toISOString();
 }
 
+/**
+ * O instante cai dentro do expediente (seg–sex, 9h–18h em Brasília)? O fim é
+ * aberto: 18:00 já está fora. Feriados não entram (v1). É a régua do aviso de
+ * resgate ao n8n: fora do horário ele acumula e sai na 1ª rodada do expediente.
+ */
+export function noHorarioComercial(iso: string, cfg: HorarioComercial = HORARIO_COMERCIAL): boolean {
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms)) return false;
+  const t = paraBrt(ms);
+  const dia = Math.floor(t / DIA_MS) * DIA_MS;
+  if (!cfg.dias.includes(new Date(dia).getUTCDay())) return false;
+  return t >= dia + cfg.inicio * 3_600_000 && t < dia + cfg.fim * 3_600_000;
+}
+
 /** Dia (AAAA-MM-DD) de um instante no calendário de Brasília. */
 export function diaBrt(iso: string): string {
   return new Date(paraBrt(Date.parse(iso))).toISOString().slice(0, 10);

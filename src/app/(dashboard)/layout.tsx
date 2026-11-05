@@ -6,16 +6,19 @@ import { SubNav } from "@/components/layout/sub-nav";
 import { NAO_CLASSIFICADO, integrationStatus } from "@/lib/meta/config";
 import { estadoDaFonte } from "@/lib/sincronizacao";
 import { AlertasProvider } from "@/components/layout/alertas";
-import { alertaDeClasse, type Alerta } from "@/lib/alertas";
-import { expirarCapiVencidos, getData, listCapiEnvios, listLeads } from "@/lib/data/store";
+import { alertaDeClasse, alertaRoboSem1aMsg, type Alerta } from "@/lib/alertas";
+import { expirarCapiVencidos, getData, listCapiEnvios, listLeadEvents, listLeads } from "@/lib/data/store";
+import { leituraDoRoboParada, reabertosNoPainel, reabertosPorLead, semMensagemDoRobo } from "@/lib/robo/situacao";
 import { JANELA_REENVIO_HORAS, alertasDaCapi, resumoDosEnvios } from "@/lib/capi-politica";
 import { capiEmModoTeste } from "@/lib/meta/capi";
 import { can } from "@/lib/auth/guard";
 import { formatCurrency0, formatDateTime } from "@/lib/format";
-import { frescorDaFonte, type Frescor } from "@/lib/frescor";
+import { LIMITES_DO_ROBO, frescorDaFonte, type Frescor } from "@/lib/frescor";
+import { estadoDoRoboAgora } from "@/lib/robo/estado";
 import { activeBrand } from "@/lib/active-brand";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { isAuthEnabled } from "@/lib/auth/config";
+import type { Lead } from "@/lib/types";
 
 export default async function DashboardLayout({
   children,
@@ -34,22 +37,54 @@ export default async function DashboardLayout({
   const agora = new Date();
   // Alertas que valem em qualquer tela (os do período vêm de cada página).
   const globais: Alerta[] = [];
-  const alertaDeFalha = (fonte: string, falha: { desde: string; erro: string }): Alerta => ({
-    id: `sync-${fonte}`,
+  // `chave` vai no id do alerta (ASCII, estável); `rotulo` é o texto ("da Meta", "do robô").
+  const alertaDeFalha = (chave: string, rotulo: string, falha: { desde: string; erro: string }): Alerta => ({
+    id: `sync-${chave}`,
     nivel: "falha",
-    titulo: `A sincronização ${fonte === "Meta" ? "da Meta" : "do Instagram"} está falhando`,
+    titulo: `A sincronização ${rotulo} está falhando`,
     detalhe: `Falhando desde ${formatDateTime(falha.desde)}: ${falha.erro} Os números dessa fonte param no último sync que deu certo.`,
     cta: { label: "Ver integrações", href: "/configuracoes/integracoes" },
   });
   if (status.ads) {
     const e = await estadoDaFonte("ads", brand.slug);
     frescor.push(frescorDaFonte("Meta", e.ultimoOk, agora, e.falha));
-    if (e.falha) globais.push(alertaDeFalha("Meta", e.falha));
+    if (e.falha) globais.push(alertaDeFalha("Meta", "da Meta", e.falha));
   }
   if (status.instagram) {
     const e = await estadoDaFonte("instagram", brand.slug);
     frescor.push(frescorDaFonte("Instagram", e.ultimoOk, agora, e.falha));
-    if (e.falha) globais.push(alertaDeFalha("Instagram", e.falha));
+    if (e.falha) globais.push(alertaDeFalha("Instagram", "do Instagram", e.falha));
+  }
+  // Os leads da marca, lidos UMA vez para os alertas abaixo (robô e classe).
+  let leadsDaMarca: Promise<Lead[]> | null = null;
+  const leadsDoLayout = () => (leadsDaMarca ??= listLeads(brand.slug));
+
+  // Robô de WhatsApp: só na marca dele e só ligado (desligado não é erro). Lido a
+  // cada 15 min, então a régua é em minutos (velho > 45 min, muito velho > 3 h).
+  try {
+    const robo = await estadoDoRoboAgora(brand.slug, agora);
+    if (robo.ligado) {
+      frescor.push(frescorDaFonte("Robô", robo.sync.ultimoOk, agora, robo.sync.falha, LIMITES_DO_ROBO));
+      if (robo.sync.falha) globais.push(alertaDeFalha("robo", "do robô", robo.sync.falha));
+      // Gente sem a 1ª mensagem do robô — a MESMA contagem da B1 (b) e de
+      // Integrações, e só com a leitura em dia (parada, quem fala é o sync-robo).
+      // Do histórico só os `reaberto` (o relógio recomeça ali): o layout roda a cada
+      // navegação e não lê o histórico inteiro.
+      const agoraIso = agora.toISOString();
+      if (!leituraDoRoboParada(robo, agoraIso)) {
+        const [leads, reabertos] = await Promise.all([
+          leadsDoLayout(),
+          listLeadEvents({ brand: brand.slug, action: "reaberto", limit: 0 }),
+        ]);
+        globais.push(
+          ...alertaRoboSem1aMsg(
+            semMensagemDoRobo(leads, reabertosPorLead(reabertos), robo, agoraIso, reabertosNoPainel(reabertos)),
+          ),
+        );
+      }
+    }
+  } catch (e) {
+    console.warn("[layout] leitura do estado do robô falhou:", e instanceof Error ? e.message : e);
   }
 
   // Gasto que nenhuma regra de marca reivindica: fora de TODOS os números.
@@ -73,7 +108,7 @@ export default async function DashboardLayout({
   // Classe do n8n diferente da do painel (ficha da live): vale em qualquer tela.
   if (brand.type !== "awareness") {
     try {
-      globais.push(...alertaDeClasse(await listLeads(brand.slug)));
+      globais.push(...alertaDeClasse(await leadsDoLayout()));
     } catch (e) {
       console.warn("[layout] leitura das classes falhou:", e instanceof Error ? e.message : e);
     }

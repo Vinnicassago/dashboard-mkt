@@ -13,16 +13,16 @@ import { deleteLeadAction, restoreLeadAction } from "@/app/(dashboard)/leads/act
 import { pedirCsvDeLeads } from "@/components/leads/exportar-csv";
 import { ETAPA_MAXIMA_LABEL, LEAD_STATUSES, LEAD_STATUS_META } from "@/lib/lead-status";
 import { DONO_LABEL, type Dono } from "@/lib/dono";
-import { FILA_ETAPAS } from "@/lib/fila";
-import { dica } from "@/lib/dicionario";
-import { formatDateTime, formatDateTimeCurta, formatarEspera } from "@/lib/format";
+import { formatDateTime, formatDateTimeCurta } from "@/lib/format";
 import { normalizarTelefone } from "@/lib/phone";
+import { FILTROS_DO_ROBO, FILTRO_ROBO_LABEL } from "@/lib/robo/situacao";
 import {
   CHAVES_FILTRO_FICHA,
   FILTROS_DA_FICHA,
   FILTRO_VAZIO,
   SINALIZADOR_LABEL,
   aplicarFiltroSemStatus,
+  ehFiltroRobo,
   filtrosDaFichaDe,
   contarPorStatus,
   profundidadeDaEtapa,
@@ -42,7 +42,8 @@ const SINAIS = Object.keys(SINALIZADOR_LABEL) as SinalizadorChave[];
 
 /**
  * Telefone e e-mail sob o nome. Mascarado (papel Marketing) é só texto: um
- * `wa.me` com "•••" no meio não leva a lugar nenhum.
+ * `wa.me` com "•••" no meio não leva a lugar nenhum. Quem pediu ao robô para não
+ * receber mensagens (opt-out, LGPD) também: o telefone sem link e o aviso ao lado.
  */
 function Contato({ row, mascarado }: { row: LinhaDeLead; mascarado: boolean }) {
   if (!row.phone && !row.email) {
@@ -52,12 +53,17 @@ function Contato({ row, mascarado }: { row: LinhaDeLead; mascarado: boolean }) {
     return (
       <span className="text-xs text-muted-foreground" title="Contato mascarado para o papel Marketing (LGPD)">
         {[row.phone, row.email].filter(Boolean).join(" · ")}
+        {row.optOut ? <span className="text-[var(--status-fora-text)]"> · pediu para não receber mensagens</span> : null}
       </span>
     );
   }
   return (
     <span className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
-      {row.phone ? (
+      {row.phone && row.optOut ? (
+        <span>
+          {row.phone} <span className="text-[var(--status-fora-text)]">· pediu para não receber mensagens</span>
+        </span>
+      ) : row.phone ? (
         <a
           href={`https://wa.me/${normalizarTelefone(row.phone)}`}
           target="_blank"
@@ -174,7 +180,7 @@ function DetalheDoLead({ r }: { r: LinhaDeLead }) {
       </div>
       <div className="flex items-baseline gap-1.5" title="Quem age em seguida. Sem dono = lead encerrado.">
         <dt className="text-muted-foreground">Dono</dt>
-        <dd className="font-medium">{r.dono ? DONO_LABEL[r.dono] : "— (encerrado)"}</dd>
+        <dd className="font-medium">{r.atendimentoAgora.dono ? DONO_LABEL[r.atendimentoAgora.dono] : "— (encerrado)"}</dd>
       </div>
       <div className="flex min-w-0 items-baseline gap-1.5">
         <dt className="text-muted-foreground">Origem</dt>
@@ -193,8 +199,10 @@ function montarColunas(opts: {
   canDelete: boolean;
   mascarado: boolean;
   comPeriodo: (href: string) => string;
+  /** Robô desligado: a dica do "Atendimento" não fala de robô nem de resgate. */
+  roboLigado: boolean;
 }): Column<LinhaDeLead>[] {
-  const { canEdit, canDelete, mascarado, comPeriodo } = opts;
+  const { canEdit, canDelete, mascarado, comPeriodo, roboLigado } = opts;
   const cols: Column<LinhaDeLead>[] = [
     {
       key: "name",
@@ -272,50 +280,32 @@ function montarColunas(opts: {
       ),
     },
     {
-      key: "primeiroContato",
-      header: "Tempo até 1º contato",
-      headerTitle: `${dica("primeiro_contato_no_prazo")} Aqui: horas úteis (seg–sex, 9h–18h) entre a entrada e a 1ª tentativa.`,
-      align: "right",
+      key: "atendimento",
+      header: "Atendimento",
+      headerTitle: roboLigado
+        ? "Onde a pessoa está agora e quem age: com o robô, no resgate ou com o comercial — a mesma régua da Fila. O link abre o grupo da Fila."
+        : "O que fazer agora e quem age — a mesma régua da Fila. O link abre o grupo da Fila.",
       sortable: true,
-      sortValue: (r) => r.horasAte1oContato ?? -1,
-      render: (r) =>
-        r.horasAte1oContato == null ? (
-          <span className="text-muted-foreground" title="Nenhuma tentativa registrada ainda">
-            —
-          </span>
-        ) : (
-          <span className="whitespace-nowrap">
-            {formatarEspera(r.horasAte1oContato)}
-            {r.primeiroContatoNoPrazo === false ? (
-              <span className={cn("ml-1", foraDoPrazoCls)} title={`A régua é ${FILA_ETAPAS.novo.slaHoras} hora útil`}>
-                fora do prazo
-              </span>
-            ) : null}
-          </span>
-        ),
-    },
-    {
-      key: "proximaAcao",
-      header: "Próxima ação",
-      headerTitle: "A mesma régua da Fila de contato — clique para abrir a Fila nessa etapa.",
-      sortable: true,
-      sortValue: (r) => (r.proximaAcao === "—" ? 0 : r.acaoAtrasada ? 2 : 1),
-      className: "max-w-[130px]",
-      render: (r) =>
-        r.etapaDaFila || r.naFilaDaLive ? (
-          <Link
-            href={comPeriodo(r.etapaDaFila ? `/fila?etapa=${r.etapaDaFila}` : "/fila#live")}
-            title={r.acaoPorque}
-            className="underline-offset-4 hover:underline"
-          >
-            {r.proximaAcao}
-            {r.acaoAtrasada ? <span className={cn("ml-1", foraDoPrazoCls)}>· atrasada</span> : null}
+      sortValue: (r) => r.atendimentoAgora.ordem,
+      className: "max-w-[170px]",
+      render: (r) => {
+        const a = r.atendimentoAgora;
+        const conteudo = (
+          <>
+            {a.texto}
+            {a.atrasado ? <span className={cn("ml-1", foraDoPrazoCls)}>· fora do prazo</span> : null}
+          </>
+        );
+        return a.href ? (
+          <Link href={comPeriodo(a.href)} title={a.dica} className="underline-offset-4 hover:underline">
+            {conteudo}
           </Link>
         ) : (
-          <span className="text-muted-foreground" title={r.acaoPorque}>
-            —
+          <span className={a.texto === "—" ? "text-muted-foreground" : undefined} title={a.dica}>
+            {conteudo}
           </span>
-        ),
+        );
+      },
     },
     {
       key: "origem",
@@ -354,10 +344,11 @@ function montarColunas(opts: {
 const isStatus = (v: string | null): v is LeadStatus => Boolean(v) && (LEAD_STATUSES as string[]).includes(v!);
 const isDono = (v: string | null): v is Dono => Boolean(v) && (DONOS as string[]).includes(v!);
 
-/** O filtro que a URL carrega (o período já é `?range=`, lido pela página). */
-function filtroDaUrl(p: URLSearchParams): FiltroDeLeads {
+/** O filtro que a URL carrega (o período já é `?range=`, lido pela página). Robô desligado: sem `robo`. */
+function filtroDaUrl(p: URLSearchParams, roboLigado: boolean): FiltroDeLeads {
   const status = p.get("status");
   const dono = p.get("dono");
+  const robo = p.get("robo");
   const sinais = (p.get("sinal") ?? "")
     .split(",")
     .filter((s): s is SinalizadorChave => (SINAIS as string[]).includes(s));
@@ -366,6 +357,7 @@ function filtroDaUrl(p: URLSearchParams): FiltroDeLeads {
     campanha: p.get("campanha") || undefined,
     conjunto: p.get("conjunto") || undefined,
     dono: isDono(dono) ? dono : undefined,
+    robo: roboLigado && ehFiltroRobo(robo) ? robo : undefined,
     sinalizadores: sinais,
     busca: "",
     ...filtrosDaFichaDe(Object.fromEntries(CHAVES_FILTRO_FICHA.map((k) => [k, p.get(k) ?? undefined]))),
@@ -385,6 +377,7 @@ function urlComFiltro(f: FiltroDeLeads): string {
   set("campanha", f.campanha);
   set("conjunto", f.conjunto);
   set("dono", f.dono);
+  set("robo", f.robo);
   set("sinal", f.sinalizadores.length ? f.sinalizadores.join(",") : undefined);
   for (const k of CHAVES_FILTRO_FICHA) set(k, f[k]);
   return url.pathname + (p.toString() ? `?${p.toString()}` : "") + url.hash;
@@ -402,6 +395,7 @@ export function LeadsDirectory({
   canDelete = false,
   canExport = false,
   mascararContato = false,
+  roboLigado = false,
 }: {
   rows: LinhaDeLead[];
   /** O `?range=` da página: o servidor exporta o MESMO período que a tabela mostra. */
@@ -414,10 +408,14 @@ export function LeadsDirectory({
   canExport?: boolean;
   /** Papel Marketing: telefone e e-mail já chegam mascarados; sem links. */
   mascararContato?: boolean;
+  /** O robô está ligado (`estadoDoRoboAgora`): só então existe o filtro do robô. */
+  roboLigado?: boolean;
 }) {
   const params = useSearchParams();
   const comPeriodo = useComPeriodo();
-  const [filtro, setFiltro] = useState<FiltroDeLeads>(() => filtroDaUrl(new URLSearchParams(params.toString())));
+  const [filtro, setFiltro] = useState<FiltroDeLeads>(() =>
+    filtroDaUrl(new URLSearchParams(params.toString()), roboLigado),
+  );
   const [exportando, startExport] = useTransition();
   const [msgExport, setMsgExport] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -452,7 +450,12 @@ export function LeadsDirectory({
       ].sort(),
     [rows, filtro.campanha],
   );
-  const donos = useMemo(() => DONOS.filter((d) => rows.some((r) => r.dono === d)), [rows]);
+  const donos = useMemo(() => DONOS.filter((d) => rows.some((r) => r.atendimentoAgora.dono === d)), [rows]);
+  // Quantos em cada chave do robô (o número do link da barra da Fila, da B1 e do alerta).
+  const porChaveDoRobo = useMemo(
+    () => Object.fromEntries(FILTROS_DO_ROBO.map((k) => [k, rows.filter((r) => r.robo.includes(k)).length])),
+    [rows],
+  );
 
   // As abas contam sobre TUDO menos o status — assim somam o "Todos" visível.
   const semStatus = useMemo(() => aplicarFiltroSemStatus(rows, filtro), [rows, filtro]);
@@ -463,13 +466,13 @@ export function LeadsDirectory({
   );
 
   const colunas = useMemo(
-    () => montarColunas({ canEdit, canDelete, mascarado: mascararContato, comPeriodo }),
-    [canEdit, canDelete, mascararContato, comPeriodo],
+    () => montarColunas({ canEdit, canDelete, mascarado: mascararContato, comPeriodo, roboLigado }),
+    [canEdit, canDelete, mascararContato, comPeriodo, roboLigado],
   );
 
   const temFiltro =
     filtro.status !== "todos" ||
-    Boolean(filtro.campanha || filtro.conjunto || filtro.dono) ||
+    Boolean(filtro.campanha || filtro.conjunto || filtro.dono || filtro.robo) ||
     filtro.sinalizadores.length > 0 ||
     filtro.busca.trim().length > 0 ||
     CHAVES_FILTRO_FICHA.some((k) => filtro[k]);
@@ -614,6 +617,21 @@ export function LeadsDirectory({
             </option>
           ))}
         </select>
+        {roboLigado ? (
+          <select
+            aria-label="Robô"
+            value={filtro.robo ?? ""}
+            onChange={(e) => mudar({ robo: ehFiltroRobo(e.target.value) ? e.target.value : undefined })}
+            className={selectCls}
+          >
+            <option value="">Robô: todos</option>
+            {FILTROS_DO_ROBO.map((k) => (
+              <option key={k} value={k}>
+                {FILTRO_ROBO_LABEL[k]} ({porChaveDoRobo[k] ?? 0})
+              </option>
+            ))}
+          </select>
+        ) : null}
         <span aria-hidden className="mx-1 h-4 w-px bg-border" />
         {SINAIS.map((s) => {
           const marcado = filtro.sinalizadores.includes(s);

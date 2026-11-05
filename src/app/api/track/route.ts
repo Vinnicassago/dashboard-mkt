@@ -14,8 +14,23 @@ import { idsDoUtm } from "@/lib/atribuicao";
 import { isLostStatus } from "@/lib/lead-status";
 import { newEventId } from "@/lib/auth/actor";
 import { avisarLeadNovo } from "@/lib/avisos";
+import { estadoDoRoboAgora } from "@/lib/robo/estado";
 import { enviarParaMeta, reenviarPendentes } from "@/lib/meta/capi-envios";
 import { sendGa4Event } from "@/lib/ga4/measurement-protocol";
+
+/**
+ * O robô está ligado para a marca do lead (`estadoDoRoboAgora`, a função única)?
+ * Vai no aviso de lead novo (11.13). Nunca derruba a entrada: na dúvida, desligado.
+ */
+async function roboNoAviso(brand: string): Promise<boolean> {
+  if (!process.env.N8N_LEAD_WEBHOOK_URL?.trim()) return false; // sem aviso, nada a perguntar
+  try {
+    return (await estadoDoRoboAgora(brand)).ligado;
+  } catch (e) {
+    console.warn("[track] não consegui ler o estado do robô para o aviso:", e instanceof Error ? e.message : e);
+    return false;
+  }
+}
 
 export const dynamic = "force-dynamic";
 
@@ -274,7 +289,7 @@ export async function POST(request: Request) {
         createdAt: new Date().toISOString(),
       });
       const voltou = await getLead(leadId);
-      if (voltou) await avisarLeadNovo(voltou, "lead_voltou");
+      if (voltou) await avisarLeadNovo(voltou, "lead_voltou", { robo: await roboNoAviso(voltou.brand) });
     }
 
     // A página da live manda as 5 respostas: o painel classifica na entrada, sem
@@ -292,7 +307,7 @@ export async function POST(request: Request) {
 
   // Lead novo: avisa quem atende (n8n). Velocidade de contato é a alavanca nº 1.
   const novo = await getLead(leadId);
-  if (novo) await avisarLeadNovo(novo);
+  if (novo) await avisarLeadNovo(novo, "lead_novo", { robo: await roboNoAviso(novo.brand) });
 
   // The user agent of THIS request is the visitor's browser (the landing page
   // posts directly), which is exactly what CAPI requires.

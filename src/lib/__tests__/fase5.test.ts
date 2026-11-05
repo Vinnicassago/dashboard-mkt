@@ -260,15 +260,35 @@ describe("motor v2 — cada regra dispara pelo seu gatilho, com dono e amostra",
     expect(c1.href).toBe("/fila?etapa=novo");
     expect(c1.severidade).toBe("agora");
     expect(c1.impacto).toMatchObject({ valor: 1, unidade: "reunioes" });
-    // Com o robô ligado e gente transferida sem abordagem, a Fila abre inteira.
-    const comRobo = rodar(data, {
-      robo: {
-        convites: [],
-        comercial: [{ session_id: "s1", nome: "X", telefone: "5511999990000", email: null, score: 8, transferido_em: brt("2026-10-07", "09:00"), abordado_em: null, briefing: null }],
-      },
+    // Com o robô ligado (nov/26) o 1º contato é dele: a C1 conta quem o comercial
+    // tem de atender — aqui, quem aceitou o convite e não teve a reunião registrada
+    // (2 horas úteis desde o aceite). Os "Novos" de antes do robô não entram.
+    const AGORA_ROBO = brt("2026-11-04", "15:00");
+    const comAceite = base({
+      leads: [
+        ...data.leads,
+        lead(brt("2026-11-04", "09:00"), {
+          phone: "5511987650001",
+          roboVistoEm: brt("2026-11-04", "09:05"),
+          roboSaudacaoEm: brt("2026-11-04", "09:02"),
+          roboRespondeuEm: brt("2026-11-04", "09:20"),
+          roboEtapa: "transferido",
+          roboAceitouEm: brt("2026-11-04", "10:00"),
+        }),
+      ],
+      metas: [meta("taxa_lead_agendada", 0.5)],
     });
-    expect(comRobo[0]).toMatchObject({ regra: "C1", href: "/fila" });
-    expect(comRobo[0].amostra.n).toBe(3);
+    const comRobo = motorDeAcoes({
+      data: comAceite,
+      range: undefined,
+      kpis: kpisDoPeriodo(comAceite, undefined, { hoje: "2026-11-04", agora: AGORA_ROBO }),
+      eventos: [],
+      agora: AGORA_ROBO,
+      hoje: "2026-11-04",
+      robo: { ligado: true, lidoAte: brt("2026-11-04", "14:55"), confiavel: true, sync: { ultimoOk: brt("2026-11-04", "14:55"), falha: null } },
+    });
+    expect(comRobo[0]).toMatchObject({ regra: "C1", href: "/fila?etapa=convite-aceito#convite-aceito", titulo: "1 aceitou o convite sem reunião registrada" });
+    expect(comRobo[0].amostra.n).toBe(1);
   });
 
   it("C1 não dispara sem ninguém além do prazo", () => {
@@ -286,7 +306,7 @@ describe("motor v2 — cada regra dispara pelo seu gatilho, com dono e amostra",
     expect(c2.severidade).toBe("alta");
     expect(c2.dono).toBe("COM");
     expect(c2.semImpacto).toBeDefined();
-    // Sem meta não há régua — a regra não dispara (G1 cobra a meta).
+    // Sem meta não há régua — a regra não dispara (o placar diz "SEM META").
     expect(regra(rodar(base({ leads })), "C2")).toBeUndefined();
   });
 
@@ -455,12 +475,12 @@ describe("motor v2 — cada regra dispara pelo seu gatilho, com dono e amostra",
     expect(regra(rodar(base(), { fontes: { gastoSemMarca: 735 } }), "D2")?.titulo).toMatch(/R\$\s735 de gasto sem marca classificada/);
   });
 
-  it("G1: sem metas (alta) ou sem orçamento de conversão (média)", () => {
-    expect(regra(rodar(base()), "G1")).toMatchObject({ severidade: "alta", href: "/configuracoes#metas", dono: "GESTAO" });
-    const comMeta = base({ metas: [meta("reunioes_agendadas", 7)], campaign: { ...base().campaign, budgetTotal: 0 } });
-    expect(regra(rodar(comMeta), "G1")?.severidade).toBe("media");
-    const completo = base({ metas: [meta("reunioes_agendadas", 7), meta("investimento_conversao", 1000)] });
-    expect(regra(rodar(completo), "G1")).toBeUndefined();
+  it("G1 retirada (nov/26): sem metas ou sem orçamento, nenhuma ação manda cadastrar meta — isso é do placar (SEM META) e de Configurações", () => {
+    const semNada = base({ campaign: { ...base().campaign, budgetTotal: 0 } });
+    for (const acoes of [rodar(base()), rodar(semNada)]) {
+      expect(regra(acoes, "G1")).toBeUndefined();
+      expect(acoes.some((a) => a.href === "/configuracoes#metas")).toBe(false);
+    }
   });
 });
 

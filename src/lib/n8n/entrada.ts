@@ -28,6 +28,9 @@ import {
   type StatusReuniao,
 } from "../qualificacao";
 
+/** Quem aparece no histórico como autor do que a API do n8n grava (puro: `situacaoDoRobo` lê). */
+export const ATOR_N8N = "n8n";
+
 export type Lido<T> = { ok: true; valor: T } | { ok: false; erros: string[] };
 
 type Corpo = Record<string, unknown>;

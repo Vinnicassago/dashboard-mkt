@@ -143,6 +143,12 @@ Agendou · Não atendeu · Número inválido · Sem interesse. "Agendou" precisa
 A próxima tentativa sai da cadência do turno (áudio 4 h do turno depois; ligação
 24 h depois).
 
+**Opt-out (LGPD):** quem pediu ao robô de WhatsApp para não receber mensagens não
+aceita tentativa por `whatsapp` nem `audio`. O envio inteiro volta com **409**
+(`erro`: "Esta pessoa pediu para não receber mensagens…", `aplicado: []`) e NADA é
+gravado — nem a ficha, nem a reunião do mesmo envio. Reenvie com `ligacao` ou
+`email` (ou sem a tentativa).
+
 **Reunião:**
 
 ```json
@@ -256,6 +262,83 @@ não instale no Pixel, ou a Meta conta duas vezes:
 | `EntrouNaComunidade` | o n8n grava `comunidade_em` | hora do clique como `event_time` |
 
 Cada um sai uma vez por lead; na Meta, crie conversões personalizadas com esses nomes.
+
+---
+
+## 6. Avisos do painel → n8n (webhooks de saída)
+
+O caminho inverso: o **painel** faz um `POST` JSON num webhook do n8n, e o fluxo
+decide quem recebe e por qual canal. Dois webhooks **próprios**, um fluxo cada (o
+fluxo do lead novo trata todo POST como lead novo — um resgate ali viraria
+mensagem quebrada):
+
+| Variável | Eventos | Quando |
+|---|---|---|
+| `N8N_LEAD_WEBHOOK_URL` | `lead_novo`, `lead_voltou` | a cada lead novo da página; `lead_voltou` = estava perdido e preencheu de novo |
+| `N8N_RESGATE_WEBHOOK_URL` | `resgate` | quem entrou no grupo Resgate da Fila desde o último aviso |
+
+Os dois levam o cabeçalho `x-painel-secret: <N8N_LEAD_WEBHOOK_SECRET>` — o fluxo
+deve recusar chamada sem ele. Sem a variável, o painel não avisa (e Integrações
+diz "Desligado"). Timeout de 3 s; falha no aviso nunca derruba a entrada do lead
+nem o sync. Os links usam `PAINEL_URL`.
+
+**`lead_novo` / `lead_voltou`** — leva nome, telefone e e-mail (é para ligar):
+
+```json
+{
+  "evento": "lead_novo",
+  "id": "LEAD-LP-…", "marca": "consorcio",
+  "nome": "Maria Souza", "telefone": "5511999990000", "email": "maria@exemplo.com",
+  "origem": "meta", "campanha": "120200000000000011",
+  "criadoEm": "2026-11-16T22:05:00.000Z",
+  "fila": "https://<seu-painel>/leads/LEAD-LP-…",
+  "ficha": "https://<seu-painel>/leads/LEAD-LP-…",
+  "robo": true
+}
+```
+
+Com o robô de WhatsApp **ligado**, o 1º contato é dele: `robo: true` e o link
+`fila` é o da ficha — o fluxo decide se chama alguém. Com o robô desligado, sem
+`robo` e `fila` = `<painel>/fila?etapa=novo` (o processo de antes).
+
+**`resgate`** — SEM telefone, e-mail, classe ou texto de conversa; só o primeiro
+nome e o link da ficha (atrás do login):
+
+```json
+{
+  "evento": "resgate",
+  "marca": "consorcio",
+  "geradoEm": "2026-11-17T12:15:00.000Z",
+  "total": 7,
+  "novos": 2,
+  "fila": "https://<seu-painel>/fila?etapa=resgate#resgate",
+  "itens": [
+    { "id": "LEAD-LP-…", "primeiroNome": "Maria", "motivo": "sem-resposta-24h",
+      "desde": "2026-11-17T11:40:00.000Z", "ficha": "https://<seu-painel>/leads/LEAD-LP-…" }
+  ]
+}
+```
+
+- `total` = quantas pessoas estão no grupo Resgate agora (o número da página que
+  o link `fila` abre); `novos` = quantas entraram desde o último aviso; `itens` =
+  até 20 delas.
+- O lead que esta API criou SEM `event_id` tem o WhatsApp no id
+  (`LEAD-WA-5511…`): no aviso de resgate ele vai com `id` e `ficha` = `null` (o
+  corpo continua sem telefone) — a pessoa está no link `fila`.
+- `motivo`: `sem-resposta-24h` (o robô falou e a pessoa não respondeu em 24 h) ·
+  `sem-whatsapp` · `sem-telefone` · `robo-nao-falou` (2 h sem a 1ª mensagem do robô).
+  "Não compareceu" e "retorno" estão no grupo, mas não avisam.
+- Sai só depois de uma leitura do robô que deu certo (cron de 15 min ou
+  "Sincronizar agora"; a leitura de carona ao abrir a Fila não avisa),
+  **seg–sex, 9h–18h** (Brasília), no máximo um aviso por rodada do cron — o
+  intervalo mínimo entre dois avisos é de **13 min** (a folga evita pular uma rodada
+  quando um sync termina mais cedo que o anterior). Fora do horário acumula e sai
+  tudo na 1ª rodada do expediente.
+- Cada pessoa gera UM aviso por entrada no resgate (`id` + `motivo` + `desde`): a
+  cadência do comercial não repete o aviso; sair do resgate e voltar, sim. Se o
+  n8n não confirmar (2xx), ninguém é marcado e a rodada seguinte tenta de novo.
+- Os inscritos da live com classe (A e B) NÃO entram: eles têm o aviso próprio
+  pelos Pendentes (§4).
 
 ---
 

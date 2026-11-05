@@ -17,15 +17,18 @@ const VARIANTE: Record<EstadoIntegracao, "good" | "muted" | "critical" | "warnin
 export function StatusRow({
   label,
   estado,
+  id,
   children,
 }: {
   label: string;
   estado: EstadoExibido;
+  /** Âncora da linha (`/configuracoes/integracoes#robo`). */
+  id?: string;
   /** Vai abaixo do selo — a chave liga/desliga do robô, por exemplo. */
   children?: React.ReactNode;
 }) {
   return (
-    <div className="flex items-start justify-between gap-3 border-b py-2.5 last:border-0">
+    <div id={id} className="flex scroll-mt-24 items-start justify-between gap-3 border-b py-2.5 last:border-0">
       <div className="min-w-0">
         <p className="text-sm font-medium">{label}</p>
         <p className="text-xs text-muted-foreground">{estado.detalhe}</p>

@@ -11,8 +11,10 @@
  */
 
 import { comPeriodo } from "./range";
-import { formatDateTime } from "./format";
+import { formatDateTime, formatDateTimeCurta, formatarEspera } from "./format";
 import { mensagemHumana } from "./erros";
+import type { EstadoAvisoResgate } from "./robo/aviso-resgate";
+import { LEITURA_PARADA_MIN, leituraDoRoboParada } from "./robo/situacao";
 import { ROLES, ROLE_LABELS, hasCapability, type Role } from "./auth/roles";
 import { CONFIRMACAO_PERIGO } from "./perigo";
 import type { Trava } from "./trust";
@@ -169,13 +171,40 @@ export function estadoDaSincronizacao(
   };
 }
 
+/** O que a leitura do robô gravou (`ResumoLeituraRobo`): só contagens. */
+export interface ContagensDaLeitura {
+  casaram: number;
+  semLeadNoPainel: number;
+  /** Das sem lead no painel, as que aceitaram o convite — o número do link da Fila ("N aceitaram pelo robô…"). */
+  transferidosSemLead?: number;
+}
+
 /**
- * Robô de WhatsApp e atendimento do especialista: escolha operacional (D5).
- * Desligado NÃO é erro — as etapas dele simplesmente não existem no painel.
- * Falhando = credencial presente, chave ligada e a leitura quebrou agora
- * (não há registro de execuções do robô, então não existe "desde").
+ * Robô de WhatsApp: escolha operacional (D5). Desligado NÃO é erro — as etapas
+ * dele simplesmente não existem no painel.
+ *
+ * Com `registro` (o estado do sync, `estadoDoRoboAgora().sync`, de `sync_runs`):
+ * "Falhando desde …" (a 1ª falha depois do último ok, com a frase humana que o
+ * sync gravou), "Parado · lido há X" (sem falha, mas sem leitura há mais de
+ * `LEITURA_PARADA_MIN` — a régua ÚNICA da B1 "leitura parada", `leituraDoRoboParada`),
+ * "Ativo · lido há X" ou "Nunca lido"; o detalhe é UMA linha: "N casaram · N do
+ * robô sem lead no painel (K aceitaram o convite) · N sem a 1ª mensagem do robô (M
+ * não chegaram ao robô)" — o 3º número é `semMensagemDoRobo`, o MESMO do alerta e
+ * da B1, e por isso só sai com a leitura em dia (parada, o alerta e a B1 (b) somem:
+ * o dado velho culparia o robô por uma falha da leitura). Sem `registro`, o
+ * comportamento de antes (falha = "Falhando agora").
  */
-export function estadoDoRobo(r: { configurado: boolean; desativado: boolean; erro?: string | null }): EstadoExibido {
+export function estadoDoRobo(r: {
+  configurado: boolean;
+  desativado: boolean;
+  erro?: string | null;
+  registro?: RegistroDaFonte;
+  /** A última leitura que deu certo (`STATE_KEYS.roboUltimaLeitura`). */
+  leitura?: ContagensDaLeitura | null;
+  /** `semMensagemDoRobo` — a contagem do alerta `robo-sem-1a-msg` e da B1 (b). */
+  semMensagem?: { total: number; naoChegaram: number };
+  agora?: string;
+}): EstadoExibido {
   if (!r.configurado) {
     return {
       estado: "nao-configurado",
@@ -190,6 +219,36 @@ export function estadoDoRobo(r: { configurado: boolean; desativado: boolean; err
       detalhe: "Desligado por escolha: as etapas do robô não aparecem na cascata, na Fila nem em Leads. Desligado não é erro.",
     };
   }
+  if (r.registro) {
+    const agora = r.agora ?? new Date().toISOString();
+    const parada = leituraDoRoboParada({ sync: r.registro }, agora);
+    const linha = linhaDaLeitura(r.leitura, parada ? undefined : r.semMensagem);
+    const lidoHa = (ok: string) => formatarEspera(Math.max(0, Date.parse(agora) - Date.parse(ok)) / 3_600_000);
+    if (r.registro.falha) {
+      // O erro já é a frase humana que o sync gravou (`mensagemHumana` em lib/robo/sync.ts).
+      const ok = r.registro.ultimoOk ? ` Última leitura que deu certo: ${formatDateTime(r.registro.ultimoOk)}.` : "";
+      return {
+        estado: "falhando",
+        rotulo: `Falhando desde ${formatDateTimeCurta(r.registro.falha.desde)}`,
+        detalhe: `${r.registro.falha.erro}${ok}${linha ? ` ${linha}` : ""}`,
+      };
+    }
+    if (r.registro.ultimoOk && parada) {
+      return {
+        estado: "falhando",
+        rotulo: `Parado · lido há ${lidoHa(r.registro.ultimoOk)}`,
+        detalhe: `Sem leitura nova há mais de ${LEITURA_PARADA_MIN} min — confira a leitura por cron.${linha ? ` ${linha}` : ""}`,
+      };
+    }
+    if (r.registro.ultimoOk) {
+      return { estado: "ativo", rotulo: `Ativo · lido há ${lidoHa(r.registro.ultimoOk)}`, detalhe: linha || "Lido sem nenhuma conversa casada ainda." };
+    }
+    return {
+      estado: "nunca",
+      rotulo: "Nunca lido",
+      detalhe: "Credencial reconhecida; a primeira leitura ainda não rodou — use “Sincronizar agora” (Só o robô) ou aguarde o cron.",
+    };
+  }
   if (r.erro) {
     return {
       estado: "falhando",
@@ -201,6 +260,107 @@ export function estadoDoRobo(r: { configurado: boolean; desativado: boolean; err
     estado: "ativo",
     rotulo: "Ativo",
     detalhe: "O painel lê o robô: convites pendentes e transferidos entram na cascata, na Fila e em Leads.",
+  };
+}
+
+/**
+ * "52 casaram · 5 do robô sem lead no painel (3 aceitaram o convite) · 3 sem a 1ª
+ * mensagem do robô (1 não chegou ao robô)".
+ */
+function linhaDaLeitura(leitura: ContagensDaLeitura | null | undefined, sem: { total: number; naoChegaram: number } | undefined): string {
+  const partes: string[] = [];
+  if (leitura) {
+    partes.push(`${leitura.casaram} ${leitura.casaram === 1 ? "casou" : "casaram"}`);
+    const t = leitura.transferidosSemLead ?? 0;
+    partes.push(
+      `${leitura.semLeadNoPainel} do robô sem lead no painel${t > 0 ? ` (${t} ${t === 1 ? "aceitou" : "aceitaram"} o convite)` : ""}`,
+    );
+  }
+  if (sem) {
+    const n = sem.naoChegaram;
+    partes.push(
+      `${sem.total} sem a 1ª mensagem do robô${sem.total > 0 ? ` (${n} não ${n === 1 ? "chegou" : "chegaram"} ao robô)` : ""}`,
+    );
+  }
+  return partes.join(" · ");
+}
+
+/** O cron do robô roda a cada 15 min (`/api/sync?source=robo`). */
+export const CRON_ROBO_MINUTOS = 15;
+/** Duas rodadas perdidas e uma folga: depois disso o cron está parado. */
+export const ATRASO_DO_CRON_ROBO_MINUTOS = 2 * CRON_ROBO_MINUTOS + 5;
+
+/**
+ * A linha "Leitura do robô por cron": diz se o cron RODA, não só se a chave
+ * existe (o molde de `estadoDoCronCapi`). `ultimaExecucao` = `roboUltimoCron`,
+ * gravado SÓ pela chamada do cron — o "Sincronizar agora" e a carona não contam.
+ */
+export function estadoDoCronRobo({
+  configurado,
+  desativado = false,
+  cronSecret,
+  ultimaExecucao,
+  agora,
+}: {
+  configurado: boolean;
+  desativado?: boolean;
+  cronSecret: boolean;
+  ultimaExecucao?: string | null;
+  agora: string;
+}): EstadoExibido {
+  const instrucao = `Agende no cron-job.org a cada ${CRON_ROBO_MINUTOS} min: GET /api/sync?secret=CRON_SECRET&source=robo.`;
+  if (!configurado || !cronSecret) {
+    return {
+      estado: "nao-configurado",
+      rotulo: "Não configurado",
+      detalhe: `Precisa do robô configurado e de CRON_SECRET; depois agende GET /api/sync?secret=…&source=robo a cada ${CRON_ROBO_MINUTOS} min.`,
+    };
+  }
+  if (desativado) return { estado: "desativado", rotulo: "Desativado", detalhe: "O robô está desligado: o cron não lê nada." };
+  if (!ultimaExecucao) return { estado: "nunca", rotulo: "Nunca rodou", detalhe: instrucao };
+  const atraso = Date.parse(agora) - Date.parse(ultimaExecucao);
+  if (atraso > ATRASO_DO_CRON_ROBO_MINUTOS * 60_000) {
+    return {
+      estado: "falhando",
+      rotulo: `Parado desde ${formatDateTimeCurta(ultimaExecucao)}`,
+      detalhe: `A última execução foi em ${formatDateTime(ultimaExecucao)}. ${instrucao}`,
+    };
+  }
+  return { estado: "ativo", rotulo: "Rodando", detalhe: `Última execução: ${formatDateTime(ultimaExecucao)}.` };
+}
+
+/**
+ * A linha "Aviso de resgate (n8n)": ligado só com N8N_RESGATE_WEBHOOK_URL (o
+ * webhook próprio do resgate); a última falha (`EstadoAvisoResgate.ultimaFalha`,
+ * limpa no próximo envio que der certo) vira "Falhou em …".
+ */
+export function estadoDoAvisoResgate({
+  configurado,
+  estado,
+}: {
+  configurado: boolean;
+  estado: EstadoAvisoResgate | null;
+}): EstadoExibido {
+  if (!configurado) {
+    return {
+      estado: "nao-configurado",
+      rotulo: "Desligado",
+      detalhe: "Sem N8N_RESGATE_WEBHOOK_URL o painel não avisa o resgate; a Fila mostra do mesmo jeito.",
+    };
+  }
+  const falha = estado?.ultimaFalha;
+  const ultimo = estado?.ultimoEnvio ? `Último aviso que deu certo: ${formatDateTime(estado.ultimoEnvio)}.` : "Nenhum aviso enviado ainda.";
+  if (falha && (!estado?.ultimoEnvio || falha.em > estado.ultimoEnvio)) {
+    return {
+      estado: "falhando",
+      rotulo: `Falhou em ${formatDateTimeCurta(falha.em)}`,
+      detalhe: `${falha.detalhe ? `${falha.detalhe.charAt(0).toUpperCase()}${falha.detalhe.slice(1)}. ` : ""}${ultimo} A próxima rodada tenta de novo.`,
+    };
+  }
+  return {
+    estado: "ativo",
+    rotulo: "Ligado",
+    detalhe: `${ultimo} Sai com gente nova no resgate, seg–sex, 9h–18h, no máximo um por rodada do cron.`,
   };
 }
 

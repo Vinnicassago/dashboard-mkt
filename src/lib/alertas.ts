@@ -15,6 +15,7 @@ import { filterLeads } from "./metrics";
 import { atribuidor } from "./atribuicao";
 import { encerrado } from "./lead-status";
 import { classeDiverge } from "./qualificacao";
+import { RESGATE_ROBO_NAO_FALOU_H, ROBO_SEM_MSG_MIN } from "./robo/situacao";
 import type { DashboardData, Lead } from "./types";
 
 export type NivelAlerta = "falha" | "quarentena" | "teto" | "piso" | "aviso" | "config";
@@ -107,6 +108,32 @@ export function alertaDeClasse(leads: Pick<Lead, "classe" | "classeN8n" | "statu
       detalhe:
         "O painel calcula a classe pelas respostas e pela tabela de parcela; o n8n manda a dele. A Fila segue a do painel, mas a mensagem e o aviso ao atendimento saíram pela do n8n. Confira a tabela de parcela e o fluxo — a coluna Classe de Leads marca quem diverge (≠ n8n).",
       cta: { label: "Ver a tabela de parcela", href: "/configuracoes/atendimento#tabela-parcela" },
+    },
+  ];
+}
+
+/**
+ * Gente sem a 1ª mensagem do robô (global, só com o robô ligado e a leitura em
+ * dia): a contagem é a de `semMensagemDoRobo` (`lib/robo/situacao.ts`) — o MESMO
+ * número da B1 e de Integrações. Com a leitura parada quem fala é o `sync-robo`.
+ */
+export function alertaRoboSem1aMsg(c: { total: number; naoChegaram: number }): Alerta[] {
+  if (c.total <= 0) return [];
+  const chegaram = c.total - c.naoChegaram;
+  return [
+    {
+      id: "robo-sem-1a-msg",
+      nivel: "falha",
+      titulo: `${c.total} ${c.total === 1 ? "lead sem" : "leads sem"} a 1ª mensagem do robô`,
+      detalhe:
+        [
+          c.naoChegaram > 0 ? `${c.naoChegaram} não ${c.naoChegaram === 1 ? "chegou" : "chegaram"} ao robô` : "",
+          chegaram > 0 ? `${chegaram} ${chegaram === 1 ? "chegou" : "chegaram"} e não ${chegaram === 1 ? "recebeu" : "receberam"} a 1ª mensagem` : "",
+        ]
+          .filter(Boolean)
+          .join("; ") +
+        ` há mais de ${ROBO_SEM_MSG_MIN} min. Confira o robô e o fluxo do n8n; depois de ${RESGATE_ROBO_NAO_FALOU_H} h, essas pessoas vão para o resgate da Fila.`,
+      cta: { label: "Ver integrações", href: "/configuracoes/integracoes#robo" },
     },
   ];
 }

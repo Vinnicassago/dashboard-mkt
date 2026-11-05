@@ -138,6 +138,12 @@ function contrato(nome: string, abrir: () => Promise<{ backend: DataBackend; fec
       expect(consorcio).toContain(`EVT-n-${sfx}`);
       const krone = (await b.listLeadEvents({ brand: "krone", limit: 0 })).map((e) => e.id);
       expect(krone).toContain(`EVT-k-${sfx}`);
+      // Só uma ação: o relógio do robô (layout, sync) lê só os `reaberto`, não o histórico inteiro.
+      await b.addLeadEvent(evento(`L-reab-${sfx}`, `EVT-reab-${sfx}`, "reaberto"));
+      const reabertos = await b.listLeadEvents({ brand: "consorcio", action: "reaberto", limit: 0 });
+      expect(reabertos.map((e) => e.id)).toContain(`EVT-reab-${sfx}`);
+      expect(reabertos.map((e) => e.id)).not.toContain(`EVT-n-${sfx}`);
+      expect(reabertos.every((e) => e.action === "reaberto")).toBe(true);
     });
 
     it("replaceAdData troca só o recorte e limpa criativo órfão", async () => {
@@ -218,6 +224,158 @@ function contrato(nome: string, abrir: () => Promise<{ backend: DataBackend; fec
       expect(l?.horarioPreferido).toBeUndefined();
       expect(l?.reuniaoConfirmadaEm).toBeUndefined();
       expect(l?.createdAt).toBe("2026-11-16T19:10:00.000Z");
+    });
+
+    it("robô (0023): fatos UMA VEZ ficam, o estado sobrescreve, null limpa; reenvio, status, exclusão e reset", async () => {
+      // O reset põe os leads do exemplo no banco (o Postgres nasce vazio).
+      const seed = await b.resetToSeed("teste");
+      const doExemplo = seed.leads.find((l) => l.brand === "consorcio")!.id;
+      const id = `LEAD-LP-robo-${sfx}`;
+      const dup = `LEAD-LP-robo-dup-${sfx}`;
+      await b.addLead({ id, brand: "consorcio", createdAt: "2026-11-03T11:59:00.000Z", name: "Pessoa Robô", phone: "5511987650001", status: "em_contato" });
+      await b.addLead({ id: dup, brand: "consorcio", createdAt: "2026-11-03T12:05:00.000Z", name: "Pessoa Robô", phone: "551187650001", status: "lead" });
+
+      const primeira = {
+        roboVistoEm: "2026-11-04T15:00:00.000Z",
+        roboRecebidoEm: "2026-11-03T12:00:00.000Z",
+        roboSaudacaoEm: "2026-11-03T12:01:00.000Z",
+        roboRespondeuEm: "2026-11-03T12:30:00.000Z",
+        roboUltimaMsgClienteEm: "2026-11-03T12:30:00.000Z",
+        roboUltimaInteracaoEm: "2026-11-03T13:00:00.000Z",
+        roboEtapa: "em_conversa" as const,
+        roboCobrancas: 0,
+        roboPausado: false,
+        roboSemWhatsappEm: "2026-11-03T12:00:00.000Z",
+        roboOptOutEm: "2026-11-03T14:00:00.000Z",
+        roboEncerradoEm: "2026-11-03T14:00:00.000Z",
+      };
+      expect(
+        await b.updateLeadsRobo([
+          { id, patch: primeira },
+          { id: dup, patch: primeira },
+          { id: `LEAD-inexistente-${sfx}`, patch: primeira },
+          { id, patch: {} },
+        ]),
+      ).toBe(2);
+
+      // 2ª leitura: os UMA VEZ não mudam; o estado troca e null limpa
+      expect(
+        await b.updateLeadsRobo([
+          {
+            id,
+            patch: {
+              roboVistoEm: "2026-11-04T15:15:00.000Z",
+              roboSaudacaoEm: "2026-11-04T09:00:00.000Z",
+              roboRespondeuEm: "2026-11-04T10:00:00.000Z",
+              roboConviteEm: "2026-11-04T10:05:00.000Z",
+              roboAceitouEm: "2026-11-04T10:20:00.000Z",
+              roboUltimaMsgClienteEm: "2026-11-04T10:00:00.000Z",
+              roboEtapa: "transferido",
+              roboCobrancas: 2,
+              roboUltimaCobrancaEm: "2026-11-04T08:00:00.000Z",
+              roboUltimaInteracaoEm: null,
+              roboPausado: null,
+              roboOptOutEm: "2026-11-04T11:00:00.000Z",
+              roboSemWhatsappEm: "2026-11-04T11:00:00.000Z",
+              roboEncerradoEm: "2026-11-04T11:00:00.000Z",
+            },
+          },
+        ]),
+      ).toBe(1);
+      // reenvio do formulário (mesmo id) não mexe nos fatos do robô
+      await b.addLead({ id, brand: "consorcio", createdAt: "2026-11-05T10:00:00.000Z", name: "Outro", status: "lead" });
+
+      const l = await b.getLead(id);
+      expect(l).toMatchObject({
+        status: "em_contato",
+        createdAt: "2026-11-03T11:59:00.000Z",
+        roboVistoEm: "2026-11-04T15:00:00.000Z",
+        roboRecebidoEm: "2026-11-03T12:00:00.000Z",
+        roboSaudacaoEm: "2026-11-03T12:01:00.000Z",
+        roboRespondeuEm: "2026-11-03T12:30:00.000Z",
+        roboConviteEm: "2026-11-04T10:05:00.000Z",
+        roboAceitouEm: "2026-11-04T10:20:00.000Z",
+        roboUltimaMsgClienteEm: "2026-11-04T10:00:00.000Z",
+        roboEtapa: "transferido",
+        roboCobrancas: 2,
+        roboUltimaCobrancaEm: "2026-11-04T08:00:00.000Z",
+        roboSemWhatsappEm: "2026-11-03T12:00:00.000Z",
+        roboOptOutEm: "2026-11-03T14:00:00.000Z",
+        roboEncerradoEm: "2026-11-04T11:00:00.000Z",
+      });
+      expect(l?.roboUltimaInteracaoEm).toBeUndefined();
+      expect(l?.roboPausado).toBeUndefined();
+      expect(l?.firstContactAt).toBeUndefined();
+      expect(l?.roboSessionId).toBeUndefined();
+      // reaberto (11.3): o fato de ANTES dele recomeça com o do episódio novo; opt-out e sem WhatsApp, não
+      const REAB = "2026-11-10T12:00:00.000Z";
+      expect(
+        await b.updateLeadsRobo([
+          {
+            id,
+            patch: {
+              reabertoEm: REAB,
+              roboVistoEm: "2026-11-10T12:15:00.000Z",
+              roboSaudacaoEm: "2026-11-10T12:05:00.000Z",
+              roboOptOutEm: "2026-11-10T12:06:00.000Z",
+              roboSemWhatsappEm: "2026-11-10T12:06:00.000Z",
+            },
+          },
+        ]),
+      ).toBe(1);
+      expect(await b.getLead(id)).toMatchObject({
+        roboVistoEm: "2026-11-10T12:15:00.000Z",
+        roboSaudacaoEm: "2026-11-10T12:05:00.000Z",
+        roboRecebidoEm: "2026-11-03T12:00:00.000Z",
+        roboOptOutEm: "2026-11-03T14:00:00.000Z",
+        roboSemWhatsappEm: "2026-11-03T12:00:00.000Z",
+      });
+      // dentro do episódio novo, UMA VEZ volta a valer
+      await b.updateLeadsRobo([{ id, patch: { reabertoEm: REAB, roboSaudacaoEm: "2026-11-11T09:00:00.000Z" } }]);
+      expect((await b.getLead(id))?.roboSaudacaoEm).toBe("2026-11-10T12:05:00.000Z");
+
+      // o outro cadastro da mesma pessoa ficou com o estado da 1ª leitura
+      expect(await b.getLead(dup)).toMatchObject({
+        status: "lead",
+        roboEtapa: "em_conversa",
+        roboPausado: false,
+        roboCobrancas: 0,
+        roboSaudacaoEm: "2026-11-03T12:01:00.000Z",
+        roboOptOutEm: "2026-11-03T14:00:00.000Z",
+        roboEncerradoEm: "2026-11-03T14:00:00.000Z",
+      });
+
+      // excluído guarda os fatos (e o lote ainda alcança a linha); restaurar devolve tudo
+      await b.softDeleteLead(dup, { at: "2026-11-05T11:00:00.000Z", by: "admin", reason: "duplicado" });
+      expect((await b.listDeletedLeads("consorcio")).find((x) => x.id === dup)).toMatchObject({ roboEtapa: "em_conversa" });
+      expect(await b.updateLeadsRobo([{ id: dup, patch: { roboCobrancas: 1 } }])).toBe(1);
+      await b.restoreLead(dup);
+      expect(await b.getLead(dup)).toMatchObject({ roboEtapa: "em_conversa", roboCobrancas: 1, roboVistoEm: "2026-11-04T15:00:00.000Z" });
+
+      // reset do exemplo: o lead do exemplo volta sem robô; o de fora fica excluído com os fatos
+      await b.updateLeadsRobo([{ id: doExemplo, patch: primeira }]);
+      expect((await b.getLead(doExemplo))?.roboEtapa).toBe("em_conversa");
+      await b.resetToSeed("teste");
+      const ex = await b.getLead(doExemplo);
+      expect(ex?.roboEtapa).toBeUndefined();
+      expect(ex?.roboVistoEm).toBeUndefined();
+      expect(ex?.roboPausado).toBeUndefined();
+      expect(ex?.roboSemWhatsappEm).toBeUndefined();
+      expect(ex?.roboOptOutEm).toBeUndefined();
+      expect(ex?.roboEncerradoEm).toBeUndefined();
+      // o sync de 15 min não apaga o selo "dados de exemplo" (touch() sem argumento, nunca touch(false))
+      expect((await b.getData("consorcio")).isSeed).toBe(true);
+      expect(await b.updateLeadsRobo([{ id: doExemplo, patch: primeira }])).toBe(1);
+      expect((await b.getData("consorcio")).isSeed).toBe(true);
+      // o "falhando desde" do robô é limpo com "" (o Supabase recusa null em app_state.value)
+      await b.setState(`robo_falha_desde_${sfx}`, "2026-11-04T15:00:00.000Z");
+      await b.setState(`robo_falha_desde_${sfx}`, "");
+      expect(await b.getState(`robo_falha_desde_${sfx}`)).toBe("");
+      expect(await b.getLead(id)).toMatchObject({
+        deletedReason: "restaurar exemplo",
+        roboEtapa: "transferido",
+        roboAceitouEm: "2026-11-04T10:20:00.000Z",
+      });
     });
 
     it("trava da pessoa: duas entradas ao mesmo tempo com a mesma chave rodam uma depois da outra", async () => {
@@ -409,6 +567,15 @@ function contrato(nome: string, abrir: () => Promise<{ backend: DataBackend; fec
       expect(ads[1]).toMatchObject({ ok: true, dateFrom: "2030-01-02", dateTo: "2030-02-01", rows: 12 });
       expect(ads[0]).toMatchObject({ ok: false, error: "A Meta recusou o token." });
       expect(ads[0].dateFrom).toBeUndefined();
+
+      // o robô (0023): execução sem janela, filtrada pela fonte
+      await b.addSyncRun({ ...base, id: `SR5-${sfx}`, brand: `m-${sfx}`, source: "robo", finishedAt: "2030-02-05T09:01:00.000Z", ok: true, rows: 52 });
+      const robo = await b.listSyncRuns({ source: "robo", brand: `m-${sfx}`, limit: 0 });
+      expect(robo.map((r) => r.id)).toEqual([`SR5-${sfx}`]);
+      expect(robo[0]).toMatchObject({ source: "robo", ok: true, rows: 52 });
+      expect(robo[0].dateFrom).toBeUndefined();
+      expect(robo[0].dateTo).toBeUndefined();
+      expect((await b.listSyncRuns({ source: "ads", brand: `m-${sfx}`, limit: 0 })).map((r) => r.id)).toEqual([`SR2-${sfx}`, `SR1-${sfx}`]);
     });
 
     it("metas: só se insere (vigência nova não apaga a antiga), por marca, com as entradas", async () => {

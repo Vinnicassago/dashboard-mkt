@@ -58,14 +58,25 @@ describe("Fila de sempre × Fila da live", () => {
     expect(etapaDoLead(leads[2], [], AGORA)).toBeNull(); // C: fora de toda fila de contato
     expect(etapaDoLead(leads[4], [], AGORA)?.nome).toBe("novo");
     expect(etapaDoLead(leads[5], [], AGORA)?.nome).toBe("confirmar");
-    const fila = montarFila({ nowIso: AGORA, leads, eventos: [], convites: [], comercial: [] });
+    const fila = montarFila({ nowIso: AGORA, leads, eventos: [] });
     expect(fila.itens.map((i) => i.leadId).sort()).toEqual(["m", "s"]);
+  });
+
+  it("com o robô ligado, a live continua fora do resgate (e do aviso); a reunião continua na Fila de sempre", () => {
+    const robo = { ligado: true, lidoAte: AGORA, confiavel: true };
+    const fila = montarFila({ nowIso: AGORA, leads, eventos: [], robo });
+    // "s" (sem classe, 2h30 sem registro no robô) vai ao resgate; A, B, C e X não.
+    expect(fila.itens.map((i) => [i.leadId, i.etapa]).sort()).toEqual([
+      ["m", "confirmar"],
+      ["s", "resgate"],
+    ]);
+    expect(fila.entradasDeResgate.map((e) => e.id)).toEqual(["s"]);
   });
 
   it("a Fila da live leva só A e B — juntas, ninguém fica de fora nem aparece duas vezes", () => {
     const live = montarFilaDaLive(leads, [], AGORA, EXPEDIENTE_PADRAO).map((i) => i.leadId);
     expect(live).toEqual(["a", "b"]);
-    const sempre = montarFila({ nowIso: AGORA, leads, eventos: [], convites: [], comercial: [] }).itens.map((i) => i.leadId);
+    const sempre = montarFila({ nowIso: AGORA, leads, eventos: [] }).itens.map((i) => i.leadId);
     expect(live.filter((id) => sempre.includes(id))).toEqual([]);
   });
 });
@@ -91,14 +102,32 @@ describe("Bússola — a C1 conta os A e B sem a 1ª tentativa no prazo do turno
 });
 
 describe("Leads — a próxima ação pela mesma régua", () => {
+  // Reescrito em nov/26 contra `atendimentoAgora` (proximaAcao/acaoAtrasada/acaoPorque
+  // viraram texto/atrasado/dica): a MESMA régua da live, os mesmos atrasos.
   it("A e B: a etapa da Fila da live; C e X: fora da Fila, dito com todas as letras", () => {
     const linhas = montarLinhasDeLeads(base(leads), [], AGORA, { expediente: EXPEDIENTE_PADRAO });
     const por = Object.fromEntries(linhas.map((l) => [l.id, l]));
-    expect(por.a).toMatchObject({ proximaAcao: "ligar agora", naFilaDaLive: true, acaoAtrasada: true });
-    expect(por.b).toMatchObject({ proximaAcao: "ligar agora", naFilaDaLive: true, acaoAtrasada: false });
-    expect(por.c).toMatchObject({ proximaAcao: "—", naFilaDaLive: false });
-    expect(por.c.acaoPorque).toBe("Classe C: fica fora da Fila de contato (só em Leads).");
-    expect(por.x.acaoPorque).toContain("Classe X");
-    expect(por.s).toMatchObject({ proximaAcao: "ligar agora", etapaDaFila: "novo" });
+    expect(por.a.naFilaDaLive).toBe(true);
+    expect(por.a.atendimentoAgora).toMatchObject({ texto: "ligar agora", atrasado: true, href: "/fila#live", dono: "COM" });
+    expect(por.b.naFilaDaLive).toBe(true);
+    expect(por.b.atendimentoAgora).toMatchObject({ texto: "ligar agora", atrasado: false, href: "/fila#live" });
+    expect(por.c.naFilaDaLive).toBe(false);
+    expect(por.c.atendimentoAgora.texto).toBe("—");
+    expect(por.c.atendimentoAgora.dica).toBe("Classe C: fica fora da Fila de contato (só em Leads).");
+    expect(por.x.atendimentoAgora.dica).toContain("Classe X");
+    expect(por.s.etapaDaFila).toBe("novo");
+    expect(por.s.atendimentoAgora.texto).toBe("ligar agora");
+  });
+
+  it("com o robô ligado, a live continua como antes; quem não tem classe segue a Fila do robô", () => {
+    const robo = { ligado: true, lidoAte: AGORA, confiavel: true };
+    const linhas = montarLinhasDeLeads(base(leads), [], AGORA, { expediente: EXPEDIENTE_PADRAO, robo });
+    const por = Object.fromEntries(linhas.map((l) => [l.id, l]));
+    expect(por.a.atendimentoAgora).toMatchObject({ texto: "ligar agora", atrasado: true, href: "/fila#live" });
+    expect(por.c.atendimentoAgora.dica).toBe("Classe C: fica fora da Fila de contato (só em Leads).");
+    // "s": 2h30 sem registro no robô → o resgate (a mesma Fila do teste acima).
+    expect(por.s.atendimentoAgora).toMatchObject({ texto: "Resgate · o robô não falou", href: "/fila?etapa=resgate#resgate" });
+    // A live está fora do recorte do robô (congelada): nenhuma chave do filtro.
+    expect(por.a.robo).toEqual([]);
   });
 });

@@ -15,19 +15,19 @@ import { resumoContato } from "../contato";
 import { montarFilaDaLive } from "../fila-live";
 import { gravarFicha } from "../leads/gravar-ficha";
 import { aplicarStatus } from "../leads/mudar-status";
-import { registrarContato } from "../leads/registrar-contato";
-import { idLeadLp } from "../lead-id";
+import { recusaPorOptOut, registrarContato } from "../leads/registrar-contato";
+import { idLeadLp, idLeadWhatsapp } from "../lead-id";
 import { idsDoUtm } from "../atribuicao";
 import { isLostStatus, podeTransitar, statusLabel } from "../lead-status";
 import { everBooked } from "../metrics";
 import { mesmoTelefone, normalizarTelefone } from "../phone";
 import { CLASSES_NA_FILA, type Classe } from "../qualificacao";
 import { DEFAULT_BRAND, type Lead, type LeadStatus } from "../types";
-import type { Atualizacao, Inscricao } from "./entrada";
+import { ATOR_N8N, type Atualizacao, type Inscricao } from "./entrada";
 import { fichaParaN8n, type FichaN8n } from "./ficha";
 
-/** Quem aparece no histórico como autor do que a API grava. */
-export const ATOR_N8N = "n8n";
+/** Quem aparece no histórico como autor do que a API grava (mora em `./entrada`, puro). */
+export { ATOR_N8N };
 
 /**
  * Até quanto tempo depois da entrada o MESMO cadastro chegando pelo outro caminho
@@ -91,7 +91,7 @@ export async function inscrever(i: Inscricao): Promise<ResultadoInscricao> {
       pessoaDoWhatsapp(i.whatsapp, leads);
 
     if (!existente) {
-      let id = i.eventId ? idLeadLp(i.eventId) : `LEAD-WA-${i.whatsapp}`;
+      let id = i.eventId ? idLeadLp(i.eventId) : idLeadWhatsapp(i.whatsapp);
       // Id ocupado (lead excluído com o mesmo id): um novo, sem tocar no antigo.
       if (await getLead(id)) id = `${id}-${Date.now().toString(36)}`;
       const base: Lead = {
@@ -185,7 +185,8 @@ export interface ResultadoAtualizacao {
  * Grava os fatos que o n8n mandou, nesta ordem: respostas e fatos da ficha →
  * tentativa (com resultado) → reunião → "Sem resposta". Cada passo confere a
  * régua de transição no estado em que o lead está NAQUELE momento; o primeiro que
- * não pode para tudo e diz o que já foi gravado.
+ * não pode para tudo e diz o que já foi gravado. A única recusa conferida antes de
+ * tudo é a tentativa por WhatsApp de quem deu opt-out ao robô (nada gravado).
  */
 export async function atualizar(lead: Lead, a: Atualizacao): Promise<ResultadoAtualizacao> {
   return comTravaDaPessoa(lead.phone ? normalizarTelefone(lead.phone) : lead.id, async () => {
@@ -198,6 +199,12 @@ export async function atualizar(lead: Lead, a: Atualizacao): Promise<ResultadoAt
       ficha: await fichaDe(lead.id),
     });
     let atual = (await getLead(lead.id)) ?? lead;
+
+    // Opt-out do robô (LGPD, 11.12): tentativa por WhatsApp (ou áudio) é recusada —
+    // e ANTES de gravar qualquer passo, para o envio não virar meia escrita (a ficha
+    // gravada e a reunião do mesmo envio não). O n8n reenvia com ligação ou e-mail.
+    const optOut = a.tentativa ? recusaPorOptOut(atual, a.tentativa.canal) : null;
+    if (optOut) return parar(optOut);
 
     if (Object.keys(a.ficha).length) {
       const { mudou } = await gravarFicha(atual, await comClasse(atual, a.ficha), ATOR_N8N);

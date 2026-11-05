@@ -109,7 +109,7 @@ export default async function OverviewPage({
       <OndeTrava transicoes={b.transicoes} gargalo={b.gargalo} rangeKey={b.rangeKey} />
 
       {/* 4. AÇÕES — o motor v2, com estado por semana. */}
-      <AcoesSemana acoes={b.acoes} historico={b.historicoAcoes} rangeKey={b.rangeKey} podeDecidir={podeDecidir} roboErro={b.roboErro} />
+      <AcoesSemana acoes={b.acoes} historico={b.historicoAcoes} rangeKey={b.rangeKey} podeDecidir={podeDecidir} />
 
       {/* 5. RODAPÉ — o resumo da semana (recolhido) e os links. */}
       <ResumoSemanalCard resumos={b.resumos} canWrite={canWrite} aiEnabled={aiEnabled} />

@@ -20,6 +20,7 @@ export function SyncPanel() {
             <option value="all">Tudo</option>
             <option value="ads">Só tráfego pago</option>
             <option value="instagram">Só Instagram</option>
+            <option value="robo">Só o robô</option>
           </select>
           <SubmitButton>
             <RefreshCw className="size-4" />

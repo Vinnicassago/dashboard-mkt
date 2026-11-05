@@ -22,6 +22,7 @@ import { dica } from "@/lib/dicionario";
 import { alertasDeAtribuicao, alertasDeConfianca } from "@/lib/alertas";
 import { RegistrarAlertas } from "@/components/layout/alertas";
 import { getCascataFontes, getRoboSnapshot } from "@/lib/robo/client";
+import { estadoDoRoboAgora } from "@/lib/robo/estado";
 import {
   confiancaDoRegistro,
   coortesDoFunil,
@@ -71,12 +72,14 @@ export default async function FunilPage({
   const agora = agoraDate.toISOString();
   const hoje = hojeEmBrasilia(agoraDate);
 
-  const [{ brandRules, campanhasDaConta }, cobertura, fontes, robo, eventos] = await Promise.all([
+  const [{ brandRules, campanhasDaConta }, cobertura, fontes, robo, eventos, roboAgora] = await Promise.all([
     contextoDeMarcas(),
     coberturaDeAnuncios(brand),
     getCascataFontes(),
     getRoboSnapshot(range?.from),
     listLeadEvents({ brand, limit: 0 }),
+    // A MESMA chave da Fila: ligado, os parados do 1º contato humano não linkam um grupo que não existe.
+    estadoDoRoboAgora(brand, agoraDate),
   ]);
 
   // Os MESMOS números da home e da Mídia (kpisDoPeriodo), com Δ do período anterior.
@@ -88,7 +91,17 @@ export default async function FunilPage({
   const g = gargalo(transicoes, periodoDaRegua(data, range, hoje));
   const resposta = fraseDoGargalo(g);
 
-  const funil = montarFunil({ data, range, kpis: kp, robo: fontes.robo, comercial: fontes.comercial, vista, hoje, agora });
+  const funil = montarFunil({
+    data,
+    range,
+    kpis: kp,
+    robo: fontes.robo,
+    comercial: fontes.comercial,
+    roboLigado: roboAgora.ligado,
+    vista,
+    hoje,
+    agora,
+  });
   const descoberta = funilDeDescoberta(data, range, kp);
   const tendencia = tendenciaDasTaxas(data, hoje, SEMANAS_TENDENCIA, agora);
   const coortes = coortesDoFunil(data, range, { agora, hoje, cobertura });
@@ -224,8 +237,9 @@ export default async function FunilPage({
           <PerdasTable linhas={perdas.linhas} />
           <p className="text-xs leading-relaxed text-muted-foreground">
             <span className="font-medium text-foreground">Onde atacar, pela regra:</span> “Sem resposta” aponta para o
-            comercial quando houve menos de 3 tentativas ou a 1ª tentativa saiu depois de 1 hora útil; só com 3 ou mais
-            tentativas, a primeira no prazo, aponta para mídia/formulário. “Contato inválido” abre pelo motivo registrado.
+            comercial quando houve menos de 3 tentativas ou a 1ª tentativa saiu depois de 1 hora útil (não vale para quem
+            o robô recebeu: o 1º contato foi dele); só com 3 ou mais tentativas, a primeira no prazo, aponta para
+            mídia/formulário. “Contato inválido” abre pelo motivo registrado.
             “Não tem interesse” e “Desistência” são oferta e pitch.
             {perdas.semTentativa > 0
               ? ` ${formatInt(perdas.semTentativa)} “Sem resposta” não ${perdas.semTentativa === 1 ? "tem" : "têm"} nenhuma tentativa registrada — sem tentativa, ninguém sabe se a pessoa responderia.`

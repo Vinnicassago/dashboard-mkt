@@ -10,6 +10,8 @@ import {
   confirmaPerigo,
   ehLinkDeConfiguracoes,
   estadoDaSincronizacao,
+  estadoDoAvisoResgate,
+  estadoDoCronRobo,
   estadoDoRobo,
   linkDeConfiguracoes,
   pendenciasDeConfiguracoes,
@@ -131,6 +133,99 @@ describe("6.6 — estado das integrações", () => {
     expect(f).toMatchObject({ estado: "falhando", rotulo: "Falhando agora" });
     expect(f.detalhe).toContain("estrutura do banco");
     expect(f.detalhe).not.toContain("vw_robo_diario");
+  });
+
+  // nov/26: Integrações não lê mais o banco do robô; o estado vem do registro do
+  // sync (`estadoDoRoboAgora().sync`). O ramo sem registro (acima) continua.
+  it("robô com o registro do sync: “Ativo · lido há X”, “Nunca lido”, “Falhando desde” — e a linha das contagens", () => {
+    const agora = "2026-11-04T13:20:00.000Z";
+    const ativo = estadoDoRobo({
+      configurado: true,
+      desativado: false,
+      registro: { ultimoOk: "2026-11-04T13:00:00.000Z", falha: null },
+      leitura: { casaram: 52, semLeadNoPainel: 5 },
+      semMensagem: { total: 3, naoChegaram: 1 },
+      agora,
+    });
+    expect(ativo).toEqual({
+      estado: "ativo",
+      rotulo: "Ativo · lido há 20 min",
+      detalhe: "52 casaram · 5 do robô sem lead no painel · 3 sem a 1ª mensagem do robô (1 não chegou ao robô)",
+    });
+    // Etapa C (achado): sem falha mas sem leitura há mais de 45 min (a régua ÚNICA da
+    // B1 "leitura parada") NÃO é "Ativo" — era o selo verde ao lado da B1 que linkava
+    // para cá dizendo "parada há 3 h". Antes: "Ativo · lido há 3 h".
+    const parado = estadoDoRobo({
+      configurado: true,
+      desativado: false,
+      registro: { ultimoOk: "2026-11-04T10:20:00.000Z", falha: null },
+      leitura: { casaram: 52, semLeadNoPainel: 5, transferidosSemLead: 3 },
+      semMensagem: { total: 4, naoChegaram: 4 },
+      agora,
+    });
+    expect(parado).toMatchObject({ estado: "falhando", rotulo: "Parado · lido há 3 h" });
+    // Com a leitura parada, o 3º número sai (o alerta e a B1 (b) também somem): o dado
+    // velho culparia o robô por uma falha da leitura.
+    expect(parado.detalhe).not.toContain("sem a 1ª mensagem");
+    // O número do link da Fila ("3 aceitaram pelo robô sem cadastro no painel") está aqui.
+    expect(parado.detalhe).toContain("5 do robô sem lead no painel (3 aceitaram o convite)");
+    // 44 min ainda é leitura em dia.
+    expect(
+      estadoDoRobo({ configurado: true, desativado: false, registro: { ultimoOk: "2026-11-04T12:36:00.000Z", falha: null }, agora }).rotulo,
+    ).toBe("Ativo · lido há 44 min");
+    expect(estadoDoRobo({ configurado: true, desativado: false, registro: { ultimoOk: null, falha: null }, agora })).toMatchObject({
+      estado: "nunca",
+      rotulo: "Nunca lido",
+    });
+    const erro = "Não consegui falar com o banco do robô: a conexão falhou (serviço fora do ar ou endereço errado).";
+    const falhando = estadoDoRobo({
+      configurado: true,
+      desativado: false,
+      registro: { ultimoOk: "2026-11-04T11:00:00.000Z", falha: { desde: "2026-11-04T12:00:00.000Z", erro } },
+      leitura: { casaram: 52, semLeadNoPainel: 5 },
+      semMensagem: { total: 0, naoChegaram: 0 },
+      agora,
+    });
+    // O "desde" é o da 1ª falha, em Brasília; a frase é a humana que o sync gravou.
+    expect(falhando).toMatchObject({ estado: "falhando", rotulo: "Falhando desde 04/11 09:00" });
+    expect(falhando.detalhe).toContain(erro);
+    expect(falhando.detalhe).toContain("52 casaram · 5 do robô sem lead no painel");
+    // Falhando = leitura parada: o "sem a 1ª mensagem" não sai (antes saía "0 sem a 1ª mensagem").
+    expect(falhando.detalhe).not.toContain("sem a 1ª mensagem");
+    // Desativado vence o registro: desligado não é erro.
+    expect(
+      estadoDoRobo({ configurado: true, desativado: true, registro: { ultimoOk: null, falha: { desde: agora, erro } } }).estado,
+    ).toBe("desativado");
+  });
+
+  it("cron do robô: diz se RODA — nunca rodou, rodando, parado (2×15+5 min), sem chave, desligado", () => {
+    const agora = "2026-11-04T13:00:00.000Z";
+    const antes = (min: number) => new Date(Date.parse(agora) - min * 60_000).toISOString();
+    const base = { configurado: true, cronSecret: true, agora };
+    expect(estadoDoCronRobo({ ...base, ultimaExecucao: null })).toMatchObject({ estado: "nunca", rotulo: "Nunca rodou" });
+    expect(estadoDoCronRobo({ ...base, ultimaExecucao: null }).detalhe).toContain("/api/sync?secret=CRON_SECRET&source=robo");
+    expect(estadoDoCronRobo({ ...base, ultimaExecucao: antes(10) })).toMatchObject({ estado: "ativo", rotulo: "Rodando" });
+    expect(estadoDoCronRobo({ ...base, ultimaExecucao: antes(34) }).estado).toBe("ativo");
+    expect(estadoDoCronRobo({ ...base, ultimaExecucao: antes(36) })).toMatchObject({
+      estado: "falhando",
+      rotulo: "Parado desde 04/11 09:24",
+    });
+    expect(estadoDoCronRobo({ ...base, cronSecret: false }).estado).toBe("nao-configurado");
+    expect(estadoDoCronRobo({ ...base, configurado: false }).estado).toBe("nao-configurado");
+    expect(estadoDoCronRobo({ ...base, desativado: true, ultimaExecucao: antes(300) }).estado).toBe("desativado");
+  });
+
+  it("aviso de resgate (n8n): desligado sem o webhook próprio; ligado; a última falha", () => {
+    expect(estadoDoAvisoResgate({ configurado: false, estado: null })).toMatchObject({ estado: "nao-configurado", rotulo: "Desligado" });
+    expect(estadoDoAvisoResgate({ configurado: true, estado: null })).toMatchObject({ estado: "ativo", rotulo: "Ligado" });
+    const enviado = { avisados: {}, ultimoEnvio: "2026-11-04T12:00:00.000Z", ultimaFalha: null };
+    expect(estadoDoAvisoResgate({ configurado: true, estado: enviado }).detalhe).toContain("Último aviso que deu certo");
+    const falhou = estadoDoAvisoResgate({
+      configurado: true,
+      estado: { ...enviado, ultimaFalha: { em: "2026-11-04T13:00:00.000Z", detalhe: "o n8n não confirmou o recebimento" } },
+    });
+    expect(falhou).toMatchObject({ estado: "falhando", rotulo: "Falhou em 04/11 10:00" });
+    expect(falhou.detalhe).toContain("O n8n não confirmou o recebimento.");
   });
 
   it("quem vê telefone e e-mail: administrador e comercial; marketing vê mascarado", () => {

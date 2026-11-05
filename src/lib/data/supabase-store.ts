@@ -20,9 +20,14 @@ import {
   type ListCapiEnviosOpts,
   agruparCampanhasDaConta,
   aplicarFicha,
+  aplicarRobo,
   chaveDeLinhaDeAnuncio,
   emFilaNoProcesso,
+  patchRoboVazio,
+  ROBO_SOBRESCREVE,
+  ROBO_UMA_VEZ,
   type LeadFichaPatch,
+  type LeadRoboPatch,
 } from "./backend";
 import { toRole } from "../auth/roles";
 import type {
@@ -368,6 +373,34 @@ export const supabaseBackend: DataBackend = {
     await touch(false);
   },
 
+  /**
+   * Sem transação nem `coalesce` no REST: por lead, lê, aplica a mesma regra do
+   * JSON local (`aplicarRobo`) e grava SÓ as colunas presentes no patch
+   * (`patch[f] !== undefined` — chave ausente nunca vira null). Sem status, sem
+   * `robo_session_id`; `touch()` sem argumento, e só se algo mudou.
+   */
+  async updateLeadsRobo(itens: { id: string; patch: LeadRoboPatch }[]) {
+    const db = supabase();
+    let alcancados = 0;
+    for (const { id, patch } of itens) {
+      if (patchRoboVazio(patch)) continue;
+      const cur = await db.from("leads").select("*").eq("id", id).maybeSingle();
+      check(cur.error, "get lead (robô)");
+      if (!cur.data) continue;
+      const lead = toLead(cur.data as Row);
+      aplicarRobo(lead, patch);
+      const row = fromLead(lead);
+      const campos = [...ROBO_SOBRESCREVE, ...ROBO_UMA_VEZ].filter((f) => patch[f] !== undefined);
+      const cols = campos.map((f) => f.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`));
+      const update = Object.fromEntries(cols.map((c) => [c, row[c] ?? null]));
+      const { error } = await db.from("leads").update(update).eq("id", id);
+      check(error, "update lead (robô)");
+      alcancados++;
+    }
+    if (alcancados > 0) await touch();
+    return alcancados;
+  },
+
   /** Supabase não expõe advisory lock pelo REST: a trava vale só dentro do processo. */
   async comTravaDaPessoa<T>(chave: string, fn: () => Promise<T>) {
     return emFilaNoProcesso(`pessoa:${chave}`, fn);
@@ -385,7 +418,6 @@ export const supabaseBackend: DataBackend = {
     if (patch?.meetingFor !== undefined) row.meeting_for = patch.meetingFor;
     if (patch?.lostReasonDetail !== undefined) row.lost_reason_detail = patch.lostReasonDetail;
     if (patch?.value !== undefined) row.value = patch.value;
-    if (patch?.roboSessionId !== undefined) row.robo_session_id = patch.roboSessionId;
     if (patch?.lostAt !== undefined) row.lost_at = patch.lostAt;
 
     // Marcos são gravados uma única vez. O REST do Supabase não tem `coalesce`,
@@ -625,6 +657,7 @@ export const supabaseBackend: DataBackend = {
     if (limit > 0) query = query.limit(limit);
     if (opts?.leadId) query = query.eq("lead_id", opts.leadId);
     if (opts?.brand) query = query.or(`brand.eq.${opts.brand},brand.is.null`);
+    if (opts?.action) query = query.eq("action", opts.action);
     const { data, error } = await query;
     check(error, "list lead events");
     return (data ?? []).map(toEvent);

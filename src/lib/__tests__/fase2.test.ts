@@ -3,7 +3,7 @@
  * Datas em UTC; Brasília = UTC−3 (sem horário de verão desde 2019).
  */
 import { describe, expect, it } from "vitest";
-import { diaBrt, horasUteisEntre, somarHorasUteis } from "../horario-util";
+import { diaBrt, horasUteisEntre, noHorarioComercial, somarHorasUteis } from "../horario-util";
 import { proximaPelaCadencia, resumoContato } from "../contato";
 import {
   BOOKED_STATUSES,
@@ -40,6 +40,15 @@ describe("horas úteis (seg–sex, 9h–18h, Brasília)", () => {
   });
   it("dia de Brasília, não de UTC", () => {
     expect(diaBrt("2026-10-09T02:00:00Z")).toBe("2026-10-08");
+  });
+  it("no horário comercial: seg–sex, das 9h às 18h (o fim é aberto), em Brasília", () => {
+    expect(noHorarioComercial(brt("2026-10-12", "09:00"))).toBe(true); // segunda 9h
+    expect(noHorarioComercial(brt("2026-10-09", "17:59"))).toBe(true);
+    expect(noHorarioComercial(brt("2026-10-09", "18:00"))).toBe(false); // sexta 18h
+    expect(noHorarioComercial(brt("2026-10-12", "08:59"))).toBe(false);
+    expect(noHorarioComercial(brt("2026-10-10", "11:00"))).toBe(false); // sábado
+    // 21h em Brasília de quinta = 00h UTC de sexta: vale o relógio de Brasília.
+    expect(noHorarioComercial("2026-10-09T00:00:00.000Z")).toBe(false);
   });
 });
 
@@ -172,6 +181,17 @@ describe("etapas da Fila", () => {
     expect(etapaDoLead(ontem, [], agora)?.nome).toBe("sem-desfecho");
   });
 
+  it("reunião já confirmada sai de 'a confirmar' (fato da ficha) — e volta como 'sem desfecho' se ninguém registrar", () => {
+    const confirmada = lead("dc", {
+      status: "agendado",
+      meetingFor: brt("2026-10-09", "12:00"),
+      bookedAt: brt("2026-10-08", "09:00"),
+      reuniaoConfirmadaEm: brt("2026-10-08", "11:00"),
+    });
+    expect(etapaDoLead(confirmada, [], agora)).toBeNull();
+    expect(etapaDoLead(confirmada, [], brt("2026-10-10", "10:00"))?.nome).toBe("sem-desfecho");
+  });
+
   it("agendado sem data (legado) vira 'sem desfecho' uma semana depois", () => {
     const velho = lead("f", { status: "agendado", bookedAt: brt("2026-09-20", "10:00") });
     expect(etapaDoLead(velho, [], agora)?.nome).toBe("sem-desfecho");
@@ -192,10 +212,11 @@ describe("etapas da Fila", () => {
         lead("conf", { status: "agendado", meetingFor: brt("2026-10-09", "12:00") }),
       ],
       eventos: [],
-      convites: [],
-      comercial: [],
     });
     expect(f.itens.map((i) => i.etapa)).toEqual(["novo", "confirmar"]);
+    // Sem o robô, os grupos são os de antes, na ordem fixa.
+    expect(f.grupos.map((g) => g.etapa)).toEqual(["novo", "retornar", "confirmar", "sem-desfecho"]);
+    expect(f.comRobo).toEqual({ emConversa: 0, esperando: 0, encerrados: 0 });
   });
 });
 

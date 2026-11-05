@@ -23,9 +23,12 @@ import {
   aplicarPatchCapi,
   agruparCampanhasDaConta,
   aplicarFicha,
+  aplicarRobo,
   chaveDeLinhaDeAnuncio,
   emFilaNoProcesso,
+  patchRoboVazio,
   type LeadFichaPatch,
+  type LeadRoboPatch,
 } from "./backend";
 import { toRole } from "../auth/roles";
 import { LOST_STATUSES, normalizeLeadStatus } from "../lead-status";
@@ -425,6 +428,23 @@ export const localBackend: DataBackend = {
     });
   },
 
+  async updateLeadsRobo(itens: { id: string; patch: LeadRoboPatch }[]) {
+    const validos = itens.filter((it) => !patchRoboVazio(it.patch));
+    if (validos.length === 0) return 0;
+    let alcancados = 0;
+    // Um commit só: cada commit reescreve o JSON inteiro.
+    commit((data) => {
+      const porId = new Map(data.leads.map((l) => [l.id, l]));
+      for (const it of validos) {
+        const lead = porId.get(it.id);
+        if (!lead) continue;
+        aplicarRobo(lead, it.patch);
+        alcancados++;
+      }
+    });
+    return alcancados;
+  },
+
   async comTravaDaPessoa<T>(chave: string, fn: () => Promise<T>) {
     return emFilaNoProcesso(`pessoa:${chave}`, fn);
   },
@@ -445,7 +465,6 @@ export const localBackend: DataBackend = {
       if (patch?.meetingFor !== undefined) lead.meetingFor = patch.meetingFor;
       if (patch?.lostReasonDetail !== undefined) lead.lostReasonDetail = patch.lostReasonDetail ?? undefined;
       if (patch?.value !== undefined) lead.value = patch.value;
-      if (patch?.roboSessionId !== undefined) lead.roboSessionId = patch.roboSessionId;
       // Marcos: gravados uma vez, nunca sobrescritos — é o que impede uma perda
       // registrada depois de apagar a reunião que aconteceu.
       if (patch?.firstContactAt === null) delete lead.firstContactAt;
@@ -603,6 +622,7 @@ export const localBackend: DataBackend = {
     let list = file().leadEvents;
     if (opts?.leadId) list = list.filter((e) => e.leadId === opts.leadId);
     if (opts?.brand) list = list.filter((e) => !e.brand || e.brand === opts.brand);
+    if (opts?.action) list = list.filter((e) => e.action === opts.action);
     const sorted = [...list].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     const limit = opts?.limit ?? 200;
     return limit > 0 ? sorted.slice(0, limit) : sorted;

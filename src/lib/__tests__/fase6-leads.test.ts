@@ -230,14 +230,16 @@ describe("montarLinhasDeLeads", () => {
     expect(linhas.map((x) => x.id).sort()).toEqual(["1", "2", "3", "4", "5", "6", "7", "9"]);
   });
 
-  it("tempo até o 1º contato em horas úteis, com a régua de 1 hora útil", () => {
-    expect(l.get("1")!.horasAte1oContato).toBeCloseTo(0.5, 5);
-    expect(l.get("1")!.primeiroContatoNoPrazo).toBe(true);
-    // Entrou quarta 17h: 1 h útil até 18h + 30 min na quinta = 1,5 h → fora do prazo.
-    expect(l.get("9")!.horasAte1oContato).toBeCloseTo(1.5, 5);
-    expect(l.get("9")!.primeiroContatoNoPrazo).toBe(false);
-    expect(l.get("2")!.horasAte1oContato).toBeNull();
-    expect(l.get("2")!.primeiroContatoNoPrazo).toBeNull();
+  // nov/26: a coluna "Tempo até 1º contato" saiu da tabela e do CSV (com o robô, o
+  // 1º contato é dele). A régua de 1 hora útil continua no KPI "1º contato no prazo"
+  // (kpis.ts, fase3) e no prazo do grupo "Novos" — que é o que a linha mostra abaixo.
+  it("a linha não carrega mais o tempo até o 1º contato: o atendimento agora o substitui", () => {
+    const linha = l.get("9")! as unknown as Record<string, unknown>;
+    expect(linha.horasAte1oContato).toBeUndefined();
+    expect(linha.primeiroContatoNoPrazo).toBeUndefined();
+    expect(linha.proximaAcao).toBeUndefined();
+    expect(linha.dono).toBeUndefined();
+    expect(l.get("9")!.atendimentoAgora).toBeDefined();
   });
 
   it("etapa máxima e tentativas saem das fontes únicas", () => {
@@ -250,25 +252,33 @@ describe("montarLinhasDeLeads", () => {
     expect(l.get("2")!.tentativas).toBe(0);
   });
 
-  it("próxima ação é a da Fila: ligar agora, retornar, confirmar, ou nada (com o porquê)", () => {
-    // B entrou 11h, ninguém tentou, são 13h: 2 h úteis num prazo de 1 → atrasada.
-    expect(l.get("2")!.proximaAcao).toBe("ligar agora");
+  // Reescrito em nov/26 contra `atendimentoAgora` (proximaAcao, acaoAtrasada, acaoPorque
+  // e dono viraram texto, atrasado, dica e dono). Robô desligado (sem `robo`): o texto
+  // de antes, sem prefixo — a mesma régua da Fila, os mesmos donos, o mesmo atraso.
+  it("atendimento é o da Fila (robô desligado): ligar agora, retornar, confirmar, ou nada (com o porquê)", () => {
+    // B entrou 11h, ninguém tentou, são 13h: 2 h úteis num prazo de 1 → fora do prazo.
+    expect(l.get("2")!.atendimentoAgora).toMatchObject({
+      texto: "ligar agora",
+      atrasado: true,
+      dono: "COM",
+      href: "/fila?etapa=novo#novo",
+    });
     expect(l.get("2")!.etapaDaFila).toBe("novo");
-    expect(l.get("2")!.acaoAtrasada).toBe(true);
-    expect(l.get("2")!.dono).toBe("COM");
+    expect(l.get("2")!.atendimentoAgora.ordem).toBeCloseTo(2, 5); // 2 h úteis ÷ 1 h
     // A: tentativa 10h30 sem resposta, cadência +2 h = 12h30 < 13h → retornar.
-    expect(l.get("1")!.proximaAcao).toBe("retornar");
-    expect(l.get("1")!.acaoAtrasada).toBe(false);
+    expect(l.get("1")!.atendimentoAgora).toMatchObject({ texto: "retornar", atrasado: false });
     // C: reunião amanhã 10h (21 h) → confirmar.
-    expect(l.get("3")!.proximaAcao).toBe("confirmar reunião");
-    expect(l.get("3")!.acaoAtrasada).toBe(false);
+    expect(l.get("3")!.atendimentoAgora).toMatchObject({ texto: "confirmar reunião", atrasado: false });
     // D: encerrado → "—", sem dono, e a dica diz por quê.
-    expect(l.get("4")!.proximaAcao).toBe("—");
-    expect(l.get("4")!.dono).toBeUndefined();
-    expect(l.get("4")!.acaoPorque).toContain("Encerrado");
+    expect(l.get("4")!.atendimentoAgora.texto).toBe("—");
+    expect(l.get("4")!.atendimentoAgora.dono).toBeUndefined();
+    expect(l.get("4")!.atendimentoAgora.dica).toContain("Encerrado");
+    expect(l.get("4")!.atendimentoAgora.href).toBeUndefined();
     // E: cliente → "—", dono especialista.
-    expect(l.get("5")!.proximaAcao).toBe("—");
-    expect(l.get("5")!.dono).toBe("ESP");
+    expect(l.get("5")!.atendimentoAgora).toMatchObject({ texto: "—", dono: "ESP" });
+    // Robô desligado: nenhuma linha entra no filtro do robô, nenhuma tem prefixo "Robô".
+    expect(linhas.every((x) => x.robo.length === 0)).toBe(true);
+    expect(linhas.some((x) => x.atendimentoAgora.texto.startsWith("Robô"))).toBe(false);
   });
 
   it("origem é a trilha campanha › conjunto › anúncio", () => {
@@ -333,8 +343,17 @@ describe("abas, filtros e CSV", () => {
     expect(colunas[2]).toMatch(/^="\d+"$/);
     expect(colunas[3]).toBe("Em contato");
     expect(colunas[4]).toBe("Contato feito");
-    expect(colunas[9]).toBe("Consórcio Leads");
-    expect(colunas[13]).toBe("comercial");
+    // nov/26: "Tempo até 1º contato", "Próxima ação" e "Dono" viraram UMA coluna
+    // "Atendimento" (índice 7); a Campanha passou de 9 para 8.
+    expect(CSV_CABECALHO[7]).toBe("Atendimento");
+    expect(colunas[7]).toBe("retornar");
+    expect(colunas[8]).toBe("Consórcio Leads");
+    expect(CSV_CABECALHO).not.toContain("Tempo até 1º contato");
+    expect(CSV_CABECALHO).not.toContain("Próxima ação");
+    expect(CSV_CABECALHO).not.toContain("Dono");
+    // O de 5 estados da live tem nome próprio — dois "Atendimento" seriam dois números para um nome.
+    expect(CSV_CABECALHO.filter((c) => c === "Atendimento")).toHaveLength(1);
+    expect(CSV_CABECALHO).toContain("Status do atendimento");
     expect(csv).not.toContain("Pessoa 5");
     expect(montarCsvDeLeads([]).split("\r\n")).toHaveLength(1);
   });
@@ -347,6 +366,14 @@ describe("abas, filtros e CSV", () => {
     expect(d).toBe("período: 30 dias · status: Agendado · campanha: Consórcio Leads · dono: comercial · sinalizadores: Duplicado · busca: sim");
     expect(d).not.toContain("11999990003");
     expect(descreverFiltro(FILTRO_VAZIO, "Campanha")).toBe("período: Campanha · status: todos");
+    // O filtro do robô também vai para o registro, pelo rótulo.
+    expect(descreverFiltro({ ...FILTRO_VAZIO, robo: "sem-1a-msg" }, "Campanha")).toBe(
+      "período: Campanha · status: todos · robô: Sem a 1ª mensagem do robô",
+    );
+    // O de 5 estados da live: a chave `atendimento` é a mesma, o rótulo é "Status do atendimento".
+    expect(descreverFiltro({ ...FILTRO_VAZIO, atendimento: "novo" }, "Campanha")).toBe(
+      "período: Campanha · status: todos · status do atendimento: Novo",
+    );
   });
 });
 
@@ -574,6 +601,10 @@ describe("exportação: o servidor monta o CSV, registra o que saiu e só então
     });
     expect(filtroDoPedido(null)).toEqual({ ...FILTRO_VAZIO, campanha: undefined, conjunto: undefined, dono: undefined });
     expect(filtroDoPedido({ status: "agendado", dono: "COM" })).toMatchObject({ status: "agendado", dono: "COM" });
+    // A chave do robô só passa se for do vocabulário (hífen, `FILTROS_DO_ROBO`).
+    expect(filtroDoPedido({ robo: "nao_recebeu" }).robo).toBeUndefined();
+    expect(filtroDoPedido({ robo: "toString" }).robo).toBeUndefined();
+    expect(filtroDoPedido({ robo: "sem-1a-msg" }).robo).toBe("sem-1a-msg");
   });
 
   it("periodoDoRegistro: as datas que o servidor aplicou, ou a campanha inteira", () => {
@@ -678,14 +709,14 @@ describe("o porquê do “—” diz quando a pessoa volta à Fila", () => {
     const J = lead("31", { status: "em_contato", firstContactAt: brt("2026-10-08", "10:00") });
     const ev = [tentativa(J.id, brt("2026-10-08", "10:00"), true)];
     const [agora] = montarLinhasDeLeads(base({ leads: [J] }), ev, AGORA);
-    expect(agora.proximaAcao).toBe("—");
-    expect(agora.acaoPorque).not.toContain("Nada pendente");
-    expect(agora.acaoPorque).toContain("já falou com a pessoa");
-    expect(agora.acaoPorque).toContain(`volta à Fila (“Retornar hoje”) em ${formatDateTime(brt("2026-10-09", "10:00"))}`);
-    expect(agora.acaoPorque).toContain(`${HORAS_APOS_CONVERSA} h depois`);
+    expect(agora.atendimentoAgora.texto).toBe("—");
+    expect(agora.atendimentoAgora.dica).not.toContain("Nada pendente");
+    expect(agora.atendimentoAgora.dica).toContain("já falou com a pessoa");
+    expect(agora.atendimentoAgora.dica).toContain(`volta à Fila (“Retornar hoje”) em ${formatDateTime(brt("2026-10-09", "10:00"))}`);
+    expect(agora.atendimentoAgora.dica).toContain(`${HORAS_APOS_CONVERSA} h depois`);
     // E a Fila concorda: passado o prazo, a mesma pessoa está em "retornar".
     const [depois] = montarLinhasDeLeads(base({ leads: [J] }), ev, brt("2026-10-09", "10:01"));
-    expect(depois.proximaAcao).toBe("retornar");
+    expect(depois.atendimentoAgora.texto).toBe("retornar");
   });
 
   it("cadência encerrada sem conversa: o mesmo relógio, sem dizer que falou", () => {
@@ -701,8 +732,8 @@ describe("o porquê do “—” diz quando a pessoa volta à Fila", () => {
       payload: { canal: "telefone", falou: "nao" },
     };
     const [linha] = montarLinhasDeLeads(base({ leads: [K] }), [semRetorno], AGORA);
-    expect(linha.proximaAcao).toBe("—");
-    expect(linha.acaoPorque).not.toContain("falou");
-    expect(linha.acaoPorque).toContain(formatDateTime(brt("2026-10-09", "11:00")));
+    expect(linha.atendimentoAgora.texto).toBe("—");
+    expect(linha.atendimentoAgora.dica).not.toContain("falou");
+    expect(linha.atendimentoAgora.dica).toContain(formatDateTime(brt("2026-10-09", "11:00")));
   });
 });

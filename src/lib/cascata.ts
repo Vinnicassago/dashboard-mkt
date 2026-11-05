@@ -233,6 +233,13 @@ export interface CascataInput {
   robo: CascataRobo | null;
   comercial: CascataComercial | null;
   /**
+   * O robô faz o 1º contato (`estadoDoRoboAgora(...).ligado`, a MESMA chave da
+   * Fila). Ligado, a Fila não tem mais o grupo "Novos": os parados do 1º contato
+   * humano ficam sem link (o número não é o de grupo nenhum da página). Ausente =
+   * desligado.
+   */
+  roboLigado?: boolean;
+  /**
    * Os KPIs do período (`kpisDoPeriodo`). A cascata não recalcula leads, CPL nem
    * verba: lê daqui, para o degrau "Leads" e o "R$ X cada" dele serem os mesmos
    * números do resto do painel.
@@ -374,7 +381,9 @@ export function montarCascata(input: CascataInput): CascataResult {
         dono,
         parados: parados && parados > 0 ? parados : undefined,
         midiaParada: parados && parados > 0 ? parados * ((anterior === leadCount ? custoLead : custo(anterior)) ?? 0) : undefined,
-        etapaFila: key === "transferidos" && parados && parados > 0 ? "convite-pendente" : undefined,
+        // O convite pendente é do robô (barra "Com o robô agora" da Fila): não há grupo
+        // do comercial para ele desde nov/26 — o degrau fica sem link para a Fila.
+        etapaFila: undefined,
         // O robô não guarda data: a contagem dele é da campanha inteira.
         nota: key === "conversas" && range ? "contagem do robô: campanha inteira, não o período" : undefined,
       });
@@ -401,7 +410,7 @@ export function montarCascata(input: CascataInput): CascataResult {
         comercial.aguardandoAbordagem > 0
           ? comercial.aguardandoAbordagem * ((robo ? custo(anteriorCom) : custoLead) ?? 0)
           : undefined,
-      etapaFila: comercial.aguardandoAbordagem > 0 ? "aguardando-contato" : undefined,
+      etapaFila: comercial.aguardandoAbordagem > 0 ? "convite-aceito" : undefined,
       nota: comercial.abordados <= 1 ? "n=1 — não é uma taxa" : undefined,
     });
 
@@ -439,9 +448,14 @@ export function montarCascata(input: CascataInput): CascataResult {
   } else {
     // Sem robô/comercial, o fundo do funil é o do painel — e quem espera o 1º
     // contato está parado AQUI, entre virar lead e ter reunião. Conta todos os
-    // leads ainda sem nenhuma tentativa (sem recorte de período), exatamente
-    // como a aba "Novos" da Fila: o número do farol é o número da página.
-    const semContato = data.leads.filter((l) => l.status === "lead").length;
+    // leads ainda sem nenhuma tentativa (sem recorte de período). Com o robô
+    // DESLIGADO é a aba "Novos" da Fila (o número do farol é o número da página) e
+    // o marcador linka para ela — todo "Novo" conta, com `roboVistoEm` ou não (o
+    // robô desligado depois de ter rodado devolve essas pessoas a "Novos"). Com o
+    // robô LIGADO, quem o robô recebeu não espera o 1º contato humano (11.7), a
+    // Fila não tem grupo com essa população (antes do robô, live, quem o robô ainda
+    // tem) e o marcador fica sem link.
+    const semContato = data.leads.filter((l) => l.status === "lead" && (!input.roboLigado || !l.roboVistoEm)).length;
     push({
       key: "reunioes",
       label: "Agendaram reunião",
@@ -456,7 +470,7 @@ export function montarCascata(input: CascataInput): CascataResult {
       dono: "COM",
       parados: semContato > 0 ? semContato : undefined,
       midiaParada: semContato > 0 ? semContato * (custoLead ?? 0) : undefined,
-      etapaFila: semContato > 0 ? "novo" : undefined,
+      etapaFila: semContato > 0 && !input.roboLigado ? "novo" : undefined,
       nota: "dos leads que entraram no período, em qualquer data",
     });
     push({

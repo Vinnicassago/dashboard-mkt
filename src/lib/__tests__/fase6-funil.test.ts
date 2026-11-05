@@ -325,6 +325,33 @@ describe("com robô/atendimento ligados, as vistas ainda diferem e a north star 
     expect(comAtendimento).toMatchObject({ parados: 5, etapaFila: "novo" });
     expect(comAtendimento.nota).toContain("uma vez só, na etapa do atendimento");
   });
+
+  it("meio-ligado é o caminho de PRODUÇÃO desde nov/26 (a mesa do atendimento não é lida): quem o robô recebeu não está parado no 1º contato humano", () => {
+    // Dois dos cinco parados (status "lead") foram recebidos pelo robô (roboVistoEm):
+    // o 1º contato deles é do robô — saem dos parados (11.7) e da base do KPI.
+    let vistos = 0;
+    const comRobo = base({
+      ...data,
+      leads: data.leads.map((l) =>
+        l.status === "lead" && vistos < 2 ? (vistos++, { ...l, roboVistoEm: "2026-10-05T13:10:00.000Z" }) : l,
+      ),
+    });
+    const kpis = (d: DashboardData) => kpisDoPeriodo(d, SEMANA, { hoje: HOJE, agora: AGORA, comparar: true });
+    const ligado = montarFunil({ data: comRobo, range: SEMANA, kpis: kpis(comRobo), robo: ROBO, comercial: null, roboLigado: true, vista: "coorte", hoje: HOJE, agora: AGORA });
+    const f = porKey(ligado.etapas);
+    expect(vistos).toBe(2);
+    expect(f.primeiro_contato.parados).toBe(3);
+    // Com o robô ligado a Fila não tem o grupo "Novos": o número fica, sem link
+    // (o número do link é o da página que ele abre). Desligado, o link de sempre.
+    expect(f.primeiro_contato.etapaFila).toBeUndefined();
+    expect(porKey(funilCom(data, "coorte", ROBO, null).etapas).primeiro_contato.etapaFila).toBe("novo");
+    // ...e saem da base do KPI do 1º contato no prazo (o mesmo 11.7).
+    expect(kpis(comRobo).primeiroContatoNoPrazo.n).toBe(kpis(data).primeiroContatoNoPrazo.n - 2);
+    // O convite pendente é do robô (barra da Fila): o degrau não aponta para grupo nenhum.
+    const transferidos = ligado.cascata.degraus.find((d) => d.key === "transferidos");
+    expect(transferidos?.parados).toBe(ROBO.convitePendente);
+    expect(transferidos?.etapaFila).toBeUndefined();
+  });
 });
 
 describe("'% da anterior' só entre populações aninhadas — nunca acima de 100%", () => {
@@ -732,6 +759,25 @@ describe("perdas confiáveis: sem testes, sem duplicados, sem quem chegou a agen
       { motivo: "sem_whatsapp", label: "Sem WhatsApp", n: 1 },
     ]);
     expect(porStatus.sem_interesse.ondeAtacar).toEqual({ oferta: 1 });
+  });
+
+  it("quem o robô recebeu: '1ª tentativa fora do prazo' não se aplica — só '< 3 tentativas' vai ao comercial (11.7)", () => {
+    // O mesmo "tardio" (3 tentativas, a 1ª no dia seguinte), agora visto pelo robô.
+    const viuRobo = { ...tardio, id: `${tardio.id}-robo`, roboVistoEm: "2026-10-05T13:05:00.000Z" };
+    // E um visto pelo robô com só 2 tentativas: continua com o comercial.
+    const poucas = perdido("2026-10-05", { roboVistoEm: "2026-10-05T13:05:00.000Z" });
+    const dados = base({ leads: [viuRobo, poucas] });
+    const evs: LeadEvent[] = [
+      tentativa(viuRobo.id, "2026-10-06T13:30:00.000Z"),
+      tentativa(viuRobo.id, "2026-10-06T18:30:00.000Z"),
+      tentativa(viuRobo.id, "2026-10-07T13:30:00.000Z"),
+      tentativa(poucas.id, "2026-10-06T13:30:00.000Z"),
+      tentativa(poucas.id, "2026-10-07T13:30:00.000Z"),
+    ];
+    const r = perdasConfiaveis(dados, SEMANA, evs);
+    expect(r.linhas.find((l) => l.status === "sem_resposta")!.ondeAtacar).toEqual({ comercial: 1, midia_formulario: 1 });
+    // Sem o robô, o mesmo lead tardio aponta para o comercial (o caso de cima, intacto).
+    expect(porStatus.sem_resposta.ondeAtacar.comercial).toBe(2);
   });
 
   it("% registrado com atraso (> 72 h) e média de tentativas, por motivo", () => {

@@ -115,11 +115,14 @@ export function resolveRange(
 
 /**
  * Leva o período escolhido num link interno — trocar de página não pode trocar
- * de período em silêncio. Respeita a query e a âncora que o link já tiver.
+ * de período em silêncio. Respeita a query e a âncora que o link já tiver — e o
+ * período que ele já tiver: o link que leva `range=` de propósito (a B1 e a barra
+ * do robô abrem Leads com `range=all`, 11.5) sai intacto, sem um 2º `range`.
  */
 export function comPeriodo(href: string, rangeKey?: string | null): string {
   if (!rangeKey || rangeKey === "all") return href;
   const [base, hash] = href.split("#");
+  if (/[?&]range=/.test(base)) return href;
   const sep = base.includes("?") ? "&" : "?";
   return `${base}${sep}range=${encodeURIComponent(rangeKey)}${hash ? `#${hash}` : ""}`;
 }

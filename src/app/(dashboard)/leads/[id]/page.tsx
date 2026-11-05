@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AlertTriangle, ArrowLeft, Mail, MessageCircle } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Info } from "@/components/ui/info";
 import { StatusBadge } from "@/components/tables/lead-status";
 import { DeletedLeads } from "@/components/leads/leads-directory";
 import { DescricaoEvento } from "@/components/leads/lead-activity";
@@ -25,7 +26,7 @@ import {
   statusAtendimento,
   statusReuniao,
 } from "@/lib/qualificacao";
-import { etapaDoLead, FILA_ETAPAS } from "@/lib/fila";
+import { etapaDoLead, FILA_ETAPAS, reunioesPorTelefone } from "@/lib/fila";
 import { ETAPA_DA_LIVE, etapaDaLive } from "@/lib/fila-live";
 import { expedienteAtual } from "@/lib/atendimento-server";
 import { gruposDuplicados, pareceTeste, problemasDeContato } from "@/lib/identidade";
@@ -33,9 +34,20 @@ import { ETAPA_MAXIMA_LABEL, etapaMaxima } from "@/lib/lead-status";
 import { mascararEmail, mascararNoTexto, mascararTelefone } from "@/lib/lgpd";
 import { everBooked } from "@/lib/metrics";
 import { origemDoLead } from "@/lib/origem";
-import { normalizarTelefone } from "@/lib/phone";
+import { chaveTelefoneValida, normalizarTelefone } from "@/lib/phone";
 import { comPeriodo } from "@/lib/range";
-import { formatCurrency, formatDateTime } from "@/lib/format";
+import { formatCurrency, formatDateTime, formatarEspera } from "@/lib/format";
+import { estadoDoRoboAgora } from "@/lib/robo/estado";
+import { ROBO_ETAPA_LABEL } from "@/lib/robo/etapa";
+import {
+  RESGATE_MOTIVO_LABEL,
+  agendouDepoisDoAceite,
+  fatoDoEpisodio,
+  reabertoDe,
+  reabertoNoPainelDe,
+  refDoRobo,
+  situacaoDoRobo,
+} from "@/lib/robo/situacao";
 import type { LeadEvent } from "@/lib/types";
 import { entradasDaMeta, type EntradaDaMeta } from "@/lib/capi-politica";
 
@@ -51,6 +63,10 @@ function Linha({ rotulo, children }: { rotulo: string; children: React.ReactNode
 }
 
 const data = (iso?: string) => (iso ? formatDateTime(iso) : "—");
+
+/** O ⓘ do card do robô: o que ele é e o que ele não é. */
+const SOBRE_O_ROBO =
+  "O que o robô de WhatsApp fez com esta pessoa, lido do banco do robô a cada 15 min (sem a conversa). O robô não é tentativa: não entra na cadência nem no 1º contato.";
 
 /**
  * Contato novo digitado num reenvio, e o contato cru que motivos antigos de
@@ -91,7 +107,7 @@ export default async function FichaDoLead({
   const lead = await getLead(id);
   if (!lead) notFound();
 
-  const [dados, proprios, enviosMeta, canEdit, canDelete, mensagem, user, expediente] = await Promise.all([
+  const [dados, proprios, enviosMeta, canEdit, canDelete, mensagem, user, expediente, robo] = await Promise.all([
     getData(lead.brand),
     listLeadEvents({ leadId: id, limit: 0 }),
     listCapiEnvios({ leadId: id, limit: 0 }),
@@ -100,6 +116,8 @@ export default async function FichaDoLead({
     mensagemWhatsapp(),
     getCurrentUser(),
     expedienteAtual(),
+    // O MESMO estado do robô da Fila: a etapa citada no cabeçalho é a do grupo de lá.
+    estadoDoRoboAgora(lead.brand),
   ]);
   const mascarar = user?.role === "marketing";
   const comRange = (href: string) => comPeriodo(href, range);
@@ -146,7 +164,44 @@ export default async function FichaDoLead({
       : null;
   const resultadoReuniao = resultadoDaReuniao(proprios);
   const origem = origemDoLead(dados)(lead);
-  const naFila = lead.deletedAt ? null : etapaDoLead(lead, proprios, new Date().toISOString());
+  // O MESMO contexto da Fila e de Leads (a mesma pessoa agendou por outro cadastro).
+  const naFila = lead.deletedAt
+    ? null
+    : etapaDoLead(lead, proprios, agoraFicha, robo.ligado ? robo : undefined, {
+        reunioesPorTelefone: reunioesPorTelefone(dados.leads),
+      });
+  // O robô para esta pessoa (`situacaoDoRobo`, a fonte única da Fila e de Leads).
+  const reabertoEm = reabertoDe(proprios);
+  const situacao = situacaoDoRobo(lead, {
+    agora: agoraFicha,
+    ref: refDoRobo(robo, agoraFicha),
+    ligado: robo.ligado,
+    reabertoEm,
+    reabertoNoPainel: reabertoNoPainelDe(proprios),
+  });
+  const ha = (iso: string) => formatarEspera(Math.max(0, Date.parse(agoraFicha) - Date.parse(iso)) / 3_600_000);
+  // As linhas do card pelo EPISÓDIO (11.3, a régua de `situacaoDoRobo`): o fato UMA
+  // VEZ de antes do `reaberto` é da conversa antiga — aparece marcado, nunca como o de agora.
+  const fatoDoRobo = (iso: string | undefined, vazio = "—") =>
+    !iso ? vazio : fatoDoEpisodio(iso, reabertoEm) ? formatDateTime(iso) : `${formatDateTime(iso)} · antes de reabrir`;
+  // "Antes do robô", "sem telefone" e "o robô não recebeu" são uma linha só. O
+  // "ainda" só para quem está no recorte e dentro dos 15 min — fora dele (com
+  // classe, encerrado, cliente) o robô pode nunca receber.
+  const roboUmaLinha = situacao.antesDoRobo
+    ? "antes do robô"
+    : chaveTelefoneValida(lead.phone) == null
+      ? "sem telefone — o robô não tem como falar"
+      : !lead.roboVistoEm
+        ? situacao.noRecorte && !situacao.naoRecebido && !situacao.resgate
+          ? "o robô ainda não recebeu"
+          : "o robô não recebeu"
+        : null;
+  const roboTitulo =
+    roboUmaLinha ??
+    `${situacao.etapa ? ROBO_ETAPA_LABEL[situacao.etapa] : "recebido"}${situacao.desde ? ` há ${ha(situacao.desde)}` : ""}${
+      situacao.resgate ? ` · resgate (${RESGATE_MOTIVO_LABEL[situacao.resgate.motivo]})` : ""
+    }`;
+  const optOut = Boolean(lead.roboOptOutEm);
   // A e B da ficha da live: a etapa e o prazo vêm da Fila da live (pelo turno).
   const naFilaLive = lead.deletedAt || naFila ? null : etapaDaLive(lead, proprios, expediente);
   const teste = pareceTeste(lead);
@@ -186,7 +241,7 @@ export default async function FichaDoLead({
               {" "}
               · na{" "}
               <Link
-                href={comRange(`/fila?etapa=${naFila.nome}`)}
+                href={comRange(`/fila?etapa=${naFila.nome}#${naFila.nome}`)}
                 className="text-primary underline-offset-4 hover:underline"
               >
                 Fila de contato
@@ -275,8 +330,13 @@ export default async function FichaDoLead({
                 <Linha rotulo="Telefone">
                   {!telefone ? (
                     "—"
-                  ) : mascarar ? (
-                    <span>{telefone}</span>
+                  ) : mascarar || optOut ? (
+                    <span>
+                      {telefone}
+                      {optOut ? (
+                        <span className="block text-xs text-[var(--status-fora-text)]">pediu para não receber mensagens</span>
+                      ) : null}
+                    </span>
                   ) : (
                     <a
                       href={`https://wa.me/${normalizarTelefone(telefone)}`}
@@ -421,6 +481,51 @@ export default async function FichaDoLead({
             </CardContent>
           </Card>
 
+          {robo.ligado ? (
+            <Card id="robo" className="scroll-mt-24">
+              <CardHeader className={roboUmaLinha ? "pb-5" : undefined}>
+                <CardTitle className="flex flex-wrap items-center gap-x-1">
+                  <span>Robô (WhatsApp) · {roboTitulo}</span>
+                  <Info texto={SOBRE_O_ROBO} rotulo="Sobre o robô de WhatsApp" />
+                </CardTitle>
+              </CardHeader>
+              {roboUmaLinha ? null : (
+                <CardContent>
+                  <dl className="divide-y">
+                    <Linha rotulo="1ª mensagem">{fatoDoRobo(lead.roboSaudacaoEm)}</Linha>
+                    <Linha rotulo="Respondeu">{fatoDoRobo(lead.roboRespondeuEm, "não")}</Linha>
+                    <Linha rotulo="Última mensagem do cliente">{data(lead.roboUltimaMsgClienteEm)}</Linha>
+                    <Linha rotulo="Cobranças">
+                      {lead.roboCobrancas
+                        ? `${lead.roboCobrancas}${lead.roboUltimaCobrancaEm ? ` · a última em ${formatDateTime(lead.roboUltimaCobrancaEm)}` : ""}`
+                        : "nenhuma"}
+                    </Linha>
+                    <Linha rotulo="Convite enviado">{fatoDoRobo(lead.roboConviteEm)}</Linha>
+                    <Linha rotulo="Aceitou o convite">
+                      {fatoDoRobo(lead.roboAceitouEm)}
+                      {/* O aceite DESTE episódio, sem reunião: o mesmo fato que põe em "Aceitou o convite". */}
+                      {situacao.aceitouEm && !agendouDepoisDoAceite(lead, situacao.aceitouEm) ? " · conferir no Calendly" : ""}
+                    </Linha>
+                    {lead.roboSemWhatsappEm ? <Linha rotulo="Sem WhatsApp">{formatDateTime(lead.roboSemWhatsappEm)}</Linha> : null}
+                    {lead.roboOptOutEm ? (
+                      <Linha rotulo="Pediu para não receber mensagens">{formatDateTime(lead.roboOptOutEm)}</Linha>
+                    ) : null}
+                    {lead.roboEncerradoEm || lead.roboPausado ? (
+                      <Linha rotulo="Encerrado pelo robô">
+                        {lead.roboEncerradoEm ? fatoDoRobo(lead.roboEncerradoEm) : "pausado"}
+                        {lead.roboEncerradoEm && lead.roboPausado ? " · pausado" : ""}
+                      </Linha>
+                    ) : null}
+                    <Linha rotulo="Última leitura">
+                      {robo.sync.ultimoOk ? formatDateTime(robo.sync.ultimoOk) : "nunca"}
+                      {robo.sync.falha ? " · falhando" : ""}
+                    </Linha>
+                  </dl>
+                </CardContent>
+              )}
+            </Card>
+          ) : null}
+
           {lead.diagnostico ? (
             <Card>
               <CardHeader>
@@ -525,6 +630,7 @@ export default async function FichaDoLead({
                   diasComTentativa={contato.diasComTentativa}
                   // Sem telefone para o papel mascarado: o botão do WhatsApp não aparece.
                   telefone={mascarar ? undefined : lead.phone}
+                  optOut={optOut}
                   mensagemWhatsapp={mensagem}
                   canEdit={canEdit}
                   podeReabrir={canDelete}

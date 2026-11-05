@@ -28,6 +28,7 @@ import type {
   StoredUser,
   CapiEnvioPatch,
   LeadFichaPatch,
+  LeadRoboPatch,
   ListCapiEnviosOpts,
 } from "./backend";
 import type { Role } from "../auth/roles";
@@ -100,6 +101,8 @@ export const addLead = (lead: Lead) => backend().addLead(lead);
 export const getLead = (id: string) => backend().getLead(id);
 /** Ficha da live: respostas e fatos da automação (ver LeadFichaPatch). */
 export const updateLeadFicha = (id: string, patch: LeadFichaPatch) => backend().updateLeadFicha(id, patch);
+/** Fatos do robô de WhatsApp em lote (só o sync do robô grava; ver LeadRoboPatch). */
+export const updateLeadsRobo = (itens: { id: string; patch: LeadRoboPatch }[]) => backend().updateLeadsRobo(itens);
 /** Trava da pessoa (telefone/e-mail): duas entradas simultâneas não criam dois leads. */
 export const comTravaDaPessoa = <T,>(chave: string, fn: () => Promise<T>) => backend().comTravaDaPessoa(chave, fn);
 

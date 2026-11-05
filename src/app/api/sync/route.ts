@@ -1,18 +1,28 @@
 import { mensagemHumana } from "@/lib/erros";
 import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
-import { runSync, type SyncSource } from "@/lib/meta/sync";
+import { runSync, type SyncReport } from "@/lib/meta/sync";
+import { incluirRoboNoRelatorio } from "@/lib/robo/sync";
+import { setState } from "@/lib/data/store";
+import { STATE_KEYS } from "@/lib/data/backend";
+import { ERRO_FONTE_DESCONHECIDA, lerFonteDoSync } from "@/lib/fonte-do-sync";
+import { DEFAULT_BRAND } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 /**
- * Daily collection endpoint.
+ * Collection endpoint (cron).
  *
  * Vercel Cron calls it with `Authorization: Bearer $CRON_SECRET`. It also
  * accepts `?secret=` so you can trigger it manually from a terminal.
  * Without CRON_SECRET set it only runs outside production, so an unprotected
  * deploy can never be triggered by a stranger.
+ *
+ * `?source=` ∈ all (padrão) · ads · instagram · robo. Fonte desconhecida = 400
+ * (nunca "all": o cron do robô roda a cada 15 min). `robo` roda SÓ a leitura do
+ * robô e grava `roboUltimoCron` (Integrações diz se o cron RODA); o "all"
+ * diário também lê o robô, sem gravar `roboUltimoCron`.
  */
 function authorize(request: Request): boolean {
   const secret = process.env.CRON_SECRET;
@@ -31,9 +41,8 @@ async function handle(request: Request) {
   }
 
   const url = new URL(request.url);
-  const sourceParam = url.searchParams.get("source") ?? "all";
-  const source: SyncSource =
-    sourceParam === "ads" || sourceParam === "instagram" ? sourceParam : "all";
+  const source = lerFonteDoSync(url.searchParams.get("source"));
+  if (!source) return NextResponse.json({ error: ERRO_FONTE_DESCONHECIDA }, { status: 400 });
   const daysParam = Number(url.searchParams.get("days"));
   // Teto de 30 dias por rodada: cada dia custa ~5 requests de insights e o teto
   // da superfície Instagram Login é ~200 calls/hora — backfill maior deve ser
@@ -44,7 +53,17 @@ async function handle(request: Request) {
   const brand = url.searchParams.get("brand")?.trim() || undefined;
 
   try {
-    const report = await runSync({ source, days, brand });
+    let report: SyncReport;
+    if (source === "robo") {
+      report = { ranAt: new Date().toISOString(), skipped: [] };
+      await incluirRoboNoRelatorio(report, "cron");
+      // Só esta chamada grava: é a prova de que o cron de 15 min RODA.
+      await setState(STATE_KEYS.roboUltimoCron, new Date().toISOString());
+    } else {
+      report = await runSync({ source, days, brand });
+      // O robô é da marca padrão: o "all" (de todas as marcas ou dela) também o lê.
+      if (source === "all" && (!brand || brand === DEFAULT_BRAND)) await incluirRoboNoRelatorio(report, "cron");
+    }
     revalidatePath("/", "layout");
     return NextResponse.json(report);
   } catch (e) {

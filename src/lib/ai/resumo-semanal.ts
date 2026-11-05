@@ -6,6 +6,9 @@ import { buildCustomKey, hojeEmBrasilia } from "../range";
 import { semanaAnteriorFechada } from "../semana";
 import { dataQualityChecks, type DataWarning } from "../metrics";
 import { estadoDaFonte } from "../sincronizacao";
+import { estadoDoRoboAgora } from "../robo/estado";
+import { leituraDoRoboParada } from "../robo/situacao";
+import { formatarEspera } from "../format";
 import { carregarBussola } from "../bussola-server";
 import { resumoDasAcoes } from "../motor";
 import { isAiConfigured } from "./config";
@@ -42,6 +45,19 @@ export async function gerarResumoSemanal(
       ? [{ level: "warn" as const, message: `Anúncios sincronizados há ${Math.round(horas)}h — os números podem estar defasados.` }]
       : []),
   ];
+  // O robô (só a marca dele, só ligado): a C1 do resgate e a B1 leem a última leitura.
+  const robo = await estadoDoRoboAgora(brand.slug, new Date(nowIso));
+  if (robo.ligado && leituraDoRoboParada(robo, nowIso)) {
+    const lidoHa = robo.sync.ultimoOk ? (Date.parse(nowIso) - Date.parse(robo.sync.ultimoOk)) / 3_600_000 : null;
+    avisosDeSync.push({
+      level: "warn",
+      message: robo.sync.falha
+        ? `A leitura do robô de WhatsApp está falhando: ${robo.sync.falha.erro} O resgate e as ações do robô usam o último dado lido.`
+        : lidoHa != null
+          ? `O robô de WhatsApp foi lido há ${formatarEspera(lidoHa)} — o resgate e as ações do robô podem estar defasados.`
+          : "O painel ainda não leu o robô de WhatsApp — o resgate e as ações do robô estão sem dado.",
+    });
+  }
   const drafts = await listDrafts(brand.slug);
 
   let briefing;

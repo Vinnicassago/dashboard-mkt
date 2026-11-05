@@ -43,6 +43,17 @@ const TETO_NOTA = 2000;
 /** Tentativa registrada depois do fato: até 7 dias (como a tela sempre aceitou). */
 const ATRASO_MAXIMO_MS = 7 * 86_400_000;
 
+/**
+ * LGPD (11.12): quem pediu ao robô para não receber mensagens não recebe WhatsApp
+ * do comercial — a recusa (frase humana) ou null. A tela já tira o botão; o
+ * servidor confere aqui, e a API do n8n confere ANTES de gravar qualquer passo
+ * (`atualizar`: o envio inteiro volta com 409, nada gravado).
+ */
+export function recusaPorOptOut(lead: Pick<Lead, "roboOptOutEm">, canal: CanalContato): string | null {
+  if (canal !== "whatsapp" || !lead.roboOptOutEm) return null;
+  return "Esta pessoa pediu para não receber mensagens no WhatsApp. Registre a tentativa por ligação ou e-mail.";
+}
+
 export async function registrarContato(leadId: string, r: RegistroDeContato): Promise<ContatoRegistrado> {
   const lead = await getLead(leadId);
   if (!lead || lead.deletedAt) return { ok: false, message: "Lead não encontrado." };
@@ -52,6 +63,8 @@ export async function registrarContato(leadId: string, r: RegistroDeContato): Pr
   if (!Object.hasOwn(RESULTADOS_CONTATO, r.resultado)) {
     return { ok: false, message: "Resultado de contato desconhecido." };
   }
+  const optOut = recusaPorOptOut(lead, r.canal);
+  if (optOut) return { ok: false, message: optOut };
 
   const agora = Date.now();
   let quando = new Date(agora).toISOString();

@@ -31,6 +31,22 @@ export function idLeadLp(eventId: string): string {
   return `LEAD-LP-${limpar(eventId)}`;
 }
 
+/**
+ * Id do lead que a API do n8n cria SEM event_id: leva o WhatsApp (a chave da API).
+ * Fonte ÚNICA do esquema — o aviso de resgate (que vai sem telefone) reconhece por
+ * `idCarregaTelefone` e não manda esse id.
+ */
+const PREFIXO_ID_WHATSAPP = "LEAD-WA-";
+
+export function idLeadWhatsapp(whatsapp: string): string {
+  return `${PREFIXO_ID_WHATSAPP}${whatsapp}`;
+}
+
+/** O id carrega o telefone da pessoa (`idLeadWhatsapp`, também com o sufixo de id ocupado)? */
+export function idCarregaTelefone(id: string): boolean {
+  return id.startsWith(PREFIXO_ID_WHATSAPP);
+}
+
 /** Id do esquema antigo (8 primeiros caracteres), só para reconhecer leads antigos. */
 export function idLeadLpLegado(eventId: string): string {
   return `LEAD-LP-${eventId.trim().slice(0, 8)}`;

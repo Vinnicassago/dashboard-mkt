@@ -276,7 +276,9 @@ export function assessTrust(input: TrustInput): TrustReport {
       titulo: "As fontes discordam sobre reuniões",
       detalhe: `O atendimento registra ${input.roboReunioes} ${input.roboReunioes === 1 ? "reunião" : "reuniões"} e o funil do painel conta 0. Enquanto discordarem, o custo por reunião não é exibido — um dos dois lados está com o lead sem parear.`,
       afeta: ["cpr", "meetings"],
-      cta: { label: "Ver atendimento", href: "/leads#especialista" },
+      // A tabela "Com o especialista" saiu (nov/26): quem aceitou o convite e falta
+      // registrar a reunião está no grupo "Aceitou o convite" da Fila.
+      cta: { label: "Registrar na Fila", href: "/fila?etapa=convite-aceito#convite-aceito" },
     });
   }
 

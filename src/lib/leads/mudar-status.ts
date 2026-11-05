@@ -57,7 +57,7 @@ const jaFechou = (l: Lead) => Boolean(l.closedAt) || l.status === "cliente";
  * Os eventos que esta mudança dispara na Meta: cada um só na PRIMEIRA vez que o
  * fato acontece — pelo marco, não pelo status. Agendar, desistir e agendar de
  * novo não manda um 2º Schedule (o event_id seria o mesmo e, passadas 48 h, a
- * Meta contaria duas vezes). Pura: a ponte do robô e a tela passam por aqui.
+ * Meta contaria duas vezes). Pura: a tela, `registrarContato` e a API do n8n passam por aqui.
  */
 export function eventosDaMudanca(lead: Lead, status: LeadStatus): EventoDoStatus[] {
   const eventos: EventoDoStatus[] = [];
@@ -78,8 +78,8 @@ const NOME_NA_NOTA: Record<EventoDoStatus, string> = {
  * Aplica uma mudança de status JÁ AUTORIZADA E VALIDADA: grava status, marcos e
  * a data da reunião, registra no histórico e, quando um fato acontece pela 1ª
  * vez (agendou, compareceu, fechou), avisa Meta e GA4. Quem chama decide as
- * regras — a tela usa `podeTransitar`; a ponte do robô usa as dela (o robô não
- * sabe a data da reunião).
+ * regras — a tela, `registrarContato` e a API do n8n conferem `podeTransitar`
+ * antes (o n8n passo a passo, `lib/n8n/servico.ts`).
  */
 export async function aplicarStatus(
   lead: Lead,

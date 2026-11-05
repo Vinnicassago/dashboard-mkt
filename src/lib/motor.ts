@@ -4,9 +4,11 @@
  * Cada regra tem id, dono, gatilho, amostra mínima, impacto e confiança, e vira
  * UMA frase com número e um link para onde se age. A ordem é severidade ×
  * impacto × confiança — mais a regra do farol, que continua valendo como regra
- * de ORDEM: C1 (gente sem o 1º contato, fora do prazo) vem primeiro sempre que
- * existir, porque essas pessoas já foram pagas, ainda dá para recuperá-las e
- * destravá-las não custa verba nova.
+ * de ORDEM (`FIXAS`): C1 (gente do comercial fora do prazo — com o robô ligado,
+ * o Resgate e quem aceitou o convite; desligado, quem espera o 1º contato) vem
+ * primeiro sempre que existir, porque essas pessoas já foram pagas, ainda dá para
+ * recuperá-las e destravá-las não custa verba nova; logo depois, B1 (o robô
+ * parado: a leitura falhando, ou gente sem a 1ª mensagem dele).
  *
  * Duas disciplinas herdadas do painel:
  *   • o motor decide com os MESMOS números do placar (`kpisDoPeriodo`) — nunca
@@ -26,8 +28,17 @@
  */
 
 import type { Dono } from "./dono";
-import { montarFila, type EntradaComercial, type EntradaConvite, type FilaResult } from "./fila";
+import { montarFila, type FilaItem, type FilaResult } from "./fila";
 import type { ItemDaFilaLive } from "./fila-live";
+import {
+  RESGATE_ROBO_NAO_FALOU_H,
+  ROBO_SEM_MSG_MIN,
+  leituraDoRoboParada,
+  reabertosNoPainel,
+  reabertosPorLead,
+  semMensagemDoRobo,
+  type RoboAgora,
+} from "./robo/situacao";
 import { custoExibivel, kpisDoPeriodo, periodoDaRegua, reguaDoPeriodo, type KpisDoPeriodo } from "./kpis";
 import { metaVigente, taxasObservadas } from "./metas";
 import {
@@ -50,6 +61,7 @@ import {
   formatCurrency,
   formatCurrency0,
   formatDateShort,
+  formatDateTimeCurta,
   formatInt,
   formatPercent,
   formatarEspera,
@@ -63,7 +75,11 @@ export type RegraId =
   | "M1" | "M2" | "M3" | "M4" | "M5" | "M6" | "M7"
   | "L1" | "L2"
   | "D1" | "D2"
-  | "G1";
+  | "B1";
+// G1 retirada em nov/26 — não reutilizar o id (o `acoes_estado` casaria pelo texto).
+
+/** A regra de ORDEM: estas vêm primeiro, nesta ordem, sempre que existirem. */
+export const FIXAS: readonly RegraId[] = ["C1", "B1"];
 
 /**
  * `agora` = já custou dinheiro e ainda dá para recuperar sem gastar mais;
@@ -109,11 +125,12 @@ export interface EntradaMotor {
   /** Histórico dos leads da marca (tentativas, status) — sem ele, C1/C4/C5 ficam cegos. */
   eventos: LeadEvent[];
   /**
-   * As filas do robô (convite pendente, transferidos sem 1º contato), quando ele
-   * está ligado — a mesma entrada da página Fila, para o número da ação ser o
-   * número que a página abre. Ausente ou vazio = robô desligado.
+   * O robô de WhatsApp (`estadoDoRoboAgora`) — o MESMO objeto que /fila passa a
+   * `montarFila`, para o número da ação ser o número que a página abre. Os fatos
+   * por lead vêm de `data.leads` (colunas `robo_*`). Ausente ou desligado = o
+   * processo antigo (C1 de antes, sem B1).
    */
-  robo?: { convites: EntradaConvite[]; comercial: EntradaComercial[] };
+  robo?: RoboAgora;
   fontes?: {
     adsFalha?: { desde: string; erro: string } | null;
     /** Gasto sem marca nos últimos 30 dias. */
@@ -224,18 +241,120 @@ function confiancaDoComercial(c: Contexto): { confianca: ConfiancaAcao; motivo?:
 
 // ---------------------------------------------------------------- regras
 
+/** "A, B e C". */
+function juntar(partes: string[]): string {
+  return partes.length <= 1 ? (partes[0] ?? "") : `${partes.slice(0, -1).join(", ")} e ${partes.at(-1)}`;
+}
+
+/** A leitura do robô falhando ou parada rebaixa a confiança do que depende dela (o resgate). */
+function confiancaDoRobo(c: Contexto): { confianca: ConfiancaAcao; motivo?: string } {
+  if (c.robo?.ligado && leituraDoRoboParada(c.robo, c.agora)) {
+    return {
+      confianca: "media",
+      motivo: c.robo.sync.falha
+        ? "a leitura do robô está falhando — a Fila usa o último dado lido"
+        : "a leitura do robô está parada — a Fila usa o último dado lido",
+    };
+  }
+  return { confianca: "alta" };
+}
+
+/**
+ * C1 — gente do comercial fora do prazo. Com o robô LIGADO: o Resgate e quem
+ * aceitou o convite com atraso > 1 (a mesma Fila da página), mais os A e B da
+ * live sem a 1ª tentativa no prazo do turno. Com ele DESLIGADO: a C1 de antes,
+ * intacta (os "Novos" além de 1 hora útil, mais a live).
+ */
 function regraC1(c: Contexto): Acao | null {
-  // Quem espera o 1º contato além do prazo: "Novos" do painel (1 hora útil) e,
-  // com o robô ligado, transferidos sem abordagem e convites sem resposta.
-  const naEtapa = c.fila.itens.filter(
-    (i) => i.etapa === "novo" || i.etapa === "aguardando-contato" || i.etapa === "convite-pendente",
-  );
+  return c.robo?.ligado ? regraC1ComRobo(c) : regraC1SemRobo(c);
+}
+
+function regraC1ComRobo(c: Contexto): Acao | null {
+  // Os inscritos da live (A e B) sem a 1ª tentativa e com o prazo do turno vencido.
+  const liveEsperando = (c.filaLive ?? []).filter((i) => i.etapa === "primeira" && i.atrasado);
+  const naLive = new Set(liveEsperando.map((i) => i.leadId));
+  // Deduplica por lead com a live (um A que aceitou o convite conta uma vez, na live).
+  const fora = (etapa: FilaItem["etapa"]) =>
+    c.fila.itens.filter((i) => i.etapa === etapa && i.atraso > 1 && !(i.leadId && naLive.has(i.leadId)));
+  const resgate = fora("resgate");
+  const convite = fora("convite-aceito");
+  // Só a live (ou ninguém): o texto e o id de sempre.
+  if (resgate.length + convite.length === 0) return regraC1SemRobo(c);
+
+  const live = liveEsperando.length;
+  const liveA = liveEsperando.filter((i) => i.classe === "A").length;
+  const r = resgate.length;
+  const a = convite.length;
+  const total = live + r + a;
+  const partes = [
+    live > 0 ? `${formatInt(live)} ${plural(live, "inscrito", "inscritos")} da live` : "",
+    r > 0 ? `${formatInt(r)} no resgate` : "",
+    a > 0 ? `${formatInt(a)} com convite aceito` : "",
+  ].filter(Boolean);
+  const titulo =
+    partes.length > 1
+      ? `${juntar(partes)}, fora do prazo`
+      : r > 0
+        ? `${formatInt(r)} ${plural(r, "pessoa", "pessoas")} no resgate fora do prazo`
+        : `${formatInt(a)} ${plural(a, "aceitou", "aceitaram")} o convite sem reunião registrada`;
+  // `?etapa=` abre a Fila no grupo (`grupoDaUrl`) e a âncora rola até ele.
+  const href =
+    live > 0
+      ? "/fila#live"
+      : partes.length > 1
+        ? "/fila"
+        : r > 0
+          ? "/fila?etapa=resgate#resgate"
+          : "/fila?etapa=convite-aceito#convite-aceito";
+
+  const cpl = custoExibivel(c.kpis.cpl) ? c.kpis.cpl.valor : 0;
+  const midia = total * cpl;
+  const taxa = c.taxaAgendada;
+  const recuperaveis = taxa != null ? Math.round(total * taxa) : 0;
+  const oQue = [
+    live > 0 ? `na live, ${formatInt(live)} (${formatInt(liveA)} classe A) sem a 1ª tentativa no prazo do turno` : "",
+    r > 0 ? "no resgate, ligue ou mande WhatsApp para quem o robô não conseguiu" : "",
+    a > 0 ? "no convite aceito, confira o Calendly e registre a data" : "",
+  ].filter(Boolean);
+  const frase = oQue.join("; ");
+  const conf = confiancaDoRobo(c);
+  return {
+    // O id carrega QUEM está esperando e EM QUE GRUPO: "feita" vale para estas
+    // pessoas nesta etapa. Gente nova (ou a mesma em outro grupo) = ação nova.
+    id: `C1:${assinatura([
+      ...resgate.map((i) => `resgate:${i.id}`),
+      ...convite.map((i) => `convite-aceito:${i.id}`),
+      ...liveEsperando.map((i) => `live:${i.leadId}`),
+    ])}`,
+    regra: "C1",
+    dono: "COM",
+    severidade: "agora",
+    titulo,
+    detalhe:
+      `${frase.charAt(0).toUpperCase()}${frase.slice(1)}. ` +
+      (midia > 0 ? `${formatCurrency0(midia)} de mídia já paga esperando. ` : "") +
+      "Comece por quem espera há mais tempo.",
+    href,
+    impacto:
+      recuperaveis >= 1
+        ? { valor: recuperaveis, unidade: "reunioes", texto: `≈ ${formatInt(recuperaveis)} ${plural(recuperaveis, "reunião recuperável", "reuniões recuperáveis")}` }
+        : undefined,
+    semImpacto: recuperaveis >= 1 ? undefined : "estimativa indisponível (sem taxa lead → reunião com amostra)",
+    confianca: conf.confianca,
+    confiancaMotivo: conf.motivo,
+    amostra: { n: total, minimo: 1 },
+    prioridade: 0,
+  };
+}
+
+function regraC1SemRobo(c: Contexto): Acao | null {
+  // Quem espera o 1º contato além do prazo: "Novos" do painel (1 hora útil).
+  const naEtapa = c.fila.itens.filter((i) => i.etapa === "novo");
   const esperando = naEtapa.filter((i) => i.atraso > 1);
   // Os inscritos da live (A e B) sem a 1ª tentativa e com o prazo do turno vencido.
   const liveEsperando = (c.filaLive ?? []).filter((i) => i.etapa === "primeira" && i.atrasado);
   if (esperando.length === 0 && liveEsperando.length === 0) return null;
-  const painel = esperando.filter((i) => i.etapa === "novo").length;
-  const noRobo = esperando.length - painel;
+  const painel = esperando.length;
   const live = liveEsperando.length;
   const liveA = liveEsperando.filter((i) => i.classe === "A").length;
   const total = esperando.length + live;
@@ -244,19 +363,11 @@ function regraC1(c: Contexto): Acao | null {
     ...esperando.map((i) => i.horasEsperando ?? 0),
     ...liveEsperando.map((i) => (Date.parse(c.agora) - Date.parse(i.desde)) / 3_600_000),
   );
-  // Mídia já paga por essas pessoas: o CPL do painel por cabeça (o custo de um
-  // lead; quem passou pelo robô custou ao menos isso).
+  // Mídia já paga por essas pessoas: o CPL do painel por cabeça (o custo de um lead).
   const cpl = custoExibivel(c.kpis.cpl) ? c.kpis.cpl.valor : 0;
   const midia = total * cpl;
 
-  const href =
-    live > 0
-      ? "/fila#live"
-      : painel > 0 && noRobo > 0
-        ? "/fila"
-        : painel > 0
-          ? "/fila?etapa=novo"
-          : "/fila?etapa=quentes";
+  const href = live > 0 ? "/fila#live" : "/fila?etapa=novo";
   const taxa = c.taxaAgendada;
   const recuperaveis = taxa != null ? Math.round(total * taxa) : 0;
   const partes = [
@@ -264,7 +375,6 @@ function regraC1(c: Contexto): Acao | null {
       ? `${formatInt(live)} ${plural(live, "inscrito", "inscritos")} da live (${formatInt(liveA)} classe A) sem a 1ª tentativa no prazo do turno`
       : "",
     painel > 0 ? `${formatInt(painel)} do painel sem nenhuma tentativa além de 1 hora útil` : "",
-    noRobo > 0 ? `${formatInt(noRobo)} ${plural(noRobo, "pessoa", "pessoas")} do robô além do prazo da etapa` : "",
   ].filter(Boolean);
   return {
     // O id carrega QUEM está esperando: "feita" vale para estas pessoas. Se
@@ -293,6 +403,9 @@ function regraC1(c: Contexto): Acao | null {
 }
 
 function regraC2(c: Contexto): Acao | null {
+  // Com o robô ligado o 1º contato é DELE (o robô não é tentativa): cobrar do
+  // comercial o 1º contato em 1 hora útil acusaria quem o robô está atendendo.
+  if (c.robo?.ligado) return null;
   const m = c.kpis.primeiroContatoNoPrazo;
   const meta = metaVigente(c.data.metas, "primeiro_contato_no_prazo", c.hoje)?.alvo;
   if (meta == null || m.n < AMOSTRA_MIN.C2 || m.valor >= meta) return null;
@@ -789,60 +902,85 @@ function regraD2(c: Contexto): Acao | null {
   };
 }
 
-function regraG1(c: Contexto): Acao | null {
-  const tem = (m: Parameters<typeof metaVigente>[1]) => metaVigente(c.data.metas, m, c.hoje) != null;
-  const semMetas = !tem("reunioes_agendadas") && !tem("cpl") && !tem("custo_por_reuniao");
-  if (semMetas) {
+/**
+ * B1 — o robô parado (só com o robô ligado). Duas variantes, nunca juntas:
+ *  (a) a leitura falhando, nunca feita ou parada há mais de 45 min → DADOS, alta,
+ *      id estável pelo início da falha (`roboFalhaDesde`) ou pelo último ok;
+ *  (b) senão, gente sem a 1ª mensagem do robô (`semMensagemDoRobo`, a MESMA
+ *      contagem do alerta e de Integrações) → BOT, agora, id pelas pessoas.
+ * Com a leitura parada, (b) não roda: o dado velho acusaria todo lead novo.
+ */
+function regraB1(c: Contexto): Acao | null {
+  const robo = c.robo;
+  if (!robo?.ligado) return null;
+  if (leituraDoRoboParada(robo, c.agora)) {
+    const { falha, ultimoOk } = robo.sync;
+    const parada = ultimoOk ? (Date.parse(c.agora) - Date.parse(ultimoOk)) / 3_600_000 : null;
     return {
-      id: "G1",
-      regra: "G1",
-      dono: "GESTAO",
+      id: `B1:sync:${falha?.desde ?? ultimoOk ?? "nunca"}`,
+      regra: "B1",
+      dono: "DADOS",
       severidade: "alta",
-      titulo: "Sem metas, o painel não colore nada — cadastre pela calculadora",
-      detalhe: "Reuniões, CPL e custo por reunião ficam sem verde nem vermelho, e metade das ações desta lista não tem régua para disparar. Leva 2 minutos em Configurações → Metas.",
-      href: "/configuracoes#metas",
+      titulo: falha
+        ? `A leitura do robô está falhando desde ${formatDateTimeCurta(falha.desde)}`
+        : parada != null
+          ? `A leitura do robô está parada há ${formatarEspera(parada)}`
+          : "O painel ainda não leu o robô",
+      detalhe:
+        (falha ? `${falha.erro} ` : "") +
+        "Enquanto isso, a Fila e o resgate usam o último dado lido. Confira o cron de 15 min e a chave do robô em Integrações.",
+      href: "/configuracoes/integracoes#robo",
       semImpacto: "estimativa indisponível",
       confianca: "alta",
-      amostra: { n: 0, minimo: 0 },
+      amostra: { n: 1, minimo: 1 },
       prioridade: 0,
     };
   }
-  if (!tem("investimento_conversao") && c.data.campaign.budgetTotal <= 0) {
-    return {
-      id: "G1",
-      regra: "G1",
-      dono: "GESTAO",
-      severidade: "media",
-      titulo: "Sem orçamento de conversão cadastrado, o ritmo da verba não tem régua",
-      detalhe: "Cadastre o orçamento semanal de conversão (a calculadora sugere um) para o painel dizer se a verba está no ritmo.",
-      href: "/configuracoes#metas",
-      semImpacto: "estimativa indisponível",
-      confianca: "alta",
-      amostra: { n: 0, minimo: 0 },
-      prioridade: 0,
-    };
-  }
-  return null;
+  const sem = semMensagemDoRobo(c.data.leads, reabertosPorLead(c.eventos), robo, c.agora, reabertosNoPainel(c.eventos));
+  if (sem.total === 0) return null;
+  const n = sem.total;
+  const chegaram = n - sem.naoChegaram;
+  return {
+    id: `B1:${assinatura(sem.ids)}`,
+    regra: "B1",
+    dono: "BOT",
+    severidade: "agora",
+    titulo: `${formatInt(n)} ${plural(n, "lead", "leads")} sem a 1ª mensagem do robô há mais de ${ROBO_SEM_MSG_MIN} min`,
+    detalhe:
+      [
+        sem.naoChegaram > 0 ? `${formatInt(sem.naoChegaram)} não ${plural(sem.naoChegaram, "chegou", "chegaram")} ao robô` : "",
+        chegaram > 0 ? `${formatInt(chegaram)} ${plural(chegaram, "chegou", "chegaram")} e o robô não mandou a 1ª mensagem` : "",
+      ]
+        .filter(Boolean)
+        .join("; ") +
+      `. Confira o robô e o fluxo do n8n — depois de ${RESGATE_ROBO_NAO_FALOU_H} h, essas pessoas vão para o resgate.`,
+    href: "/leads?robo=sem-1a-msg&range=all",
+    semImpacto: "estimativa indisponível",
+    confianca: "alta",
+    amostra: { n, minimo: 1 },
+    prioridade: 0,
+  };
 }
 
 // ---------------------------------------------------------------- o motor
 
 /**
- * As ações da semana, ordenadas. Abertas primeiro (C1 à frente de todas), depois
+ * As ações da semana, ordenadas. Abertas primeiro (C1 e B1 à frente de todas), depois
  * as feitas e as ignoradas — que continuam na lista completa, só não disputam o
  * topo.
  */
+/** Posição na regra de ordem: as `FIXAS` na ordem delas, o resto depois. */
+const posicaoFixa = (r: RegraId) => {
+  const i = FIXAS.indexOf(r);
+  return i < 0 ? FIXAS.length : i;
+};
+
 export function motorDeAcoes(e: EntradaMotor): Acao[] {
   // "Campanha inteira" = do primeiro dado até hoje (a mesma régua do placar).
   const semanas = diasDoPeriodo(periodoDaRegua(e.data, e.range, e.hoje)) / 7;
   const observadas = taxasObservadas(e.data, e.hoje, e.agora);
-  const fila = montarFila({
-    nowIso: e.agora,
-    leads: e.data.leads,
-    eventos: e.eventos,
-    convites: e.robo?.convites ?? [],
-    comercial: e.robo?.comercial ?? [],
-  });
+  // A MESMA entrada que /fila passa (o robô de `estadoDoRoboAgora`): o número da ação é o da página.
+  const fila = montarFila({ nowIso: e.agora, leads: e.data.leads, eventos: e.eventos, robo: e.robo });
   const base = { ...e, semanas, observadas, fila };
   const c5 = regraC5(base);
   const c: Contexto = {
@@ -853,6 +991,7 @@ export function motorDeAcoes(e: EntradaMotor): Acao[] {
 
   const acoes: Acao[] = [
     regraC1(c),
+    regraB1(c),
     regraC2(c),
     regraC3(c),
     regraC4(c),
@@ -868,7 +1007,6 @@ export function motorDeAcoes(e: EntradaMotor): Acao[] {
     regraL2(c),
     regraD1(c),
     regraD2(c),
-    regraG1(c),
   ].filter((a): a is Acao => a != null);
 
   // O estado da semana: a última decisão por ação.
@@ -884,8 +1022,10 @@ export function motorDeAcoes(e: EntradaMotor): Acao[] {
     const abertaA = a.estado ? 1 : 0;
     const abertaB = b.estado ? 1 : 0;
     if (abertaA !== abertaB) return abertaA - abertaB;
-    // A regra do farol: gente parada vence qualquer custo.
-    if ((a.regra === "C1") !== (b.regra === "C1")) return a.regra === "C1" ? -1 : 1;
+    // A regra do farol: gente parada vence qualquer custo — C1, depois B1 (`FIXAS`).
+    const fa = posicaoFixa(a.regra);
+    const fb = posicaoFixa(b.regra);
+    if (fa !== fb) return fa - fb;
     return b.prioridade - a.prioridade || a.id.localeCompare(b.id);
   });
 }

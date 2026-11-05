@@ -11,7 +11,7 @@ import { NAO_CLASSIFICADO, contextoDeMarcas, integrationStatus } from "./meta/co
 import { montarFilaDaLive } from "./fila-live";
 import { expedienteAtual } from "./atendimento-server";
 import { coberturaDeAnuncios, estadoDaFonte } from "./sincronizacao";
-import { getComercial, getRoboLeads } from "./robo/client";
+import { estadoDoRoboAgora } from "./robo/estado";
 import { dataQualityChecks, type DateRange } from "./metrics";
 import { alertasDeAtribuicao, alertasDeConfianca, alertasDeQualidade, type Alerta } from "./alertas";
 import type { AcaoEstado, DashboardData, ResumoSemanal } from "./types";
@@ -28,8 +28,6 @@ export interface BussolaCarregada extends Bussola {
   agora: string;
   /** Os alertas do período (para o "⚠ N" do cabeçalho). */
   alertas: Alerta[];
-  /** O robô está ligado e a leitura dele QUEBROU — a fila e as ações estão incompletas. */
-  roboErro: boolean;
   /** Últimas decisões sobre ações (qualquer semana), mais recentes primeiro. */
   historicoAcoes: AcaoEstado[];
   /** Os resumos semanais da IA, mais recente primeiro (até 12). */
@@ -37,9 +35,13 @@ export interface BussolaCarregada extends Bussola {
 }
 
 /**
- * Carrega tudo o que a Bússola precisa de fora (store, robô, syncs, estados) e
+ * Carrega tudo o que a Bússola precisa de fora (store, syncs, estados) e
  * entrega a visão montada pela função pura. É o MESMO caminho da home e do
  * resumo semanal: a IA lê o que a tela mostra.
+ *
+ * O robô entra pelo store: os fatos que o sync gravou no lead e o estado da
+ * leitura (`estadoDoRoboAgora`, o MESMO objeto da /fila) — nunca o banco do robô
+ * no render. A falha da leitura é o alerta `sync-robo` do cabeçalho e a B1.
  */
 export async function carregarBussola(
   brandSlug: string,
@@ -58,13 +60,12 @@ export async function carregarBussola(
   const status = integrationStatus();
   const semanaDosEstados = opts.semanaDosEstados ?? semanaDaAcao(hoje);
 
-  const [{ brandRules, campanhasDaConta }, cobertura, eventos, comercial, convites, ads, estados, historicoAcoes, resumos, semMarca] =
+  const [{ brandRules, campanhasDaConta }, cobertura, eventos, robo, ads, estados, historicoAcoes, resumos, semMarca] =
     await Promise.all([
       contextoDeMarcas(),
       coberturaDeAnuncios(brand.slug),
       listLeadEvents({ brand: brand.slug, limit: 0 }),
-      getComercial(),
-      getRoboLeads(),
+      estadoDoRoboAgora(brand.slug, agoraDate),
       estadoDaFonte("ads", brand.slug),
       listAcoesEstado({ brand: brand.slug, semana: semanaDosEstados, limit: 0 }),
       listAcoesEstado({ brand: brand.slug, limit: 30 }),
@@ -76,14 +77,16 @@ export async function carregarBussola(
   const corte = new Date(agoraDate.getTime() - 30 * 86_400_000).toISOString().slice(0, 10);
   const gastoSemMarca = (semMarca?.adDaily ?? []).filter((r) => r.date >= corte).reduce((s, r) => s + r.spend, 0);
 
-  // A comparação com o robô só roda no período "campanha inteira": a view do
-  // robô é vitalícia e sem marca.
-  const roboReunioes = comercial.kpis?.reunioes_realizadas ?? null;
+  // A trava "fontes divergem" (reuniões do atendimento × do painel) fica dormente
+  // até a Fase 3: as reuniões do atendimento vinham da leitura AO VIVO da mesa do
+  // atendimento (`vw_robo_comercial_kpis`), que saiu — o painel não lê o banco do
+  // robô no render.
+  const roboReunioes = null;
   const kpis = kpisDoPeriodo(data, range, {
     brandRules,
     campanhasDaConta,
     cobertura,
-    roboReunioes: range ? null : roboReunioes,
+    roboReunioes,
     comparar: true,
     hoje,
     agora,
@@ -92,11 +95,6 @@ export async function carregarBussola(
   // número que a Mídia imprime em "Campanha", com os mesmos "≥"/"≤".
   const campanha = range ? kpisDoPeriodo(data, undefined, { brandRules, campanhasDaConta, cobertura, roboReunioes, hoje, agora }) : kpis;
 
-  // Robô DESLIGADO (sem credencial, ou desativado em Configurações) é ausência, não
-  // falha: as filas dele não existem. Leitura que QUEBROU é outra coisa.
-  const roboLigado = comercial.falha?.tipo !== "desligado" || convites.falha?.tipo !== "desligado";
-  const roboErro = comercial.falha?.tipo === "erro" || convites.falha?.tipo === "erro";
-
   const bussola = montarBussola({
     data,
     range,
@@ -104,7 +102,9 @@ export async function carregarBussola(
     campanha,
     cobertura,
     eventos,
-    robo: roboLigado ? { convites: convites.rows, comercial: comercial.rows } : undefined,
+    // Robô DESLIGADO (sem credencial, desativado, ou outra marca) é ausência, não
+    // falha: o processo antigo volta inteiro.
+    robo: robo.ligado ? robo : undefined,
     fontes: { adsFalha: ads.falha, gastoSemMarca },
     estados,
     // Os inscritos da live (A e B) saem da Fila de sempre: a C1 os conta por aqui.
@@ -131,19 +131,7 @@ export async function carregarBussola(
           },
         ]
       : []),
-    ...(roboErro
-      ? [
-          {
-            id: "robo-leitura",
-            nivel: "falha" as const,
-            titulo: "Não consegui ler o robô nem o atendimento",
-            detalhe:
-              "Sem eles, quem espera o 1º contato pelo robô não aparece nas ações — e ausência de leitura não é o mesmo que ninguém esperando. Se o robô está parado, desative-o em Configurações → Integrações.",
-            cta: { label: "Ver integrações", href: "/configuracoes/integracoes" },
-          },
-        ]
-      : []),
   ];
 
-  return { ...bussola, brand, data, range, rangeKey, hoje, agora, alertas, roboErro, historicoAcoes, resumos };
+  return { ...bussola, brand, data, range, rangeKey, hoje, agora, alertas, historicoAcoes, resumos };
 }

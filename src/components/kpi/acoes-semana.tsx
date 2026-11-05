@@ -169,14 +169,11 @@ export function AcoesSemana({
   historico,
   rangeKey,
   podeDecidir,
-  roboErro = false,
 }: {
   acoes: Acao[];
   historico: AcaoEstado[];
   rangeKey?: string;
   podeDecidir: boolean;
-  /** A leitura do robô quebrou: quem espera por ele não está nesta lista. */
-  roboErro?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -208,17 +205,11 @@ export function AcoesSemana({
       </CardHeader>
       <CardContent className="space-y-3">
         {erro ? <p className="text-sm text-[var(--danger-text)]">{erro}</p> : null}
-        {roboErro ? (
-          <p className="text-sm text-[var(--warning-text)]">
-            Não consegui ler o robô: quem espera o 1º contato por ele não está nesta lista. Se o robô está parado, desative-o em Configurações → Integrações.
-          </p>
-        ) : null}
+        {/* A leitura do robô falhando é a B1 (nesta lista) e o ⚠ do cabeçalho — um fato, um lugar. */}
         {topo.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             {acoes.length === 0
-              ? roboErro
-                ? "Nenhuma regra disparou com o que deu para ler — a fila do robô ficou de fora."
-                : "Nenhuma regra disparou: os números estão dentro da régua e ninguém está esperando além do prazo."
+              ? "Nenhuma regra disparou: os números estão dentro da régua e ninguém está esperando além do prazo."
               : "Tudo o que disparou nesta semana já foi feito ou ignorado."}
           </p>
         ) : (

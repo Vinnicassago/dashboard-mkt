@@ -18,6 +18,7 @@ import type {
   HorarioPreferido,
   PrazoCompra,
 } from "./qualificacao";
+import type { RoboEtapa } from "./robo/etapa";
 
 // ------------------------- Marca / conta ----------------------------
 
@@ -478,6 +479,45 @@ export interface Lead {
   reuniaoConfirmadaEm?: string;
   /** Pediu para remarcar e ainda não há data nova. Limpo quando a data nova é gravada. */
   reuniaoRemarcarEm?: string;
+
+  // ---- Robô de WhatsApp (migração 0023). Só o sync do robô grava (`updateLeadsRobo`). ----
+  // Campos PLANOS de propósito (a cópia rasa do `getLead` local não vazaria um objeto).
+  // O robô NÃO é tentativa: nada daqui entra em `resumoContato`, na cadência, no
+  // `firstContactAt` nem na régua do "Sem resposta". Sem texto de conversa (LGPD).
+  // UMA VEZ = gravado na 1ª leitura que o vê; SOBRESCREVE = o estado da última leitura.
+  /** UMA VEZ: a 1ª leitura do sync em que o lead casou com uma linha do robô. */
+  roboVistoEm?: string;
+  /** UMA VEZ: quando o robô recebeu o lead (`criado_em` no robô). */
+  roboRecebidoEm?: string;
+  /** UMA VEZ: a 1ª mensagem do robô (`saudacao_em`). */
+  roboSaudacaoEm?: string;
+  /**
+   * UMA VEZ: a 1ª leitura em que a pessoa já tinha respondido — APROXIMAÇÃO: o robô
+   * não guarda a 1ª resposta, só a última (`ultima_msg_cliente_em` daquela leitura).
+   */
+  roboRespondeuEm?: string;
+  /** SOBRESCREVE: a última mensagem da pessoa ao robô. */
+  roboUltimaMsgClienteEm?: string;
+  /** SOBRESCREVE: a última interação na conversa (`ultima_interacao`). */
+  roboUltimaInteracaoEm?: string;
+  /** SOBRESCREVE: a etapa no robô (`etapaDoRobo`, `lib/robo/etapa.ts`). */
+  roboEtapa?: RoboEtapa;
+  /** SOBRESCREVE: cobranças que o robô mandou (`followups_enviados`) — espelho, não tentativa. */
+  roboCobrancas?: number;
+  /** SOBRESCREVE: a última cobrança do robô. */
+  roboUltimaCobrancaEm?: string;
+  /** UMA VEZ: o robô mandou o convite para falar com o especialista. */
+  roboConviteEm?: string;
+  /** UMA VEZ: aceitou o convite (`transferido_em`) — recebeu o link do Calendly. */
+  roboAceitouEm?: string;
+  /** UMA VEZ: o robô marcou "Telefone sem WhatsApp" (`criado_em` do robô; sem ele, a leitura). */
+  roboSemWhatsappEm?: string;
+  /** SOBRESCREVE: o robô encerrou a conversa. */
+  roboEncerradoEm?: string;
+  /** UMA VEZ: pediu para não receber mensagens (`opt_out_em`; sem a data, a leitura). */
+  roboOptOutEm?: string;
+  /** SOBRESCREVE: o robô está pausado para esta pessoa (`bot_pausado`). */
+  roboPausado?: boolean;
 }
 
 // ------------------------- Lead audit log ---------------------------
@@ -542,7 +582,8 @@ export interface AuditEntry {
 
 // ------------------------- Sincronizações (ADR-04) --------------------
 
-export type SyncFonte = "ads" | "instagram";
+/** `robo` = a leitura do banco do robô de WhatsApp (`lib/robo/sync.ts`), sem janela de datas. */
+export type SyncFonte = "ads" | "instagram" | "robo";
 
 /**
  * Uma execução de sincronização, por fonte e marca — tenha dado certo ou não.

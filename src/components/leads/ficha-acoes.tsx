@@ -35,6 +35,7 @@ export function FichaAcoes({
   mensagemWhatsapp,
   canEdit,
   podeReabrir,
+  optOut = false,
 }: {
   id: string;
   name: string;
@@ -46,10 +47,15 @@ export function FichaAcoes({
   mensagemWhatsapp: string;
   canEdit: boolean;
   podeReabrir: boolean;
+  /** Pediu ao robô para não receber mensagens (LGPD): sem WhatsApp, nem no registro (o servidor também recusa). */
+  optOut?: boolean;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
-  const [canal, setCanal] = useState<CanalContato>("whatsapp");
+  const [canalEscolhido, setCanal] = useState<CanalContato>(optOut ? "ligacao" : "whatsapp");
+  // O opt-out pode chegar depois da montagem (`router.refresh` mantém o estado): o
+  // canal bloqueado nunca fica escolhido nem vai para o servidor.
+  const canal: CanalContato = optOut && canalEscolhido === "whatsapp" ? "ligacao" : canalEscolhido;
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [desfazivel, setDesfazivel] = useState<string | null>(null);
   const [nota, setNota] = useState("");
@@ -128,7 +134,7 @@ export function FichaAcoes({
 
   return (
     <div className="space-y-5">
-      {telefone ? (
+      {telefone && !optOut ? (
         <a
           href={linkWhatsapp(telefone, mensagemWhatsapp, name)}
           target="_blank"
@@ -145,11 +151,21 @@ export function FichaAcoes({
         <section className="space-y-2">
           <h3 className="text-sm font-semibold">Tentativa de contato</h3>
           <div className="flex flex-wrap items-center gap-2">
-            {(Object.keys(CANAL_LABEL) as CanalContato[]).map((c) => (
-              <button key={c} type="button" onClick={() => setCanal(c)} className={chip(canal === c)}>
-                {CANAL_LABEL[c]}
-              </button>
-            ))}
+            {(Object.keys(CANAL_LABEL) as CanalContato[]).map((c) => {
+              const bloqueado = c === "whatsapp" && optOut;
+              return (
+                <button
+                  key={c}
+                  type="button"
+                  disabled={bloqueado}
+                  title={bloqueado ? "Pediu para não receber mensagens" : undefined}
+                  onClick={() => setCanal(c)}
+                  className={cn(chip(canal === c), "disabled:cursor-not-allowed disabled:opacity-40")}
+                >
+                  {CANAL_LABEL[c]}
+                </button>
+              );
+            })}
           </div>
           <textarea
             value={notaDaLigacao}

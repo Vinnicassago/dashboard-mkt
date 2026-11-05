@@ -131,7 +131,8 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   clique), "Cliente" exige valor, "Desistência" só para quem já agendou
   (`everBooked`). A tela usa `destinosPermitidos`; o servidor confere de novo
   (`changeLeadStatus`). Gravar status = `aplicarStatus` (`lib/leads/mudar-status.ts`),
-  usado pela tela e pela ponte do robô. **Máquina** (Fase 2): `TRANSICOES` é a fonte
+  usado pela tela, por `registrarContato` e pela API do n8n (a ponte do robô saiu em nov/26;
+  `roboSessionId` só é lido). **Máquina** (Fase 2): `TRANSICOES` é a fonte
   ÚNICA dos destinos; perda e cliente ENCERRAM (sair = `reabrirLead`, admin, com
   motivo); "Em contato" nunca é escolhido — nasce da 1ª tentativa; "Não compareceu"
   (`no_show`) conta como agendou; "Sem resposta" antes de 3 tentativas em 2 dias pede
@@ -139,7 +140,13 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
 - **Tentativas** (`lib/contato.ts`, puro): NÃO há contador no lead — tudo sai dos
   eventos `tentativa` (canal, falou, próxima pela `CADENCIA_HORAS`; `occurredAt` =
   quando aconteceu). `resumoContato` é a leitura única. Desfazer = evento `desfeito`
-  apontando para ela (nada é apagado). A 1ª carimba o marco `firstContactAt`.
+  apontando para ela (nada é apagado). A 1ª carimba o marco `firstContactAt`. **O robô
+  NÃO é tentativa**: os fatos dele são as colunas `robo_*` do lead (migração 0023) —
+  nunca evento `tentativa`, `resumoContato`, cadência, `firstContactAt` nem a régua do
+  "Sem resposta". Quem o robô recebeu (`roboVistoEm`) sai da base do "1º contato no
+  prazo" (kpis, Funil, "Onde atacar": só "< 3 tentativas" vai ao comercial). Com
+  opt-out (`roboOptOutEm`) o WhatsApp some de Leads, ficha e Fila e `registrarContato`
+  recusa tentativa por WhatsApp.
 - **Marcos vs. status** (migração `0012`): `status` é o estado ATUAL (rótulo, cor,
   fila) e é mutável; `bookedAt`/`attendedAt`/`closedAt` são o FATO, gravados uma vez
   e nunca sobrescritos (`coalesce` no Postgres, `??=` nos outros backends). A
@@ -165,16 +172,23 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   `AMOSTRA_GARGALO` (10) entradas; a régua é a meta vigente ou, sem meta, a média das 8
   semanas anteriores — E O RÓTULO DIZ QUAL. Impacto = entradas × (régua − real) × produto
   das taxas seguintes até "agendada" (régua quando a real é 0), inteiro e só com amostra.
-  **Motor v2** (`lib/motor.ts`, puro): regras C1–C5, M1–M5, L1–L2, D1–D2, G1 do
-  relatório (+ M6 escalar vencedor e M7 ritmo de verba), cada uma com id estável
+  **Motor v2** (`lib/motor.ts`, puro): regras C1–C5, M1–M5, L1–L2, D1–D2 do relatório
+  (+ M6 escalar vencedor, M7 ritmo de verba e B1 robô parado; a G1 foi retirada em
+  nov/26 — não reutilize o id), cada uma com id estável
   (`regra:alvo` — a C1 leva a `assinatura` de QUEM espera: pessoas novas fora do prazo
   = ação nova, de volta ao topo mesmo depois de um "Feito"), dono (`lib/dono.ts`),
   amostra mínima (`AMOSTRA_MIN`), impacto e confiança. A landing page só entra em
   "Onde trava" com linha NO período (`temLpNoPeriodo`): histórico sem dado é rastreio
   que parou (alerta), não "0%". Decide com os números de `kpisDoPeriodo` (nunca com custo em quarentena) e
   lê a Fila pela mesma `montarFila` da página. Ordem = severidade × impacto × confiança,
-  mais a regra do farol como regra de ORDEM: C1 (gente sem o 1º contato, fora do prazo)
-  vem primeiro sempre que existir. Impacto só inteiro e só com amostra — senão
+  mais a regra do farol como regra de ORDEM: C1 (gente esperando o comercial, fora do
+  prazo) vem primeiro sempre que existir, a B1 logo depois, e só então o resto. Com o
+  robô ligado a C1 conta resgate + aceitou o convite com atraso > 1 (mais a live,
+  deduplicada por lead) e a assinatura leva o grupo (`resgate:<id>`); desligado, a C1
+  de antes, intacta. B1 (só com o robô ligado): leitura falhando ou parada há > 45 min
+  (dono DADOS, id `B1:sync:<roboFalhaDesde ?? ultimoOk>`) ou, com a leitura em dia,
+  gente sem a 1ª mensagem do robô (`semMensagemDoRobo`, dono BOT). A C2 é nula com o
+  robô ligado (o 1º contato é dele). Impacto só inteiro e só com amostra — senão
   `semImpacto` diz "estimativa indisponível". Confiança cai com piso/sync falhando
   (mídia) e com registro em lote (taxas do comercial). Regra nova = função `regraXn` +
   teste em `fase5.test.ts`; regras de conteúdo ficam em `recommendations.ts` (Conteúdo).
@@ -196,22 +210,72 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   lead, sem contar quem está parado) é a resposta do Funil e a ÚNICA junta com cor;
   abaixo de `AMOSTRA_MINIMA` a cascata não imprime taxa nem custo unitário. Sem robô,
   cai no funil do painel e diz isso.
-- **Fila de contato** (`src/lib/fila.ts`): funde as três filas que vivem em bancos
-  diferentes (leads sem desfecho, convite pendente no robô, transferido sem 1º contato)
-  numa lista só. Fonte ÚNICA dos SLAs por etapa em `FILA_ETAPAS` — nunca hardcode um
-  prazo. Ordena por **atraso relativo** (`horas ÷ SLA da etapa`), não por idade crua:
-  6h num SLA de 2h é mais urgente que 3 dias num de 48h. Dedupe por telefone via
-  `src/lib/phone.ts` (fonte única do pareamento, usada também pela ponte do Comercial) —
-  a mesma pessoa costuma estar em duas filas, e vence a etapa mais funda. Etapa nova =
-  entrada em `FILA_ETAPAS` + um ramo em `montarFila`. Rótulo de dono (marketing, robô,
-  comercial) vem de `src/lib/dono.ts`. Etapas do painel saem de `etapaDoLead` (novo,
-  retornar, confirmar, sem desfecho); prazos em **horas úteis** (`lib/horario-util.ts`,
-  seg–sex 9h–18h Brasília, UTC−3 fixo, sem feriados) — "novo" é 1 hora útil. Lead
-  reaberto recomeça o relógio no `reaberto`. Robô desligado em Configurações → Integrações
-  (`robo_desativado`, `roboLigado()`) some com as etapas dele — desligado não é erro.
-  A ficha (`/leads/[id]`) não é página de menu: abre pelo nome em Leads, Fila,
-  histórico e no link do aviso. Aviso de lead novo = webhook do n8n (`lib/avisos.ts`,
-  `N8N_LEAD_WEBHOOK_URL`); falha no aviso nunca derruba a entrada do lead.
+- **Fila de contato** (`src/lib/fila.ts`, puro): para quem ligar agora, por GRUPO na
+  ordem fixa (`gruposDaFila`) e, dentro do grupo, por **atraso relativo** (`horas ÷ SLA`):
+  6h num SLA de 2h é mais urgente que 3 dias num de 48h. Fonte ÚNICA dos prazos, rótulos
+  e do ⓘ (`hint`) em `FILA_ETAPAS` — nunca hardcode um prazo. **Robô ligado**: Resgate ·
+  Aceitou o convite · Reuniões a confirmar · Reuniões sem desfecho; quem está COM o robô
+  não está na Fila (só na barra "Com o robô agora"). Resgate = quem ficou sem conversa
+  com o robô — `ResgateMotivo`, lista fechada: sem resposta em 24 h, sem WhatsApp, sem
+  telefone, o robô não falou (2 h), não compareceu, retorno de quem já era trabalhado
+  antes do robô; só os quatro primeiros avisam o n8n. Resgate e "Aceitou o convite" têm a
+  cadência humana (quem já tentou some até a próxima; no convite e no "não compareceu"
+  só contam as tentativas depois da entrada; no resgate, as depois do último `reaberto`).
+  "Aceitou o convite" sai quando a reunião é registrada DEPOIS do aceite
+  (`agendouDepoisDoAceite` — a de um episódio anterior ao reaberto não conta) ou o lead
+  encerra. "Aceitou o convite" e as reuniões valem
+  para todo lead (com ou sem classe); as etapas de contato, não (a live está congelada).
+  Registrar a reunião = "Agendado" com `meetingFor` (`changeLeadStatus`), NUNCA
+  tentativa. Quem já confirmou (`reuniaoConfirmadaEm`) sai de "a confirmar" nos dois
+  modos. **Robô desligado** (sem credencial, desativado em Integrações, ou outra marca) =
+  o processo antigo inteiro: "Novos — ligar agora" (1 hora útil), "Retornar hoje" e as
+  reuniões; desligado não é erro. Dedupe por telefone utilizável (`chaveTelefoneValida`,
+  `lib/phone.ts`), vence a etapa mais funda (`profundidade`), com o atraso na régua DELA
+  (horas úteis; "a confirmar" mantém a proximidade da reunião). Prazos em **horas úteis**
+  (`lib/horario-util.ts`, seg–sex 9h–18h Brasília, UTC−3 fixo, sem feriados). Lead
+  reaberto recomeça o relógio no `reaberto`. Links antigos (`?etapa=novo`…) passam por
+  `grupoDaUrl` e a página rola até a `<section id>`. A página: a live primeiro (intacta),
+  um título por grupo ("Resgate · 5 · 2 fora do prazo" + ⓘ), cinco pessoas + "ver todos",
+  uma linha por pessoa, a barra no fim com links para `/leads?robo=<chave>&range=all`;
+  "a confirmar" = Confirmada · Pediu para remarcar (robô desligado: também o Desfecho▾);
+  sem WhatsApp (o robô viu, ou opt-out) a linha perde o botão e a tentativa começa por
+  ligação; a linha resolvida some só no grupo da ação e volta quando o servidor deixa de
+  listá-la ali (`components/fila/resolvidos.ts`). A
+  ficha (`/leads/[id]`) não é página de menu: abre pelo nome em Leads, Fila, histórico e
+  no link do aviso. Avisos ao n8n (`lib/avisos.ts`, docs/api-n8n.md §6): lead novo
+  (`N8N_LEAD_WEBHOOK_URL`, com `robo: true` e o link da ficha quando o robô está ligado)
+  e resgate (`N8N_RESGATE_WEBHOOK_URL`, webhook próprio, sem PII, seg–sex 9–18, no
+  máximo um por rodada do cron — intervalo mínimo de 13 min, `FOLGA_JANELA_AVISO_MIN` —, um
+  aviso por entrada `id:motivo:desde`); falha no aviso nunca
+  derruba a entrada do lead nem o sync.
+- **Robô no painel** (Fase 1, nov/26, `lib/robo/*`): o painel NUNCA lê o banco do robô
+  para desenhar uma tela — só o sync (`sincronizarRobo`: cron `/api/sync?source=robo` a
+  cada 15 min, "Sincronizar agora" e a carona ao abrir a Fila, job de sistema) lê
+  "Leads WhatsApp" com a lista EXPLÍCITA de colunas (`COLUNAS_DO_ROBO`) — é ela a
+  barreira de LGPD: nada de nome, e-mail, briefing, transcrição ou resumo; o telefone só
+  casa e nunca é gravado nem logado. A chave lê com RLS (service_role): fica só no
+  servidor. O painel NÃO escreve no banco do robô. Casa pelo telefone (`casar.ts`) e grava
+  só as colunas `robo_*` (`updateLeadsRobo`): UMA VEZ (visto, recebido, saudação,
+  respondeu, convite, aceitou, sem WhatsApp, opt-out) × SOBRESCREVE (etapa, última
+  interação/mensagem, cobranças, encerrado, pausado). Duas linhas do robô para a mesma
+  chave: vale a mais recente, com o opt-out de TODAS (o opt-out vale sempre). Reaberto
+  (11.3): os fatos UMA VEZ de antes dele são da conversa antiga — recomeçam com o 1º do
+  episódio novo; convite/aceite sem a data no robô só recomeçam se o robô interagiu
+  depois do reaberto, e "transferido" sem o aceite do episódio é conversa nova. Lead
+  reaberto no PAINEL (o admin) não é falha do robô (fora da B1, do alerta e de
+  Integrações: o robô só recebe inscrições); o resgate das 2 h continua. Nada muda de status. Toda leitura
+  vai para `sync_runs` (fonte `robo`); `roboUltimaLeitura` guarda só contagens. Fontes
+  únicas (puras, `lib/robo/situacao.ts`): `situacaoDoRobo` (resgate, balde, antes do
+  robô, não recebeu), `casaFiltroRobo` (as chaves do filtro de Leads, da barra, da B1 e do
+  alerta) e `semMensagemDoRobo` (o número do alerta, da B1 e de Integrações). O estado
+  (ligado, `lidoAte`, confiável, sync) sai SÓ de `estadoDoRoboAgora` — Fila, Bússola,
+  Leads, exportação, ficha, layout, Integrações e o aviso. Exceção até a Fase 3: o Funil
+  ainda lê as views do robô no render (só contagens).
+- **Texto na tela** (régua de nov/26): o título dá a resposta ("Resgate · 5 · 2 fora do
+  prazo"); nada de descrição embaixo do título — a explicação vai para o ⓘ
+  (`components/ui/info.tsx`); ação em até 12 palavras; uma linha por pessoa; instrução só
+  em Configurações; ressalva no ⚠ do cabeçalho ou no ⓘ. Metas: Início ≤ 100 palavras,
+  demais páginas ≤ 200, Fila em até 3 telas de rolagem.
 - **Navegação** (`components/layout/nav-items.ts`): 7 páginas nomeadas pela PERGUNTA
   que respondem ou pelo DONO do trabalho — Bússola (`/`), Funil (`/funil`), Mídia
   (`/midia`), Conteúdo, Fila de contato, Leads (`/leads`), Configurações
@@ -248,7 +312,10 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   ADR-06); a janela termina no fim do período (hoje, sem `?range=`) na tela, no motor e na IA;
   gráfico diário em barras com dias sem dado e pausados marcados; o gasto nunca aparece
   como orçamento. **Leads**: colunas da ficha (etapa máxima = `etapaMaxima`, função dos
-  marcos — ADR-01), abas com contagem que somam o total, origem campanha › conjunto ›
+  marcos — ADR-01), "Atendimento" (`atendimentoAgora`: o grupo da Fila pela MESMA
+  `etapaDoLead`, senão o robô, "Antes do robô" ou nada — o filtro "dono" lê dali; o de 5
+  estados da live se chama "Status do atendimento", chave `?atendimento=`), filtro `robo`
+  (`casaFiltroRobo`, só com o robô ligado), abas com contagem que somam o total, origem campanha › conjunto ›
   anúncio, exportação só com `leads:write`, montada NO SERVIDOR (`POST /leads/exportar`
   recalcula linhas e contagem) e SEMPRE registrada em `audit_log` antes de devolver o
   arquivo — célula que começa com = + - @ ganha apóstrofo e o telefone só leva dígitos e
@@ -303,8 +370,9 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   validados em `paleta.test.ts`. Metas de conteúdo (seguidores, plano de 90 dias)
   continuam em `goals`.
 - **Alertas** (`lib/alertas.ts`, `components/layout/alertas.tsx`): um lugar só, o
-  "⚠ N" do cabeçalho com painel lateral. Globais (sync falhando, gasto sem marca,
-  rastreio sem chave) vêm do layout; os do período (travas de confiança, saúde do dado,
+  "⚠ N" do cabeçalho com painel lateral. Globais (sync falhando — `sync-robo` inclusive —,
+  gasto sem marca, rastreio sem chave e `robo-sem-1a-msg`, a MESMA contagem da B1 e de
+  Integrações, só com a leitura do robô em dia) vêm do layout; os do período (travas de confiança, saúde do dado,
   atribuição) a página registra com `<RegistrarAlertas>`. Não crie faixa de aviso no
   meio da tela — o que desqualifica um número fica colado nele ("—", "≥", "≤") e a
   explicação vai para o painel.

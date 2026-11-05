@@ -2,18 +2,29 @@ import { Plug } from "lucide-react";
 import { ReenviarCapi, RoboToggle, SyncPanel } from "@/components/config/integracoes-forms";
 import { StatusRow, estadoSimples } from "@/components/config/integracoes-status";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { RolarParaAncora } from "@/components/ui/rolar-para-ancora";
 import { isAiConfigured } from "@/lib/ai/config";
 import { isAuthEnabled } from "@/lib/auth/config";
 import { BRANDS } from "@/lib/brands";
-import { estadoDaSincronizacao, estadoDoRobo, type EstadoExibido } from "@/lib/configuracoes";
+import {
+  estadoDaSincronizacao,
+  estadoDoAvisoResgate,
+  estadoDoCronRobo,
+  estadoDoRobo,
+  type EstadoExibido,
+} from "@/lib/configuracoes";
 import { roboDesativado } from "@/lib/integracoes";
 import { integrationStatus, metaBrandConfig } from "@/lib/meta/config";
-import { hojeEmBrasilia } from "@/lib/range";
-import { getTransferidos, isRoboConfigured } from "@/lib/robo/client";
+import { isRoboConfigured } from "@/lib/robo/client";
+import { estadoDoRoboAgora } from "@/lib/robo/estado";
+import { leituraDoRoboParada, reabertosNoPainel, reabertosPorLead, semMensagemDoRobo } from "@/lib/robo/situacao";
+import { lerEstadoAvisoResgate } from "@/lib/robo/aviso-resgate";
+import type { ResumoLeituraRobo } from "@/lib/robo/casar";
+import { avisoDeResgateConfigurado } from "@/lib/avisos";
 import { estadoDaFonte, type EstadoFonte } from "@/lib/sincronizacao";
 import { DEFAULT_BRAND } from "@/lib/types";
 import { VERSAO } from "@/lib/version";
-import { getState, listCapiEnvios } from "@/lib/data/store";
+import { getState, listCapiEnvios, listLeadEvents, listLeads } from "@/lib/data/store";
 import { STATE_KEYS } from "@/lib/data/backend";
 import { capiEmModoTeste } from "@/lib/meta/capi";
 import { estadoDaCapi, estadoDoCronCapi, resumoDosEnvios } from "@/lib/capi-politica";
@@ -42,20 +53,54 @@ export default async function IntegracoesPage({ searchParams }: { searchParams: 
     return { slug: b.slug, label: b.label, configurada: Boolean(m.igUserId && m.igToken) };
   });
 
-  // Robô: credencial + chave (D5) + uma leitura agora, para dizer "Falhando" com motivo.
+  // Robô: credencial + chave (D5) + o registro do sync (`sync_runs`, pelo MESMO
+  // `estadoDoRoboAgora` da Fila e do alerta) — nada de ler o banco do robô aqui.
+  // O robô é só da marca padrão: a linha fala dela, qualquer que seja a marca aberta.
+  const agoraRobo = new Date();
+  const agoraRoboIso = agoraRobo.toISOString();
   const roboConfigurado = isRoboConfigured();
-  const roboOff = await roboDesativado();
-  let roboErro: string | null = null;
-  if (roboConfigurado && !roboOff) {
-    try {
-      const r = await getTransferidos(hojeEmBrasilia());
-      if (r.falha?.tipo === "erro") roboErro = r.falha.detalhe;
-    } catch (e) {
-      roboErro = e instanceof Error ? e.message : String(e);
-    }
-    if (roboErro) console.error("[integracoes] leitura do robô falhou:", roboErro);
-  }
-  const robo = estadoDoRobo({ configurado: roboConfigurado, desativado: roboOff, erro: roboErro });
+  const roboOff = roboConfigurado ? await roboDesativado() : false;
+  const estadoRobo = await estadoDoRoboAgora(DEFAULT_BRAND, agoraRobo);
+  const [leituraRobo, ultimoCronRobo, avisoBruto] = await Promise.all([
+    estadoRobo.ligado ? getState<ResumoLeituraRobo>(STATE_KEYS.roboUltimaLeitura) : null,
+    roboConfigurado ? getState<string>(STATE_KEYS.roboUltimoCron) : null,
+    avisoDeResgateConfigurado() ? getState<unknown>(STATE_KEYS.avisoResgate) : null,
+  ]);
+  // "Sem a 1ª mensagem do robô": a MESMA contagem do alerta e da B1 (b) — e com a
+  // MESMA guarda: com a leitura parada ou falhando os dois somem (o dado velho
+  // culparia o robô por uma falha da leitura), então aqui também não sai.
+  const reabertos =
+    estadoRobo.ligado && !leituraDoRoboParada(estadoRobo, agoraRoboIso)
+      ? await listLeadEvents({ brand: DEFAULT_BRAND, action: "reaberto", limit: 0 })
+      : null;
+  const semMensagem = reabertos
+    ? semMensagemDoRobo(
+        await listLeads(DEFAULT_BRAND),
+        reabertosPorLead(reabertos),
+        estadoRobo,
+        agoraRoboIso,
+        reabertosNoPainel(reabertos),
+      )
+    : undefined;
+  const robo = estadoDoRobo({
+    configurado: roboConfigurado,
+    desativado: roboOff,
+    registro: estadoRobo.ligado ? estadoRobo.sync : undefined,
+    leitura: leituraRobo,
+    semMensagem,
+    agora: agoraRoboIso,
+  });
+  const cronRobo = estadoDoCronRobo({
+    configurado: roboConfigurado,
+    desativado: roboOff,
+    cronSecret: status.cronSecret,
+    ultimaExecucao: ultimoCronRobo,
+    agora: agoraRoboIso,
+  });
+  const avisoResgate = estadoDoAvisoResgate({
+    configurado: avisoDeResgateConfigurado(),
+    estado: avisoBruto == null ? null : lerEstadoAvisoResgate(avisoBruto),
+  });
 
   // CAPI: o selo sai dos ENVIOS da última semana MAIS todo pendente de qualquer
   // idade (todas as marcas: o dataset é um só), lidos como estão AGORA.
@@ -100,6 +145,8 @@ export default async function IntegracoesPage({ searchParams }: { searchParams: 
 
   return (
     <div className="max-w-3xl space-y-6">
+      {/* A página tem loading.tsx: sem isto, `#robo` (alerta, B1, Fila) abria no topo. */}
+      <RolarParaAncora />
       <p className="text-sm text-muted-foreground">
         Conecte as APIs da Meta para a coleta rodar sozinha, ou alimente o painel à mão pelo CSV em Importar.
       </p>
@@ -164,10 +211,16 @@ export default async function IntegracoesPage({ searchParams }: { searchParams: 
               )}
             />
             <StatusRow label="Rastreio da landing page" estado={rastreio} />
-            {/* Robô e atendimento: escolha operacional, não só credencial (D5). */}
-            <StatusRow label="Robô de WhatsApp e atendimento do especialista" estado={robo}>
+            {/* Robô: escolha operacional, não só credencial (D5). */}
+            <StatusRow id="robo" label="Robô de WhatsApp" estado={robo}>
               {roboConfigurado && ctx.papeis.dados ? <RoboToggle ativo={!roboOff} /> : null}
             </StatusRow>
+            {roboConfigurado ? (
+              <>
+                <StatusRow label="Leitura do robô por cron" estado={cronRobo} />
+                <StatusRow label="Aviso de resgate (n8n)" estado={avisoResgate} />
+              </>
+            ) : null}
             <StatusRow
               label="Análise por IA (Claude)"
               estado={estadoSimples(

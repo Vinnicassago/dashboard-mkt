@@ -9,6 +9,7 @@
 
 import { toRole } from "../auth/roles";
 import { normalizeLeadStatus } from "../lead-status";
+import { isoOuNull, lerRoboEtapa } from "../robo/etapa";
 import {
   BENS,
   CLASSES,
@@ -283,6 +284,14 @@ export const fromLp = (l: LpDaily): Row => ({
   form_submits: l.formSubmits,
 });
 
+/**
+ * Data do robô (0023) sempre no formato de `toISOString`, nos TRÊS backends: o
+ * PostgREST devolve "…+00:00", o driver do Postgres um Date e o JSON local o que
+ * foi gravado. O casamento compara o gravado com a leitura nova — com formatos
+ * diferentes, o Supabase veria "mudou" em toda leitura e regravaria todo lead.
+ */
+const isoRobo = (v: unknown): string | undefined => isoOuNull(v) ?? undefined;
+
 export const toLead = (r: Row): Lead => ({
   id: s(r.id),
   brand: brandOf(r.brand),
@@ -337,6 +346,22 @@ export const toLead = (r: Row): Lead => ({
   diagnostico: lerDiagnostico(r.diagnostico),
   reuniaoConfirmadaEm: r.reuniao_confirmada_em ? iso(r.reuniao_confirmada_em) : undefined,
   reuniaoRemarcarEm: r.reuniao_remarcar_em ? iso(r.reuniao_remarcar_em) : undefined,
+  // Robô de WhatsApp (0023). A etapa é lista fechada: valor desconhecido some, não quebra a tela.
+  roboVistoEm: isoRobo(r.robo_visto_em),
+  roboRecebidoEm: isoRobo(r.robo_recebido_em),
+  roboSaudacaoEm: isoRobo(r.robo_saudacao_em),
+  roboRespondeuEm: isoRobo(r.robo_respondeu_em),
+  roboUltimaMsgClienteEm: isoRobo(r.robo_ultima_msg_cliente_em),
+  roboUltimaInteracaoEm: isoRobo(r.robo_ultima_interacao_em),
+  roboEtapa: lerRoboEtapa(r.robo_etapa),
+  roboCobrancas: r.robo_cobrancas == null ? undefined : n(r.robo_cobrancas),
+  roboUltimaCobrancaEm: isoRobo(r.robo_ultima_cobranca_em),
+  roboConviteEm: isoRobo(r.robo_convite_em),
+  roboAceitouEm: isoRobo(r.robo_aceitou_em),
+  roboSemWhatsappEm: isoRobo(r.robo_sem_whatsapp_em),
+  roboEncerradoEm: isoRobo(r.robo_encerrado_em),
+  roboOptOutEm: isoRobo(r.robo_opt_out_em),
+  roboPausado: r.robo_pausado == null ? undefined : Boolean(r.robo_pausado),
 });
 
 /** jsonb do diagnóstico → objeto (o Postgres devolve objeto; texto antigo é lido também). */
@@ -404,6 +429,21 @@ export const fromLead = (l: Lead): Row => ({
   diagnostico: l.diagnostico ?? null,
   reuniao_confirmada_em: l.reuniaoConfirmadaEm ?? null,
   reuniao_remarcar_em: l.reuniaoRemarcarEm ?? null,
+  robo_visto_em: l.roboVistoEm ?? null,
+  robo_recebido_em: l.roboRecebidoEm ?? null,
+  robo_saudacao_em: l.roboSaudacaoEm ?? null,
+  robo_respondeu_em: l.roboRespondeuEm ?? null,
+  robo_ultima_msg_cliente_em: l.roboUltimaMsgClienteEm ?? null,
+  robo_ultima_interacao_em: l.roboUltimaInteracaoEm ?? null,
+  robo_etapa: l.roboEtapa ?? null,
+  robo_cobrancas: l.roboCobrancas ?? null,
+  robo_ultima_cobranca_em: l.roboUltimaCobrancaEm ?? null,
+  robo_convite_em: l.roboConviteEm ?? null,
+  robo_aceitou_em: l.roboAceitouEm ?? null,
+  robo_sem_whatsapp_em: l.roboSemWhatsappEm ?? null,
+  robo_encerrado_em: l.roboEncerradoEm ?? null,
+  robo_opt_out_em: l.roboOptOutEm ?? null,
+  robo_pausado: l.roboPausado ?? null,
 });
 
 export const toConferencia = (r: Row): ConferenciaGasto => ({

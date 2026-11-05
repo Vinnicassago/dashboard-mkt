@@ -40,7 +40,7 @@ import { AMOSTRA_MINIMA, montarCascata, type CascataComercial, type CascataResul
 import { eventosPorLead, resumoContato } from "./contato";
 import { DONO_LABEL, type Dono } from "./dono";
 import type { FilaEtapa } from "./fila";
-import { FILA_ETAPAS } from "./fila";
+import { SLA_PRIMEIRO_CONTATO_HORAS } from "./fila";
 import { textoDoImpacto, type Gargalo } from "./gargalo";
 import { somarHorasUteis } from "./horario-util";
 import { gruposDuplicados, pareceTeste } from "./identidade";
@@ -178,6 +178,8 @@ export interface EntradaFunil {
   /** `null` quando o robô está desligado ou a leitura falhou (como na cascata). */
   robo: CascataRobo | null;
   comercial: CascataComercial | null;
+  /** O robô faz o 1º contato (`estadoDoRoboAgora(...).ligado`): os parados do 1º contato humano ficam sem link para a Fila. */
+  roboLigado?: boolean;
   vista: VistaFunil;
   /** AAAA-MM-DD (Brasília) e ISO. */
   hoje: string;
@@ -413,7 +415,15 @@ function etapasDaCascata(degraus: Degrau[], e: EntradaFunil): { etapas: EtapaFun
   // o "aguardando abordagem" do bloco são os TRANSFERIDOS pelo robô, outra
   // população; esconder os do painel tirava do funil gente que a Fila lista. Quem
   // está nos dois aparece na Fila uma vez, na etapa mais funda — a nota diz isso.
-  const semContato = data.leads.filter((l) => l.status === "lead").length;
+  // Robô LIGADO: o lead que o robô recebeu (`roboVistoEm`) não está parado no 1º
+  // contato HUMANO — o 1º contato dele é do robô (11.7) —, e a Fila não tem grupo com
+  // essa população (antes do robô, live, quem o robô ainda tem): o número fica, sem
+  // link. Robô DESLIGADO: o processo de antes — todo "Novo" conta, com o carimbo ou
+  // não (desligado depois de ter rodado, quem o robô viu volta a "Novos — ligar
+  // agora"), e o marcador abre "Novos" na Fila (o número do link é o da página que
+  // ele abre — exceção que já existia: o lead da live, com classe, conta aqui e
+  // fica fora de "Novos").
+  const semContato = data.leads.filter((l) => l.status === "lead" && (!e.roboLigado || !l.roboVistoEm)).length;
   const contato: EtapaFunil = {
     key: "primeiro_contato",
     label: "1º contato registrado",
@@ -421,7 +431,7 @@ function etapasDaCascata(degraus: Degrau[], e: EntradaFunil): { etapas: EtapaFun
     fonte: "crm",
     dono: "COM",
     parados: semContato > 0 ? semContato : undefined,
-    etapaFila: semContato > 0 ? "novo" : undefined,
+    etapaFila: semContato > 0 && !e.roboLigado ? "novo" : undefined,
     nota: [
       periodo
         ? "tentativas de 1º contato feitas no período, pela data da 1ª tentativa"
@@ -555,8 +565,8 @@ function metricaDaEtapa(et: EtapaFunil): MetricaComMeta | undefined {
 }
 
 export function montarFunil(e: EntradaFunil): FunilConversao {
-  const { data, range, kpis, robo, comercial, vista } = e;
-  const cascata = montarCascata({ data, range, robo, comercial, kpis });
+  const { data, range, kpis, robo, comercial, vista, roboLigado } = e;
+  const cascata = montarCascata({ data, range, robo, comercial, kpis, roboLigado });
   const { etapas, bloco } = etapasDaCascata(cascata.degraus, e);
 
   // Δ: o MESMO funil no período anterior (só com período concreto). O bloco do
@@ -564,7 +574,7 @@ export function montarFunil(e: EntradaFunil): FunilConversao {
   if (range) {
     const ant = previousRange(range);
     const kAnt = kpisDoPeriodo(data, ant, { hoje: e.hoje, agora: e.agora });
-    const cascAnt = montarCascata({ data, range: ant, robo, comercial, kpis: kAnt });
+    const cascAnt = montarCascata({ data, range: ant, robo, comercial, kpis: kAnt, roboLigado });
     const porKey = new Map(etapasDaCascata(cascAnt.degraus, { ...e, range: ant, kpis: kAnt }).etapas.map((x) => [x.key, x.valor]));
     for (const et of etapas) {
       const v = porKey.get(et.key);
@@ -881,15 +891,17 @@ export const ALVO_LABEL: Record<AlvoDaPerda, string> = {
   indefinido: "Não dá para dizer",
 };
 
-/** Prazo do 1º contato (horas úteis) — a régua da Fila, não uma cópia. */
-export const SLA_PRIMEIRO_CONTATO_HORAS = FILA_ETAPAS.novo.slaHoras;
+/** Prazo do 1º contato (horas úteis) — mora em `lib/fila.ts` (a régua da Fila, não uma cópia). */
+export { SLA_PRIMEIRO_CONTATO_HORAS };
 
 /**
  * "Sem resposta" aponta para o COMERCIAL quando houve menos de 3 tentativas
  * (`TENTATIVAS_PARA_SEM_RESPOSTA`) OU a 1ª tentativa saiu fora do prazo de 1 hora
  * útil (`SLA_PRIMEIRO_CONTATO_HORAS`); só com 3+ tentativas, a primeira no prazo,
  * a culpa vai para a mídia/formulário. `primeiraNoPrazo === null` = sem tentativa
- * registrada, que é o caso mais claro de processo.
+ * registrada, que é o caso mais claro de processo. Para o lead que o robô recebeu
+ * (`roboVistoEm`) o prazo não vale — `contextoDaPerda` já manda `primeiraNoPrazo`
+ * como `true` e só as tentativas contam (11.7); o texto da tela diz isso.
  */
 export function ondeAtacarSemResposta(tentativas: number, primeiraNoPrazo: boolean | null): "comercial" | "midia_formulario" {
   if (tentativas < TENTATIVAS_PARA_SEM_RESPOSTA) return "comercial";
@@ -940,12 +952,17 @@ export interface PerdasConfiaveis {
   semTentativa: number;
 }
 
-/** O que a regra precisa saber de um lead perdido. */
+/**
+ * O que a regra precisa saber de um lead perdido. O lead que o robô recebeu
+ * (`roboVistoEm`) teve o 1º contato pelo robô (11.7): "1ª tentativa fora do
+ * prazo" não se aplica a ele — só "menos de 3 tentativas" manda para o comercial.
+ */
 function contextoDaPerda(l: Lead, evs: LeadEvent[]) {
   const rc = resumoContato(evs);
   const primeira = rc.primeira ?? l.firstContactAt;
   const prazo = somarHorasUteis(l.createdAt, SLA_PRIMEIRO_CONTATO_HORAS);
-  const primeiraNoPrazo = primeira ? Date.parse(primeira) <= Date.parse(prazo) : null;
+  // Com o robô, a 1ª tentativa humana conta como "no prazo": o prazo de 1 hora útil não vale.
+  const primeiraNoPrazo = !primeira ? null : l.roboVistoEm ? true : Date.parse(primeira) <= Date.parse(prazo);
   // Quando o status de perda foi REGISTRADO: o último evento para ele, senão o marco.
   const registro = evs
     .filter((e) => e.action === "status_changed" && e.toStatus === l.status)

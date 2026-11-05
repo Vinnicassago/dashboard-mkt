@@ -7,6 +7,9 @@
  * com a hora do último sync que DEU CERTO.
  */
 
+import { formatarEspera } from "./format";
+import { LEITURA_PARADA_MIN } from "./robo/situacao";
+
 export type NivelFrescor = "ok" | "velho" | "muito-velho";
 
 export interface Frescor {
@@ -24,6 +27,23 @@ export interface Frescor {
 export const HORAS_VELHO = 26;
 export const HORAS_MUITO_VELHO = 50;
 
+/**
+ * Régua própria de uma fonte, em MINUTOS — para quem não roda uma vez por dia.
+ * Com ela, a idade sai em minutos (`formatarEspera`: "50 min", "3 h 10 min").
+ */
+export interface LimitesDeFrescor {
+  velhoMin: number;
+  muitoVelhoMin: number;
+}
+
+/**
+ * O robô lê a cada 15 min: velho depois de 45 min (três leituras perdidas), muito
+ * velho depois de 3 h. O "velho" é a MESMA régua da B1 "leitura parada", da
+ * confiança da C1 e do alerta (`LEITURA_PARADA_MIN`): o cabeçalho e a ação nunca
+ * discordam sobre a mesma leitura.
+ */
+export const LIMITES_DO_ROBO: LimitesDeFrescor = { velhoMin: LEITURA_PARADA_MIN, muitoVelhoMin: 180 };
+
 const fmt = new Intl.DateTimeFormat("pt-BR", {
   timeZone: "America/Sao_Paulo",
   day: "2-digit",
@@ -38,14 +58,16 @@ export function frescorDaFonte(
   agora: Date = new Date(),
   /** O sync está falhando (o dado pode até ser recente — a próxima atualização não vem). */
   falha?: { desde: string; erro: string } | null,
+  /** Sem limites, a régua do cron diário (26/50 h). */
+  limites?: LimitesDeFrescor,
 ): Frescor {
-  const f = frescorBase(fonte, iso, agora);
+  const f = frescorBase(fonte, iso, agora, limites);
   if (!falha) return f;
   const desde = fmt.format(new Date(falha.desde)).replace(",", "");
   return { ...f, falhando: true, detalhe: `${f.detalhe} A sincronização está falhando desde ${desde}: ${falha.erro}` };
 }
 
-function frescorBase(fonte: string, iso: string | null, agora: Date): Frescor {
+function frescorBase(fonte: string, iso: string | null, agora: Date, limites?: LimitesDeFrescor): Frescor {
   if (!iso) {
     return { fonte, quando: "nunca", nivel: "muito-velho", detalhe: `${fonte}: nenhuma sincronização deu certo ainda.` };
   }
@@ -54,12 +76,15 @@ function frescorBase(fonte: string, iso: string | null, agora: Date): Frescor {
     return { fonte, quando: "—", nivel: "muito-velho", detalhe: `${fonte}: data de sincronização ilegível.` };
   }
   const horas = (agora.getTime() - t) / 3_600_000;
-  const nivel: NivelFrescor =
-    horas > HORAS_MUITO_VELHO ? "muito-velho" : horas > HORAS_VELHO ? "velho" : "ok";
+  const velho = limites ? limites.velhoMin / 60 : HORAS_VELHO;
+  const muitoVelho = limites ? limites.muitoVelhoMin / 60 : HORAS_MUITO_VELHO;
+  const nivel: NivelFrescor = horas > muitoVelho ? "muito-velho" : horas > velho ? "velho" : "ok";
   const quando = fmt.format(new Date(t)).replace(",", "");
+  // Com régua em minutos, "há 0 h" seria mentira: a idade sai em minutos.
+  const idade = limites ? formatarEspera(horas) : `${Math.floor(horas)} h`;
   const detalhe =
     nivel === "ok"
       ? `${fonte}: último sync que deu certo em ${quando}.`
-      : `${fonte}: o último sync que deu certo foi em ${quando} — há ${Math.floor(horas)} h. Os números dessa fonte podem estar desatualizados.`;
+      : `${fonte}: o último sync que deu certo foi em ${quando} — há ${idade}. Os números dessa fonte podem estar desatualizados.`;
   return { fonte, quando, nivel, detalhe };
 }

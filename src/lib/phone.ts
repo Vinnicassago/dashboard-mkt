@@ -7,7 +7,8 @@
  * nono dígito, comparar string crua erra — e um erro aqui não é cosmético: é uma
  * reunião que não chega ao funil, ou a mesma pessoa contada duas vezes na fila.
  *
- * Puro, sem I/O. Usado pela ponte do Comercial e pela dedupe da Fila.
+ * Puro, sem I/O. Usado pela dedupe da Fila, pela identidade (mesma pessoa) e
+ * pelo casamento com o robô (`lib/robo/casar.ts`).
  */
 
 /** Só dígitos, com DDI 55 quando o número vier sem ele. */
@@ -48,4 +49,15 @@ export function chaveTelefone(phone?: string | null): string | null {
   if (!phone) return null;
   const vars = variantesTelefone(normalizarTelefone(phone));
   return vars.sort()[0] ?? null;
+}
+
+/**
+ * A chave só quando ela é de um telefone UTILIZÁVEL (55 + DDD + número: 12 ou 13
+ * dígitos); lixo ("123", "0") não agrupa nem casa. Régua única de "telefone
+ * utilizável": a identidade (mesma pessoa, Revisar) e o casamento com o robô
+ * leem daqui — se o limite mudar, muda para os dois.
+ */
+export function chaveTelefoneValida(phone?: string | null): string | null {
+  const k = chaveTelefone(phone);
+  return k && k.length >= 12 ? k : null;
 }

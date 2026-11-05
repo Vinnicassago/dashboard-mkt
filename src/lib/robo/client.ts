@@ -2,6 +2,7 @@ import "server-only";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { CascataComercial, CascataRobo } from "@/lib/cascata";
 import { roboDesativado } from "@/lib/integracoes";
+import { normalizarLinhaRobo, type LinhaRobo } from "./etapa";
 
 /**
  * Cliente do Supabase do robô de WhatsApp — banco SEPARADO do store do painel.
@@ -9,6 +10,10 @@ import { roboDesativado } from "@/lib/integracoes";
  * Usa nomes próprios de variável (ROBO_*) de propósito: SUPABASE_URL e
  * SUPABASE_SERVICE_ROLE_KEY trocam o backend do painel inteiro (ver
  * lib/data/backend.ts), e não é isso que queremos aqui.
+ *
+ * SÓ LEITURA: o painel não escreve no banco do robô (D4 — o "Abordado" e a
+ * tabela "Com o especialista" saíram em nov/26). As telas leem o store; quem lê
+ * daqui é o sync (`lerLeadsDoRobo`) e, até a Fase 3, o Funil (contagens).
  */
 
 const url = process.env.ROBO_SUPABASE_URL;
@@ -21,8 +26,9 @@ export function isRoboConfigured(): boolean {
 /**
  * Credencial presente E não desativado em Configurações. Desativado devolve
  * "desligado" em toda leitura — as etapas do robô somem, sem erro (D5).
+ * Para saber se o robô vale numa MARCA (só a padrão), use `estadoDoRoboAgora`.
  */
-async function roboLigado(): Promise<boolean> {
+export async function roboLigado(): Promise<boolean> {
   return isRoboConfigured() && !(await roboDesativado());
 }
 
@@ -92,19 +98,16 @@ export interface RoboSaude {
   pendencias_identidade: number;
 }
 
-export interface RoboPendente {
-  nome: string | null;
-  telefone: string | null;
-  score: number | null;
-  ultima_interacao: string | null;
-}
-
+/**
+ * O que o Funil lê das views do robô no render (exceção declarada até a Fase 3,
+ * 11.8). Só contagens — sem nome nem telefone: os pendentes saíram (o Funil não
+ * os usava; quem espera está na Fila, que lê do store).
+ */
 export interface RoboSnapshot {
   kpis: RoboKpis | null;
   diario: RoboDia[];
   motivos: RoboMotivo[];
   saude: RoboSaude | null;
-  pendentes: RoboPendente[];
   /** `null` = leitura OK. Ver RoboFalha. */
   falha: RoboFalha;
 }
@@ -142,30 +145,25 @@ function primeiroErro(...res: { error: { message: string } | null }[]): RoboFalh
  */
 export async function getRoboSnapshot(desde?: string): Promise<RoboSnapshot> {
   if (!(await roboLigado())) {
-    return { kpis: null, diario: [], motivos: [], saude: null, pendentes: [], falha: DESLIGADO };
+    return { kpis: null, diario: [], motivos: [], saude: null, falha: DESLIGADO };
   }
   const sb = client();
 
   const diarioQuery = sb.from("vw_robo_diario").select("*").order("dia", { ascending: true });
   if (desde) diarioQuery.gte("dia", desde);
 
-  const [kpis, diario, motivos, saude, pendentes] = await Promise.all([
+  const [kpis, diario, motivos, saude] = await Promise.all([
     sb.from("vw_robo_kpis").select("*").maybeSingle(),
     diarioQuery,
     sb.from("vw_robo_motivos").select("*").order("leads", { ascending: false }),
     sb.from("vw_robo_saude").select("*").maybeSingle(),
-    sb
-      .from("vw_robo_leads")
-      .select("nome,telefone,score,ultima_interacao")
-      .eq("etapa", "convite_pendente")
-      .order("ultima_interacao", { ascending: true }),
   ]);
 
   // Uma view quebrada contamina a leitura inteira: melhor a aba dizer "não
-  // consegui ler" do que exibir quatro blocos certos e um zerado sem aviso.
-  const falha = primeiroErro(kpis, diario, motivos, saude, pendentes);
+  // consegui ler" do que exibir três blocos certos e um zerado sem aviso.
+  const falha = primeiroErro(kpis, diario, motivos, saude);
   if (falha) {
-    return { kpis: null, diario: [], motivos: [], saude: null, pendentes: [], falha };
+    return { kpis: null, diario: [], motivos: [], saude: null, falha };
   }
 
   return {
@@ -173,61 +171,23 @@ export async function getRoboSnapshot(desde?: string): Promise<RoboSnapshot> {
     diario: (diario.data as RoboDia[]) ?? [],
     motivos: (motivos.data as RoboMotivo[]) ?? [],
     saude: (saude.data as RoboSaude) ?? null,
-    pendentes: (pendentes.data as RoboPendente[]) ?? [],
     falha: null,
   };
 }
 
 /**
- * Leads transferidos ao especialista no período — alimenta o card da Visão Geral.
- *
- * Devolve `valor: null` com o motivo em `falha`. O card NUNCA deve cair para a
- * contagem de reuniões do store quando isto falha: são métricas diferentes, de
- * bancos diferentes, e trocar uma pela outra em silêncio foi como o painel
- * passou a exibir dois números incompatíveis lado a lado.
- */
-export async function getTransferidos(
-  desde?: string,
-  ate?: string,
-): Promise<{ valor: number | null; falha: RoboFalha }> {
-  if (!(await roboLigado())) return { valor: null, falha: DESLIGADO };
-  const q = client().from("vw_robo_diario").select("transferidos");
-  if (desde) q.gte("dia", desde);
-  if (ate) q.lte("dia", ate);
-  const { data, error } = await q;
-  if (error) return { valor: null, falha: { tipo: "erro", detalhe: error.message } };
-  const rows = (data ?? []) as { transferidos: number }[];
-  return { valor: rows.reduce((a, d) => a + (d.transferidos ?? 0), 0), falha: null };
-}
-
-/**
- * Leads parados numa etapa do robô. A Fila única usa `convite_pendente` — são os
- * que já receberam a oferta de falar com o especialista e não responderam, o
- * grupo mais quente que o robô consegue nomear.
- *
- * Existe separado de `getRoboSnapshot` porque a Fila não precisa das outras
- * quatro views: puxar as cinco para renderizar uma lista de telefones pagaria
- * cinco round-trips por visita.
- */
-export async function getRoboLeads(
-  etapa = "convite_pendente",
-): Promise<{ rows: RoboPendente[]; falha: RoboFalha }> {
-  if (!(await roboLigado())) return { rows: [], falha: DESLIGADO };
-  const res = await client()
-    .from("vw_robo_leads")
-    .select("nome,telefone,score,ultima_interacao")
-    .eq("etapa", etapa)
-    .order("ultima_interacao", { ascending: true });
-  if (res.error) return { rows: [], falha: { tipo: "erro", detalhe: res.error.message } };
-  return { rows: (res.data as RoboPendente[]) ?? [], falha: null };
-}
-
-/**
- * Os números do robô e do atendimento no formato que a cascata precisa.
+ * Os números do robô no formato que a cascata precisa.
  *
  * Deriva o que as views não expõem direto: "responderam" é o total menos os que
  * nunca responderam, e "convidados" soma quem ainda está com o convite aberto,
  * quem declinou e quem foi transferido — as três saídas possíveis do convite.
+ *
+ * A "mesa do atendimento" (`vw_robo_comercial_kpis`: abordados, reuniões, vendas)
+ * NÃO é mais lida (11.8): quem escrevia `abordado_em` no banco do robô saiu em
+ * nov/26 (o "Abordado" da Fila e a tabela "Com o especialista" de Leads — o
+ * painel não escreve no banco do robô), e aqueles números congelariam. `comercial` é sempre null e a
+ * cascata roda no modo "robô sem a mesa do atendimento" — reunião e venda ficam
+ * no painel. Até a Fase 3.
  */
 export async function getCascataFontes(): Promise<{
   robo: CascataRobo | null;
@@ -235,16 +195,11 @@ export async function getCascataFontes(): Promise<{
   falha: RoboFalha;
 }> {
   if (!(await roboLigado())) return { robo: null, comercial: null, falha: DESLIGADO };
-  const sb = client();
-  const [kpis, com] = await Promise.all([
-    sb.from("vw_robo_kpis").select("*").maybeSingle(),
-    sb.from("vw_robo_comercial_kpis").select("*").maybeSingle(),
-  ]);
-  const falha = primeiroErro(kpis, com);
+  const kpis = await client().from("vw_robo_kpis").select("*").maybeSingle();
+  const falha = primeiroErro(kpis);
   if (falha) return { robo: null, comercial: null, falha };
 
   const k = kpis.data as RoboKpis | null;
-  const c = com.data as ComercialKpis | null;
   return {
     robo: k
       ? {
@@ -255,86 +210,76 @@ export async function getCascataFontes(): Promise<{
           convitePendente: k.convite_pendente,
         }
       : null,
-    comercial: c
-      ? {
-          abordados: c.abordados,
-          reunioesRealizadas: c.reunioes_realizadas,
-          negociosFechados: c.negocios_fechados,
-          aguardandoAbordagem: c.aguardando_abordagem,
-        }
-      : null,
+    comercial: null,
     falha: null,
   };
 }
 
-// ---------------------------------------------------------------- comercial
+// ---------------------------------------------------------------- leitura do sync
 
-export interface ComercialRow {
-  session_id: string;
-  nome: string | null;
-  telefone: string | null;
-  email: string | null;
-  score: number | null;
-  saudacao_em: string | null;
-  transferido_em: string | null;
-  minutos_ate_transferencia: number | null;
-  briefing: string | null;
-  transcricao: string | null;
-  abordado_em: string | null;
-  reuniao_marcada: "sim" | "nao" | null;
-  reuniao_realizada: "sim" | "nao" | null;
-  negocio_fechado: "sim" | "nao" | null;
-  obs_comercial: string | null;
-  minutos_ate_abordagem: number | null;
-}
+/**
+ * As ÚNICAS colunas de "Leads WhatsApp" que o painel lê. A lista explícita é a
+ * barreira de LGPD: a tabela tem 84 colunas, com nome, e-mail, briefing,
+ * transcrição e resumo — `*` traria tudo isso para a memória do servidor e para
+ * o log de erro. O telefone vem só para casar; nunca é gravado nem logado.
+ */
+export const COLUNAS_DO_ROBO = [
+  "Session_id",
+  "Telefone",
+  "status",
+  "status_atendimento",
+  "turno",
+  "convite_enviado",
+  "convite_enviado_em",
+  "transferido_em",
+  "criado_em",
+  "ultima_interacao",
+  "saudacao_em",
+  "ultima_msg_cliente_em",
+  "followups_enviados",
+  "ultimo_followup_em",
+  "robo_encerrado_em",
+  "opt_out",
+  "opt_out_em",
+  "bot_pausado",
+] as const;
 
-export interface ComercialKpis {
-  transferidos: number;
-  abordados: number;
-  taxa_abordagem: number | null;
-  minutos_medios_ate_abordagem: number | null;
-  pior_tempo_minutos: number | null;
-  minutos_medios_ate_transferencia: number | null;
-  reunioes_marcadas: number;
-  reunioes_realizadas: number;
-  negocios_fechados: number;
-  aguardando_abordagem: number;
-}
+/** Linhas por página (o teto padrão do PostgREST no Supabase). */
+export const PAGINA_DO_ROBO = 1000;
+/** Tempo máximo de cada página — o supabase-js não tem timeout próprio. */
+export const TIMEOUT_DO_ROBO_MS = 15_000;
+/** Trava de segurança contra laço infinito (100 mil linhas). */
+const MAX_PAGINAS = 100;
 
-export async function getComercial(): Promise<{
-  rows: ComercialRow[];
-  kpis: ComercialKpis | null;
-  falha: RoboFalha;
-}> {
-  if (!(await roboLigado())) return { rows: [], kpis: null, falha: DESLIGADO };
+/**
+ * Lê a tabela inteira do robô, paginada com ordem ESTÁVEL (`criado_em`, depois
+ * `Session_id`): sem ORDER BY o PostgREST não garante a mesma ordem entre as
+ * páginas, e linha que some entre páginas viraria um falso "robô não recebeu".
+ * Avança pelo que de fato veio e para na página vazia — se o servidor cortar
+ * abaixo de 1000, nada se perde. Datas normalizadas (`toISOString`).
+ *
+ * LANÇA no erro (com a mensagem do PostgREST, sem dado de linha): quem chama
+ * (`sincronizarRobo`) registra a falha. Nunca transforma erro em lista vazia.
+ * Não confere se o robô está ligado — quem chama confere.
+ */
+export async function lerLeadsDoRobo(): Promise<LinhaRobo[]> {
   const sb = client();
-  const [rows, kpis] = await Promise.all([
-    sb.from("vw_robo_comercial").select("*").order("transferido_em", { ascending: false }),
-    sb.from("vw_robo_comercial_kpis").select("*").maybeSingle(),
-  ]);
-  const falha = primeiroErro(rows, kpis);
-  if (falha) return { rows: [], kpis: null, falha };
-  return {
-    rows: (rows.data as ComercialRow[]) ?? [],
-    kpis: (kpis.data as ComercialKpis) ?? null,
-    falha: null,
-  };
-}
-
-/** Campos que o painel pode alterar no acompanhamento comercial. */
-export type ComercialPatch = Partial<{
-  abordado_em: string | null;
-  reuniao_marcada: string | null;
-  reuniao_realizada: string | null;
-  negocio_fechado: string | null;
-  obs_comercial: string | null;
-}>;
-
-export async function updateComercial(sessionId: string, patch: ComercialPatch) {
-  if (!isRoboConfigured()) throw new Error("Robô não configurado.");
-  const { error } = await client()
-    .from("Leads WhatsApp")
-    .update(patch)
-    .eq("Session_id", sessionId);
-  if (error) throw new Error(error.message);
+  const select = COLUNAS_DO_ROBO.join(",");
+  const out: LinhaRobo[] = [];
+  let de = 0;
+  for (let pagina = 0; pagina < MAX_PAGINAS; pagina++) {
+    const { data, error } = await sb
+      .from("Leads WhatsApp")
+      .select(select)
+      .order("criado_em", { ascending: true })
+      .order("Session_id", { ascending: true })
+      .range(de, de + PAGINA_DO_ROBO - 1)
+      .abortSignal(AbortSignal.timeout(TIMEOUT_DO_ROBO_MS));
+    if (error) throw new Error(error.message);
+    const linhas = (data ?? []) as unknown as Record<string, unknown>[];
+    if (linhas.length === 0) return out;
+    for (const r of linhas) out.push(normalizarLinhaRobo(r));
+    de += linhas.length;
+  }
+  throw new Error(`a leitura passou de ${MAX_PAGINAS} páginas`);
 }

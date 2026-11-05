@@ -5,16 +5,24 @@
  * A página não calcula nada (ADR-03): carrega os dados e o histórico e chama
  * `montarLinhasDeLeads`. Tudo o que uma coluna mostra sai da fonte única de
  * cada fato — etapa máxima dos marcos (`etapaMaxima`), tentativas do histórico
- * (`resumoContato`), próxima ação da MESMA régua da Fila (`etapaDoLead`),
- * origem da junção única (`origemDoLead`), dono de `lib/dono.ts` — para o que
- * Leads diz de uma pessoa ser o que a Fila e o Funil dizem dela.
+ * (`resumoContato`), o atendimento agora da MESMA régua da Fila (`etapaDoLead`
+ * com o robô) e de `situacaoDoRobo`, origem da junção única (`origemDoLead`),
+ * dono de `lib/dono.ts` — para o que Leads diz de uma pessoa ser o que a Fila e
+ * o Funil dizem dela.
  */
 
 import { eventosPorLead, resumoContato, type ResumoContato } from "./contato";
 import { DONO_LABEL, type Dono } from "./dono";
-import { etapaDoLead, FILA_ETAPAS, HORAS_APOS_CONVERSA, type FilaEtapa } from "./fila";
-import { formatDateTime, formatarEspera } from "./format";
-import { horasUteisEntre, somarHorasUteis } from "./horario-util";
+import {
+  etapaDoLead,
+  etapaEVoltaDoLead,
+  FILA_ETAPAS,
+  HORAS_APOS_CONVERSA,
+  reunioesPorTelefone,
+  type FilaEtapa,
+  type VoltaDaCadencia,
+} from "./fila";
+import { formatDateTime, formatDateTimeCurta, formatarEspera } from "./format";
 import { gruposDuplicados, pareceTeste, problemasDeContato } from "./identidade";
 import {
   ETAPAS_MAXIMAS,
@@ -52,11 +60,28 @@ import {
   type StatusAtendimento,
   type StatusReuniao,
 } from "./qualificacao";
+import { ROBO_ETAPA_LABEL, ROBO_INICIO } from "./robo/etapa";
+import {
+  FILTROS_DO_ROBO,
+  FILTRO_ROBO_LABEL,
+  RESGATE_MOTIVO_LABEL,
+  RESGATE_ROBO_NAO_FALOU_H,
+  RESGATE_SEM_RESPOSTA_H,
+  casaFiltroRobo,
+  leadAberto,
+  reabertoDe,
+  reabertoNoPainelDe,
+  refDoRobo,
+  situacaoDoRobo,
+  type FiltroRobo,
+  type RoboNaFila,
+  type SituacaoRobo,
+} from "./robo/situacao";
 import type { DashboardData, Lead, LeadEvent, LeadStatus } from "./types";
 
 // ---------------------------------------------------------------- vocabulário
 
-/** O que fazer com o lead AGORA, nas palavras da Fila. "—" = nada neste momento. */
+/** O que fazer com o lead AGORA, nas palavras da Fila (robô desligado). "—" = nada neste momento. */
 export type ProximaAcao = "ligar agora" | "retornar" | "confirmar reunião" | "registrar desfecho" | "—";
 
 /** Cada etapa da Fila da live, no mesmo vocabulário. */
@@ -67,12 +92,13 @@ const ACAO_DA_LIVE: Record<EtapaDaLive, ProximaAcao> = {
   encerrar: "registrar desfecho",
 };
 
-/** Cada etapa da Fila, no verbo de quem vai agir. */
+/** Cada grupo da Fila, no verbo de quem vai agir — o texto do robô DESLIGADO (o de antes). */
 export const ACAO_DA_ETAPA: Record<FilaEtapa, ProximaAcao> = {
   novo: "ligar agora",
-  "aguardando-contato": "ligar agora",
   retornar: "retornar",
-  "convite-pendente": "retornar",
+  // Os grupos do robô ligado têm texto próprio (`atendimentoNoGrupo`); aqui só por completude.
+  resgate: "ligar agora",
+  "convite-aceito": "ligar agora",
   confirmar: "confirmar reunião",
   "sem-desfecho": "registrar desfecho",
 };
@@ -96,6 +122,28 @@ export interface Sinalizadores {
   contatoInvalido: boolean;
 }
 
+/**
+ * Onde a pessoa está AGORA e quem age — a coluna "Atendimento" de Leads (§7).
+ * Montada da MESMA `etapaDoLead` da Fila (com o robô) e de `situacaoDoRobo`, sem
+ * precedência própria: o grupo da Fila vence; fora dela, o robô (em conversa,
+ * esperando resposta, encerrado), "Antes do robô" ou nada. Robô desligado: o
+ * texto de antes ("ligar agora", "retornar"…), sem prefixo.
+ */
+export interface AtendimentoAgora {
+  /** Quem age em seguida; sem dono = lead encerrado. O filtro "dono" lê daqui. */
+  dono?: Dono;
+  /** "Robô · em conversa há 2 h", "Resgate · 1 tentativa", "Comercial · confirmar 18/11"… */
+  texto: string;
+  /** O porquê (dica da célula). */
+  dica: string;
+  /** Passou do prazo do grupo da Fila (ou do turno da live). */
+  atrasado: boolean;
+  /** A ordem da coluna: o atraso relativo da Fila (maior = mais urgente; nada a fazer = −1). */
+  ordem: number;
+  /** O grupo da Fila onde a ação mora (`/fila?etapa=<g>#<g>`, ou `/fila#live`). */
+  href?: string;
+}
+
 export interface LinhaDeLead {
   id: string;
   name: string;
@@ -108,27 +156,22 @@ export interface LinhaDeLead {
   /** Data DA reunião. Agendado antes de out/2026 não tem (a coluna diz isso). */
   meetingFor?: string;
   etapaMaxima: EtapaMaxima;
-  /** Horas ÚTEIS entre a entrada e a 1ª tentativa; null = sem tentativa registrada. */
-  horasAte1oContato: number | null;
-  /** A 1ª tentativa coube na régua da Fila (1 hora útil)? null sem 1º contato. */
-  primeiroContatoNoPrazo: boolean | null;
   tentativas: number;
   diasComTentativa: number;
   falou: boolean;
   ultimaTentativa?: string;
   proximaTentativa?: string;
-  proximaAcao: ProximaAcao;
-  /** Etapa da Fila de onde a ação vem — o link abre a Fila nela. */
+  /** Onde a pessoa está agora e quem age (a coluna "Atendimento"). */
+  atendimentoAgora: AtendimentoAgora;
+  /** Grupo da Fila em que a pessoa está agora (o link da coluna abre nele). */
   etapaDaFila?: FilaEtapa;
   /** A ação vem da Fila da live (A e B, pelo prazo do turno). */
   naFilaDaLive: boolean;
-  /** A ação já estourou o prazo da etapa. */
-  acaoAtrasada: boolean;
-  /** Por que não há ação agora (quando `proximaAcao` é "—"), ou desde quando há. */
-  acaoPorque: string;
+  /** As chaves do filtro do robô em que a pessoa entra (`casaFiltroRobo`). Robô desligado: nenhuma. */
+  robo: FiltroRobo[];
+  /** Pediu ao robô para não receber mensagens (LGPD): sem botão de WhatsApp. */
+  optOut: boolean;
   origem: Origem;
-  /** Quem age em seguida; sem dono = lead encerrado. */
-  dono?: Dono;
   sinalizadores: Sinalizadores;
   // ---- ficha da live (lib/qualificacao.ts) ----
   /** A classe que vale (a do painel; sem ela, a do n8n) — `classeDoLead`. */
@@ -140,7 +183,7 @@ export interface LinhaDeLead {
   finalidade?: Finalidade;
   faixaParcela?: FaixaParcela;
   prazoCompra?: PrazoCompra;
-  /** A leitura em cinco estados do atendimento. */
+  /** A leitura em cinco estados do atendimento ("Status do atendimento"). */
   atendimento: StatusAtendimento;
   reuniao?: StatusReuniao;
   /** Clicou no link da comunidade. */
@@ -176,11 +219,20 @@ function donoDoLead(l: Lead, etapa: FilaEtapa | undefined): Dono | undefined {
   return "COM";
 }
 
-/** O motivo de não haver ação agora — para a dica do "—" não ser um zero disfarçado. */
-function porqueSemAcao(l: Lead, contato: ResumoContato): string {
+/**
+ * O motivo de não haver ação agora — para a dica do "—" não ser um zero disfarçado.
+ * `voltaARetornar`: só com o robô desligado e sem classe a pessoa volta ao grupo
+ * "Retornar hoje" (com o robô, quem a cadência escondeu tem a `volta` da Fila; a
+ * live tem a régua dela).
+ */
+function porqueSemAcao(l: Lead, contato: ResumoContato, voltaARetornar: boolean): string {
   if (isLostStatus(l.status)) return `Encerrado como “${statusLabel(l.status)}”.`;
   if (l.status === "cliente") return "Fechou — nada a fazer.";
   if (l.status === "reuniao_realizada") return "Compareceu; o desfecho (cliente ou não) é do especialista.";
+  // Já confirmada (fato da ficha ou do n8n): sai de "a confirmar" nos dois modos (11.5).
+  if (l.status === "agendado" && l.meetingFor && l.reuniaoConfirmadaEm) {
+    return `Reunião em ${formatDateTime(l.meetingFor)} — já confirmada; registre o desfecho depois dela.`;
+  }
   if (l.status === "agendado" && l.meetingFor) {
     return `Reunião em ${formatDateTime(l.meetingFor)} — confirmar ${FILA_ETAPAS.confirmar.slaHoras} h antes.`;
   }
@@ -190,7 +242,7 @@ function porqueSemAcao(l: Lead, contato: ResumoContato): string {
   // acabou): a Fila traz a pessoa de volta HORAS_APOS_CONVERSA depois da última
   // tentativa — a MESMA conta de `etapaDoLead`. Até lá existe um prazo; dizer
   // "nada pendente" esconderia o relógio que estoura amanhã.
-  if (l.status === "em_contato" && contato.ultima) {
+  if (voltaARetornar && l.status === "em_contato" && contato.ultima) {
     const volta = new Date(Date.parse(contato.ultima) + HORAS_APOS_CONVERSA * 3_600_000).toISOString();
     const conversa = contato.falou ? " — já falou com a pessoa" : "";
     return (
@@ -199,6 +251,209 @@ function porqueSemAcao(l: Lead, contato: ResumoContato): string {
     );
   }
   return "Nada pendente neste momento.";
+}
+
+const tentativasTxt = (n: number) => `${n} ${n === 1 ? "tentativa" : "tentativas"}`;
+/** "18/11" — o dia em Brasília. */
+const diaCurto = (iso: string) => formatDateTimeCurta(iso).split(" ")[0];
+/** " há 2 h" (vazio sem data). */
+const haQuanto = (desde: string | null | undefined, agora: string) =>
+  desde ? ` há ${formatarEspera(Math.max(0, Date.parse(agora) - Date.parse(desde)) / 3_600_000)}` : "";
+/** O link do grupo: `?etapa=` abre a Fila nele e a âncora rola até ele. */
+const linkDoGrupo = (g: FilaEtapa) => `/fila?etapa=${g}#${g}`;
+
+type Etapa = NonNullable<ReturnType<typeof etapaDoLead>>;
+type Live = NonNullable<ReturnType<typeof etapaDaLive>>;
+
+/** O atraso relativo da Fila (a mesma conta de `montarFila`); a live pelo prazo do turno. */
+function ordemDe(etapa: Etapa | null, live: Live | null, agora: string): number {
+  if (etapa) {
+    return etapa.nome === "confirmar" ? (etapa.atraso ?? 0) : etapa.horasUteis / FILA_ETAPAS[etapa.nome].slaHoras;
+  }
+  if (live) {
+    const passou = (Date.parse(agora) - Date.parse(live.prazo)) / 3_600_000;
+    return live.prazo < agora ? 1 + Math.max(0, passou) : 0.5;
+  }
+  return -1;
+}
+
+/** A dica de quem está num grupo da Fila: o que aconteceu e o prazo. */
+function dicaDoGrupo(etapa: Etapa): string {
+  const hint = FILA_ETAPAS[etapa.nome].hint;
+  if (etapa.nome === "resgate" && etapa.motivo) {
+    const prazo = etapa.venceEm ? ` Prazo: ${formatDateTime(etapa.venceEm)}.` : "";
+    return `Resgate — ${RESGATE_MOTIVO_LABEL[etapa.motivo]}.${prazo}`;
+  }
+  if ((etapa.nome === "confirmar" || etapa.nome === "sem-desfecho") && etapa.reuniao) {
+    return `${hint} Reunião: ${formatDateTime(etapa.reuniao)}.`;
+  }
+  return etapa.venceEm ? `${hint} Vence ${formatDateTime(etapa.venceEm)}.` : `${hint} Desde ${formatDateTime(etapa.desde)}.`;
+}
+
+/** O texto de quem está num grupo da Fila com o robô ligado. */
+function textoDoGrupo(etapa: Etapa, contato: ResumoContato): string {
+  switch (etapa.nome) {
+    case "resgate":
+      return `Resgate · ${
+        contato.tentativas > 0 ? tentativasTxt(contato.tentativas) : etapa.motivo ? RESGATE_MOTIVO_LABEL[etapa.motivo] : "retomar o contato"
+      }`;
+    case "convite-aceito":
+      return "Comercial · conferir Calendly";
+    case "confirmar":
+      return etapa.reuniao ? `Comercial · confirmar ${diaCurto(etapa.reuniao)}` : "Comercial · confirmar reunião";
+    case "sem-desfecho":
+      return "Comercial · registrar desfecho";
+    default:
+      return ACAO_DA_ETAPA[etapa.nome];
+  }
+}
+
+interface EntradaDoAtendimento {
+  l: Lead;
+  agora: string;
+  contato: ResumoContato;
+  etapa: Etapa | null;
+  /** Fora do grupo agora só pela cadência humana (`etapaEVoltaDoLead`, robô ligado). */
+  volta?: VoltaDaCadencia;
+  /** Aceitou o convite e a mesma pessoa já agendou por outro cadastro (`etapaEVoltaDoLead`). */
+  reuniaoEmOutroCadastro?: boolean;
+  live: Live | null;
+  classe: Classe | undefined;
+  /** C e X sem grupo: fora da Fila de contato (só em Leads). */
+  foraDaFila: boolean;
+  /** `situacaoDoRobo` (desligada quando o robô está desligado). */
+  s: SituacaoRobo;
+}
+
+/**
+ * A coluna "Atendimento" — sem precedência própria: o grupo da Fila (a MESMA
+ * `etapaDoLead`), depois a Fila da live (como antes), depois quem a cadência
+ * humana tirou do grupo agora (a `volta` da MESMA conta — sem link: a Fila não
+ * mostra a pessoa até lá), depois o robô.
+ */
+export function atendimentoDoLead(e: EntradaDoAtendimento): AtendimentoAgora {
+  const { l, agora, contato, etapa, volta, reuniaoEmOutroCadastro, live, classe, foraDaFila, s } = e;
+  const ordem = ordemDe(etapa, live, agora);
+  const daLive = (texto: string): AtendimentoAgora => ({
+    dono: "COM",
+    texto,
+    dica: `Fila da live (classe ${classe}): ${ETAPA_DA_LIVE[live!.etapa].label.toLowerCase()} — prazo ${formatDateTime(live!.prazo)}.`,
+    atrasado: live!.prazo < agora,
+    ordem,
+    href: "/fila#live",
+  });
+  const nada = (dica = porqueSemAcao(l, contato, !s.ligado && !classe)): AtendimentoAgora => ({
+    dono: donoDoLead(l, undefined),
+    texto: "—",
+    dica,
+    atrasado: false,
+    ordem,
+  });
+
+  // ---- robô desligado: o texto de antes, sem prefixo ----
+  if (!s.ligado) {
+    if (etapa) {
+      return {
+        dono: FILA_ETAPAS[etapa.nome].dono,
+        texto: ACAO_DA_ETAPA[etapa.nome],
+        dica: etapa.venceEm
+          ? `${FILA_ETAPAS[etapa.nome].hint} Vence ${formatDateTime(etapa.venceEm)}.`
+          : `${FILA_ETAPAS[etapa.nome].hint} Desde ${formatDateTime(etapa.desde)}.`,
+        atrasado: etapa.nome === "confirmar" ? false : ordem > 1,
+        ordem,
+        href: linkDoGrupo(etapa.nome),
+      };
+    }
+    if (live) return daLive(ACAO_DA_LIVE[live.etapa]);
+    if (foraDaFila) return nada(`Classe ${classe}: fica fora da Fila de contato (só em Leads).`);
+    return nada();
+  }
+
+  // ---- robô ligado ----
+  if (etapa) {
+    return {
+      dono: FILA_ETAPAS[etapa.nome].dono,
+      texto: textoDoGrupo(etapa, contato),
+      dica: dicaDoGrupo(etapa),
+      atrasado: etapa.nome === "confirmar" ? false : ordem > 1,
+      ordem,
+      href: linkDoGrupo(etapa.nome),
+    };
+  }
+  // A live está congelada: o texto de antes.
+  if (live) return daLive(ACAO_DA_LIVE[live.etapa]);
+
+  // A cadência humana tirou a pessoa do grupo agora: ela volta na próxima da cadência.
+  if (volta) {
+    const grupo = FILA_ETAPAS[volta.nome].label;
+    const porque =
+      volta.nome === "convite-aceito"
+        ? FILA_ETAPAS["convite-aceito"].hint
+        : `Resgate — ${volta.motivo ? RESGATE_MOTIVO_LABEL[volta.motivo] : "retomar o contato"}.`;
+    const ultima = contato.ultima
+      ? ` Última tentativa em ${formatDateTime(contato.ultima)}${contato.falou ? " — já falou com a pessoa" : ""}.`
+      : "";
+    return {
+      dono: "COM",
+      texto: `${grupo} · volta ${formatDateTimeCurta(volta.volta)}`,
+      dica: `${porque}${ultima} Volta ao grupo “${grupo}” da Fila em ${formatDateTime(volta.volta)}, pela cadência.`,
+      atrasado: false,
+      ordem: 0,
+    };
+  }
+  if (reuniaoEmOutroCadastro) {
+    return {
+      dono: "COM",
+      texto: "Reunião em outro cadastro",
+      dica: "Aceitou o convite e a mesma pessoa (mesmo telefone) já agendou por outro cadastro. Dá para mesclar em Leads → Revisar.",
+      atrasado: false,
+      ordem: 0,
+    };
+  }
+  if (foraDaFila) return nada(`Classe ${classe}: fica fora da Fila de contato (só em Leads).`);
+  if (!s.noRecorte) return nada();
+
+  if (s.antesDoRobo) {
+    // Quem tem retorno combinado nos últimos 7 dias está no Resgate (ou na `volta` acima).
+    return {
+      dono: "COM",
+      texto: "Antes do robô",
+      dica: `Entrou antes do robô (${dataBr(ROBO_INICIO)}): fica fora da Fila de contato.`,
+      atrasado: false,
+      ordem: 0,
+    };
+  }
+
+  // Com o robô de WhatsApp.
+  const robo = (texto: string, dica: string): AtendimentoAgora => ({ dono: "BOT", texto: `Robô · ${texto}`, dica, atrasado: false, ordem: 0 });
+  if (s.balde === "em-conversa") {
+    return robo(
+      `em conversa${haQuanto(s.desde, agora)}`,
+      `Conversando com o robô de WhatsApp${s.desde ? ` — última interação em ${formatDateTime(s.desde)}` : ""}.`,
+    );
+  }
+  if (s.balde === "esperando") {
+    return robo(
+      `esperando resposta${haQuanto(s.desde, agora)}`,
+      `O robô mandou a 1ª mensagem${s.desde ? ` em ${formatDateTime(s.desde)}` : ""}; sem resposta em ${RESGATE_SEM_RESPOSTA_H} h, vai para o resgate.`,
+    );
+  }
+  if (s.balde === "encerrado") {
+    return robo("encerrado", `O robô encerrou a conversa${s.desde ? ` em ${formatDateTime(s.desde)}` : ""}.`);
+  }
+  if (s.naoRecebido) {
+    return robo("não recebeu", `O robô ainda não recebeu este lead; depois de ${RESGATE_ROBO_NAO_FALOU_H} h, vai para o resgate.`);
+  }
+  if (s.semPrimeiraMsg) {
+    return robo(
+      "sem a 1ª mensagem",
+      `O robô recebeu e ainda não mandou a 1ª mensagem; depois de ${RESGATE_ROBO_NAO_FALOU_H} h, vai para o resgate.`,
+    );
+  }
+  if (s.etapa) {
+    return robo(`${ROBO_ETAPA_LABEL[s.etapa]}${haQuanto(s.desde, agora)}`, `Com o robô de WhatsApp: ${ROBO_ETAPA_LABEL[s.etapa]}.`);
+  }
+  return robo("aguardando a 1ª mensagem", "Acabou de entrar: o robô manda a 1ª mensagem em alguns minutos.");
 }
 
 /**
@@ -214,11 +469,14 @@ export function montarLinhasDeLeads(
     range?: DateRange;
     /** O turno da live: a próxima ação dos A e B sai da Fila da live (`etapaDaLive`). */
     expediente?: Expediente;
+    /** O robô (`estadoDoRoboAgora`) — o MESMO da Fila. Ausente ou desligado = o texto de antes. */
+    robo?: RoboNaFila;
   } = {},
 ): LinhaDeLead[] {
   const origem = origemDoLead(data);
   const porLead = eventosPorLead(eventos);
-  const sla = FILA_ETAPAS.novo.slaHoras;
+  const robo = opts.robo?.ligado ? opts.robo : undefined;
+  const ref = refDoRobo(robo, agora);
 
   // Duplicados olham a base INTEIRA (um duplicado pode ter entrado fora do período).
   const grupoDe = new Map<string, { principal: Lead }>();
@@ -226,22 +484,21 @@ export function montarLinhasDeLeads(
     for (const m of [g.principal, ...g.duplicados]) grupoDe.set(m.id, { principal: g.principal });
   }
 
+  // O mesmo contexto da Fila: quem já agendou por outro cadastro (a mesma pessoa).
+  const ctx = { reunioesPorTelefone: reunioesPorTelefone(data.leads) };
+
   const leads = filterLeads(data.leads, opts.range).filter((l) => !l.deletedAt);
   return leads.map((l): LinhaDeLead => {
     const proprios = porLead.get(l.id) ?? [];
     const contato = resumoContato(proprios);
-    const etapa = etapaDoLead(l, proprios, agora);
+    const { etapa, volta, reuniaoEmOutroCadastro } = etapaEVoltaDoLead(l, proprios, agora, robo, ctx);
     // Da ficha da live: A e B têm a próxima ação na Fila da live; C e X, nenhuma.
     const classe = classeDoLead(l);
     const live = classe && opts.expediente && !etapa ? etapaDaLive(l, proprios, opts.expediente) : null;
-    const foraDaFila = classe && !CLASSES_NA_FILA.includes(classe) && !etapa && (l.status === "lead" || l.status === "em_contato");
-    const horas = l.firstContactAt ? horasUteisEntre(l.createdAt, l.firstContactAt) : null;
+    const foraDaFila = Boolean(classe && !CLASSES_NA_FILA.includes(classe) && !etapa && leadAberto(l));
+    const reabertoEm = reabertoDe(proprios);
+    const s = situacaoDoRobo(l, { agora, ref, ligado: Boolean(robo), reabertoEm, reabertoNoPainel: reabertoNoPainelDe(proprios) });
     const grupo = grupoDe.get(l.id);
-    const atrasada = etapa
-      ? etapa.nome === "confirmar"
-        ? false
-        : etapa.horasUteis / FILA_ETAPAS[etapa.nome].slaHoras > 1
-      : false;
     return {
       id: l.id,
       name: l.name,
@@ -252,28 +509,17 @@ export function montarLinhasDeLeads(
       jaAgendou: everBooked(l),
       meetingFor: l.meetingFor,
       etapaMaxima: etapaMaxima(l),
-      horasAte1oContato: horas,
-      primeiroContatoNoPrazo: l.firstContactAt ? l.firstContactAt <= somarHorasUteis(l.createdAt, sla) : null,
       tentativas: contato.tentativas,
       diasComTentativa: contato.diasComTentativa,
       falou: contato.falou,
       ultimaTentativa: contato.ultima,
       proximaTentativa: contato.proxima,
-      proximaAcao: etapa ? ACAO_DA_ETAPA[etapa.nome] : live ? ACAO_DA_LIVE[live.etapa] : "—",
+      atendimentoAgora: atendimentoDoLead({ l, agora, contato, etapa, volta, reuniaoEmOutroCadastro, live, classe, foraDaFila, s }),
       etapaDaFila: etapa?.nome,
       naFilaDaLive: Boolean(live),
-      acaoAtrasada: live ? live.prazo < agora : atrasada,
-      acaoPorque: etapa
-        ? etapa.venceEm
-          ? `${FILA_ETAPAS[etapa.nome].hint} Vence ${formatDateTime(etapa.venceEm)}.`
-          : `${FILA_ETAPAS[etapa.nome].hint} Desde ${formatDateTime(etapa.desde)}.`
-        : live
-          ? `Fila da live (classe ${classe}): ${ETAPA_DA_LIVE[live.etapa].label.toLowerCase()} — prazo ${formatDateTime(live.prazo)}.`
-          : foraDaFila
-            ? `Classe ${classe}: fica fora da Fila de contato (só em Leads).`
-            : porqueSemAcao(l, contato),
+      robo: FILTROS_DO_ROBO.filter((k) => casaFiltroRobo(l, k, s, { agora, reabertoEm })),
+      optOut: Boolean(l.roboOptOutEm),
       origem: origem(l),
-      dono: donoDoLead(l, etapa?.nome),
       sinalizadores: {
         teste: pareceTeste(l),
         duplicado: Boolean(grupo),
@@ -311,7 +557,10 @@ export interface FiltroDeLeads {
   status: AbaStatus;
   campanha?: string;
   conjunto?: string;
+  /** Quem age em seguida (`atendimentoAgora.dono`). */
   dono?: Dono;
+  /** Onde a pessoa está com o robô (`casaFiltroRobo`) — as chaves dos links da barra da Fila, da B1 e do alerta. */
+  robo?: FiltroRobo;
   /** Qualquer um dos marcados basta (OU) — quem filtra por sinal quer ver o que revisar. */
   sinalizadores: SinalizadorChave[];
   /** Nome, e-mail ou telefone. */
@@ -343,7 +592,9 @@ export const FILTROS_DA_FICHA = {
   finalidade: { rotulo: "Finalidade", vocab: FINALIDADES },
   faixaParcela: { rotulo: "Parcela", vocab: FAIXAS_PARCELA },
   prazoCompra: { rotulo: "Prazo", vocab: PRAZOS_COMPRA },
-  atendimento: { rotulo: "Atendimento", vocab: STATUS_ATENDIMENTO },
+  // A chave `atendimento` (na URL e nos links já compartilhados) NÃO muda; o nome
+  // "Atendimento" agora é a coluna de quem age (`atendimentoAgora`).
+  atendimento: { rotulo: "Status do atendimento", vocab: STATUS_ATENDIMENTO },
   reuniao: { rotulo: "Reunião", vocab: { ...STATUS_REUNIAO, nunca: "Nunca agendou" } },
   comunidade: { rotulo: "Comunidade", vocab: { sim: "Clicou", nao: "Não clicou" } },
   msg1: { rotulo: "Mensagem automática", vocab: MSG1_SITUACAO_LABEL },
@@ -385,7 +636,8 @@ export function aplicarFiltroSemStatus(linhas: LinhaDeLead[], f: FiltroDeLeads):
   return linhas.filter((r) => {
     if (f.campanha && r.origem.campanha !== f.campanha) return false;
     if (f.conjunto && r.origem.conjunto !== f.conjunto) return false;
-    if (f.dono && r.dono !== f.dono) return false;
+    if (f.dono && r.atendimentoAgora.dono !== f.dono) return false;
+    if (f.robo && !r.robo.includes(f.robo)) return false;
     if (f.sinalizadores.length && !f.sinalizadores.some((s) => temSinal(r, s))) return false;
     for (const k of CHAVES_FILTRO_FICHA) {
       const v = f[k];
@@ -413,6 +665,7 @@ export function descreverFiltro(f: FiltroDeLeads, periodo: string): string {
   if (f.campanha) partes.push(`campanha: ${f.campanha}`);
   if (f.conjunto) partes.push(`conjunto: ${f.conjunto}`);
   if (f.dono) partes.push(`dono: ${DONO_LABEL[f.dono]}`);
+  if (f.robo) partes.push(`robô: ${FILTRO_ROBO_LABEL[f.robo]}`);
   if (f.sinalizadores.length) partes.push(`sinalizadores: ${f.sinalizadores.map((s) => SINALIZADOR_LABEL[s]).join(", ")}`);
   for (const k of CHAVES_FILTRO_FICHA) {
     const v = f[k];
@@ -428,7 +681,7 @@ const textoDoPedido = (v: unknown): string | undefined =>
 
 /**
  * O filtro que o navegador PEDE na exportação, conferido campo a campo: o que
- * não for um status, um dono ou um sinalizador conhecido cai para "sem filtro"
+ * não for um status, um dono, uma chave do robô ou um sinalizador conhecido cai para "sem filtro"
  * nesse campo. Quem exporta é o servidor (`/leads/exportar`), que recalcula as
  * linhas e aplica ESTE filtro — o navegador só diz o que quer, não o que levou.
  */
@@ -437,6 +690,7 @@ export function filtroDoPedido(entrada: unknown): FiltroDeLeads {
   const status =
     typeof e.status === "string" && (LEAD_STATUSES as string[]).includes(e.status) ? (e.status as LeadStatus) : "todos";
   const dono = typeof e.dono === "string" && Object.hasOwn(DONO_LABEL, e.dono) ? (e.dono as Dono) : undefined;
+  const robo = ehFiltroRobo(e.robo) ? e.robo : undefined;
   const sinalizadores = Array.isArray(e.sinalizadores)
     ? [
         ...new Set(
@@ -451,10 +705,16 @@ export function filtroDoPedido(entrada: unknown): FiltroDeLeads {
     campanha: textoDoPedido(e.campanha),
     conjunto: textoDoPedido(e.conjunto),
     dono,
+    robo,
     sinalizadores,
     busca: textoDoPedido(e.busca) ?? "",
     ...filtrosDaFichaDe(e),
   };
+}
+
+/** É uma chave do filtro do robô (`FILTROS_DO_ROBO`)? A URL e o pedido de exportação conferem aqui. */
+export function ehFiltroRobo(v: unknown): v is FiltroRobo {
+  return typeof v === "string" && (FILTROS_DO_ROBO as readonly string[]).includes(v);
 }
 
 /** Os filtros da ficha de um objeto qualquer (pedido, URL): o que não é do vocabulário cai. */
@@ -533,14 +793,14 @@ export const CSV_CABECALHO = [
   "Status",
   "Etapa máxima",
   "Entrada",
-  "Tempo até 1º contato",
   "Tentativas",
-  "Próxima ação",
+  // Onde a pessoa está e quem age (`atendimentoAgora.texto`) — substitui "Tempo
+  // até 1º contato", "Próxima ação" e "Dono" (nov/26).
+  "Atendimento",
   "Campanha",
   "Conjunto",
   "Anúncio",
   "Reunião",
-  "Dono",
   "Classe",
   "Classe (n8n diverge)",
   "Bem",
@@ -548,7 +808,7 @@ export const CSV_CABECALHO = [
   "Finalidade",
   "Parcela",
   "Prazo",
-  "Atendimento",
+  "Status do atendimento",
   "Status da reunião",
   "Comunidade",
   "Mensagem automática",
@@ -564,14 +824,12 @@ export function montarCsvDeLeads(linhas: LinhaDeLead[]): string {
       csvCell(statusLabel(r.status)),
       csvCell(ETAPA_MAXIMA_LABEL[r.etapaMaxima]),
       csvCell(formatDateTime(r.createdAt)),
-      csvCell(r.horasAte1oContato == null ? "" : formatarEspera(r.horasAte1oContato)),
       String(r.tentativas),
-      csvCell(r.proximaAcao === "—" ? "" : r.proximaAcao),
+      csvCell(r.atendimentoAgora.texto === "—" ? "" : r.atendimentoAgora.texto),
       csvCell(r.origem.campanha ?? ""),
       csvCell(r.origem.conjunto ?? ""),
       csvCell(r.origem.anuncio === "—" ? "" : r.origem.anuncio),
       csvCell(r.meetingFor ? formatDateTime(r.meetingFor) : r.jaAgendou ? "data não registrada" : ""),
-      csvCell(r.dono ? DONO_LABEL[r.dono] : ""),
       csvCell(r.classe ?? ""),
       csvCell(r.classeDiverge ? "sim" : ""),
       csvCell(r.bem ? BENS[r.bem] : ""),
