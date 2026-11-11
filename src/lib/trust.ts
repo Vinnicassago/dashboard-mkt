@@ -300,7 +300,7 @@ export function assessTrust(input: TrustInput): TrustReport {
           : "Nenhuma reunião registrada no período",
       detalhe: `Houve R$ ${Math.round(kpis.spendConversao)} de investimento em conversão e nenhuma reunião marcada. O custo por reunião fica sem denominador: "R$ 0,00" seria lido como custo baixo, quando é ausência de resultado.`,
       afeta: ["cpr"],
-      cta: { label: "Ver a jornada", href: "/funil" },
+      cta: { label: "Ver o funil", href: "/funil" },
     });
   }
 
