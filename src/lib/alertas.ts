@@ -11,7 +11,7 @@
 
 import type { Trava } from "./trust";
 import type { DataWarning, DateRange } from "./metrics";
-import { filterLeads } from "./metrics";
+import { filterLeads, lpParouNoPeriodo } from "./metrics";
 import { atribuidor } from "./atribuicao";
 import { encerrado } from "./lead-status";
 import { classeDiverge } from "./qualificacao";
@@ -98,6 +98,27 @@ export function alertasDeAtribuicao(data: DashboardData, range?: DateRange): Ale
     });
   }
   return out;
+}
+
+/**
+ * A landing page que parou de registrar (K13): há histórico dela, o período já
+ * começou (`range.from <= hoje`, C9) e termina depois do 1º dia rastreado, mas não
+ * tem nenhuma linha (`lpParouNoPeriodo`). Um período futuro, ou de antes de a
+ * landing page existir, não tem linha de nada — e isso não é o rastreio parado.
+ * Registrado pelo Início (`alertasDoInicio`) e pelo Funil (`alertasDoFunil`).
+ */
+export function alertaLpSemDado(data: DashboardData, range: DateRange | undefined, hoje: string): Alerta[] {
+  if (!range || range.from > hoje || !lpParouNoPeriodo(data, range)) return [];
+  return [
+    {
+      id: "lp-sem-dado",
+      nivel: "aviso",
+      titulo: "O rastreio da landing page parou: sem visitas registradas no período",
+      detalhe:
+        "Há histórico da landing page, mas nenhuma linha neste período: o rastreio (/api/track) pode ter parado — chave trocada, script fora da página. Visitas e envios ficam fora do funil até voltar.",
+      cta: { label: "Ver integrações", href: "/configuracoes/integracoes" },
+    },
+  ];
 }
 
 /**

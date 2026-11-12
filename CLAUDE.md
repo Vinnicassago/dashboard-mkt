@@ -90,9 +90,9 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   reunião SÓ de `kpisDoPeriodo` (`lib/kpis.ts`) — valor, amostra `n`, confiança e
   anterior, e `mostrar()`/`custoExibivel()` para exibir. O lint (`eslint.config.mjs`)
   proíbe `src/app` e `src/components` de importar `overviewKpis`, `objectiveBreakdown`,
-  `adKpis`, `filterLeads`, `countMeetings`… e `assessTrust`. Cascata, Início, Mídia, motor
+  `adKpis`, `filterLeads`, `countMeetings`… e `assessTrust`. Funil, Início, Mídia, motor
   de ações, insights e briefing da IA leem o mesmo objeto; `fase3.test.ts` confere 3
-  períodos × 2 marcas, o Início incluído. O custo por reunião pronto para a tela é UM,
+  períodos × 2 marcas, o Início e o Funil incluídos. O custo por reunião pronto para a tela é UM,
   `fatoDoCustoPorReuniao(k)` (`{exibivel, valor, n, fato}`): a razão só quando `exibivel`,
   senão o FATO "R$ X investidos em conversão · N reuniões de conversão" (decisão 4.2; reuniões
   em quarentena = "reuniões sem leitura confiável", sem contagem) — a Mídia mostra o fato
@@ -122,15 +122,15 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   `quarentena` ao `KpiCard`, que também some com delta e sparkline. NÃO troque `div()`
   para `number | null`: 75 call sites e null vazaria para o Recharts. Trava nova =
   entrada em `assessTrust`, não um `if` na página. `MIN_REUNIOES` (trust.ts) é a régua
-  ÚNICA da quarentena do custo por reunião: Início, Mídia, cascata, IA e motor de ações
+  ÚNICA da quarentena do custo por reunião: Início, Mídia, Funil, IA e motor de ações
   leem dali — nenhuma tela imprime nem decide por CPR abaixo dela. A quarentena olha o
   denominador de VERDADE (`meetingsConversao`, `leadsConversao`) e vale também linha a
   linha (conjunto, criativo).
 - **Status do lead** (`src/lib/lead-status.ts`): fonte ÚNICA de rótulo, cor, posição
   no funil e "isto encerra o lead?". UI, métricas, CSV e seed leem dali — nunca
   repita a lista de status nem hardcode um `<option>`. Os quatro motivos de perda
-  se dividem em `lossKind` **qualidade** (mídia) e **decisão** (oferta) — é a quebra
-  que o funil mostra. Status novo = entrada em `LEAD_STATUS_META` + migração em
+  se dividem em `lossKind` **qualidade** (mídia) e **decisão** (oferta) — a base do "onde
+  atacar" das perdas do Funil, que mostra uma linha por motivo com quem encerrou. Status novo = entrada em `LEAD_STATUS_META` + migração em
   `db/schema.ts` E `supabase/migrations/`, e um apelido em `normalizeLeadStatus` se
   o nome antigo puder estar gravado. **Transições** (`podeTransitar`, pura): "Agendado"
   exige `meetingFor` (data DA reunião — `meetingAt` é legado e guardava a hora do
@@ -150,7 +150,7 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   NÃO é tentativa**: os fatos dele são as colunas `robo_*` do lead (migração 0023) —
   nunca evento `tentativa`, `resumoContato`, cadência, `firstContactAt` nem a régua do
   "Sem resposta". Quem o robô recebeu (`roboVistoEm`) sai da base do "1º contato no
-  prazo" (kpis, Funil, "Onde atacar": só "< 3 tentativas" vai ao comercial). Com
+  prazo" (kpis e o "Onde atacar" das perdas do Funil: só "< 3 tentativas" vai ao comercial). Com
   opt-out (`roboOptOutEm`) o WhatsApp some de Leads, ficha e Fila e `registrarContato`
   recusa tentativa por WhatsApp.
 - **Marcos vs. status** (migração `0012`): `status` é o estado ATUAL (rótulo, cor,
@@ -182,21 +182,39 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   (`duplicadoDe`; `duplicado` marca o principal também); o título diz "nenhum no período" só
   sem lead nenhum (com lead e a lista vazia: "só teste ou duplicado") e o "último há" arredonda
   como a lista (`formatarEspera`). **Atendimento** (título =
-  `esperandoOComercial`): o funil curto da COORTE (`funilDoAtendimento`, colunas `robo_*` por
-  `situacaoDoRobo` com os insumos da Fila, nunca as views do robô) — Leads → Com o robô
-  (recorte sem taxa; o ⓘ diz quem ficou fora) → 1ª mensagem → Responderam → Convite aceito,
-  cada degrau interseção do anterior, e Agendaram em paralelo; taxa só com base ≥
-  `AMOSTRA_MINIMA`, leitura parada = "≥ N" sem taxa; robô desligado ou período todo antes dele
-  = Leads → Agendaram → Reuniões realizadas. E até 3 frases de AGORA com o número do grupo da
-  MESMA `montarFila` (e `semMensagemDoRobo`); nada linka para o bloco do robô do Funil (escopos
-  diferentes até a Fase 3). **Rodapé**: Funil, Mídia e o último post (`ultimoPostDaGrade`).
-- **Gargalo** (`lib/gargalo.ts`, puro — a resposta do Funil, `fraseDoGargalo`): transições
-  com dono, taxa, régua e n; gargalo = menor razão taxa ÷ régua entre as com
-  `AMOSTRA_GARGALO` (10) entradas; a régua é a meta vigente ou, sem meta, a média das 8
-  semanas anteriores — E O RÓTULO DIZ QUAL. Impacto = entradas × (régua − real) × produto
-  das taxas seguintes até "agendada" (régua quando a real é 0), inteiro e só com amostra. A
-  landing page só entra com linha NO período (`temLpNoPeriodo`): histórico sem dado é
-  rastreio que parou (alerta `lp-sem-dado`), não "0%".
+  `esperandoOComercial`): o funil curto é um RECORTE do funil do processo do Funil
+  (`funilDoAtendimento` = `recortarProcesso(funilDoProcesso(…), RECORTE_DO_INICIO)`,
+  `lib/funil-processo.ts`: os mesmos números e o mesmo texto do % — `textoDaTaxa` — nos degraus
+  que os dois mostram) — Leads → Com o robô (recorte sem taxa; o ⓘ diz quem ficou fora) → 1ª
+  mensagem → Responderam → Convite aceito, e Agendaram em paralelo; robô desligado ou período
+  todo antes dele = Leads → Agendaram → Reuniões realizadas (sobre Agendaram). `ondeTrava` vai
+  para a IA (`atendimento.ondeTrava`, sempre um objeto com `situacao`), SEM marca nem palavra
+  na tela; a frase da trava mora no Funil. E até 3 frases de AGORA com o número do grupo da
+  MESMA `montarFila` (e `semMensagemDoRobo`). **Rodapé**: Funil, Mídia e o último post
+  (`ultimoPostDaGrade`).
+- **Onde trava** (Fase 3, nov/26, `lib/onde-trava.ts`, puro): UMA função — a manchete do
+  Funil e `inicio.atendimento.ondeTrava` da IA (`situacao`: trava · abaixo-da-amostra ·
+  sem-leads · leitura-parada; nunca um `null` só). A maior perda em PESSOAS, sem meta nem
+  média, saída das `juntas` de `funilDoProcesso` (a MESMA passada pela coorte), sobre a coorte
+  SEM teste nem cópia de duplicado (`testesEDuplicados`, a régua das perdas), sem a live e, com
+  o robô no período, sem os de antes de 29/10 fora da Fila (sem processo, D5; contados no ⓘ):
+  travados = entraram − passaram − chegaram a agendar NESTE episódio (outro caminho ou
+  desistindo depois; o reaberto que agenda de novo não regrava o marco — vale a mudança de
+  status depois do reaberto) − ainda no prazo da etapa (as 2 h e 24 h do robô por
+  `situacaoDoRobo`; 48 h sem atividade na conversa, pausado incluído — e quem respondeu sem
+  a fala do robô registrada, que nunca entra no Resgate; as 2 h úteis do convite aceito; as 24 h
+  úteis do sem desfecho; 30 dias de negociação; sem o robô ou fora dele, o prazo da Fila). Todo
+  lead sem reunião (menos a live e esses) é julgado numa junta só: com o robô, quem está fora
+  dele cai em `fora-agendou`; o desistente trava em `realizou`. "Encerrado" = status de perda
+  (nas três juntas do robô, também `encerramentoDoRobo`). Concorre com `AMOSTRA_MINIMA`
+  travados; leitura do robô parada tira as três juntas do robô e põe "⚠" na manchete; vence o
+  maior, empate = a mais funda. O chip é o dono da ETAPA; o link vai ao grupo da Fila com mais
+  travados AGORA (o item da PESSOA: a Fila deduplica por telefone, e o principal herda o
+  item da cópia) e não leva número (a Fila é o agora; a perda é a coorte). `gargalo.ts` (meta ÷
+  média de 8 semanas) saiu. A landing page só conta com linha NO período
+  (`temLpNoPeriodo`/`lpParouNoPeriodo`, em `metrics.ts`): histórico sem dado é rastreio que
+  parou (alerta `lp-sem-dado`, `alertaLpSemDado`, no Início e no Funil; a linha Leads fica sem
+  %), não "0%".
 - **Motor v2** (`lib/motor.ts`, puro) — DORMENTE até a Mídia (Fase 4): sem tela, sem IA, sem
   escritor (`acoes-actions.ts` saiu), com todos os testes; o que segue vale quando ele voltar
   a ter tela. Regras C1–C5, M1–M5, L1–L2, D1–D2 do relatório (+ M6 escalar vencedor, M7 ritmo
@@ -220,23 +238,32 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
 - **Resumo da semana** (H7): `/api/resumo-semanal` (CRON_SECRET, cron-job.org segunda 08:00)
   lê a semana fechada anterior (`semanaAnteriorFechada`, `carregarBussola` com `semModoLive`)
   e grava em `resumos_semanais`. A IA lê o Início (`inicioParaIA`: cartões como a tela os
-  escreve, leads por dia, atendimento — foto do momento da geração, não da semana —, último
+  escreve, leads por dia, atendimento, com `ondeTrava` (só contagens e a `situacao`) — foto do
+  momento da geração, não da semana —, último
   post; sem a lista de pessoas) e os kpis do carregador (`pago`, `regua`, `cprEmQuarentena`);
   sem `bussola` nem ações do motor (`alertasJaDetectados` = só as de conteúdo). O cartão só
   aparece com resumo; sem ele, o botão "Gerar o resumo da semana" para `data:write` com IA, ou
   nada. Nunca gere no render — custa.
-- **Cascata** (`src/lib/cascata.ts`, no Funil): o funil ponta a ponta atravessando os
-  quatro sistemas (Meta → LP → painel → robô → atendimento). Regras: **duas âncoras** (acima
-  de Leads mede sobre impressões; de Leads para baixo, Leads = 100%) — com uma só,
-  oito linhas imprimem "0,0%", que é mentira por arredondamento; **selo de fonte** em
-  todo degrau e junta tracejada onde o dado troca de sistema; **cliques NÃO é degrau**
-  (`inline_link_clicks || clicks` soma duas definições incompatíveis); quando duas
-  fontes discordam do mesmo fato, `valor: null` e a divergência vira nota — nunca
-  escolha um lado em silêncio. A resposta do Funil é o gargalo (`fraseDoGargalo`) e nenhuma
-  junta ganha cor (ninguém passa `vazamentoKey`); `maiorVazamento()`/`resumirCascata()` estão
-  DORMENTES (só `fase1-numeros.test.ts` os lê). Abaixo de `AMOSTRA_MINIMA` a cascata não
-  imprime taxa nem custo unitário. Sem robô,
-  cai no funil do painel e diz isso.
+- **Funil do processo** (`lib/funil-processo.ts`, puro, no Funil e no Início): a COORTE do
+  período (`filterLeads`, com teste e duplicado, = `kpis.leads`), lida SÓ do lead — colunas
+  `robo_*` por `situacaoDoRobo` e os marcos —, nunca do banco do robô. Leads → Com o robô
+  (recorte: fora os de antes de 29/10, sem telefone, live, recentes, depois da leitura,
+  reabertos no painel) → 1ª mensagem → Responderam → Convite aceito (interseções) · Agendaram
+  (`isBooked` = `kpis.agendaram`; com o robô, ramo paralelo sobre Leads) — Confirmaram (linha
+  lateral sobre Agendaram: confirmação REGISTRADA alguma vez, `reuniaoConfirmadaEm` ou evento
+  `ficha`; "≥ N" sem % com reunião de antes de 04/11, quando o registro começou) — Reuniões
+  realizadas (`isAttended`, sobre Agendaram = `showRate`) → Vendas (`isClient`). Taxa só com
+  base ≥ `AMOSTRA_MINIMA` e nunca acima da base (sem taxa, e o ⓘ diz por quê); leitura parada
+  = "≥ N" sem taxa no trecho do robô; robô desligado ou período todo antes dele = o funil do
+  painel, e o ⓘ diz isso. **Cascata** (`lib/cascata.ts`) é só o topo — impressões de
+  conversão → visitas na LP → Leads —, com **duas âncoras** (acima de Leads, sobre impressões;
+  de Leads para baixo, Leads = 100%; com uma só, oito linhas imprimiam "0,0%"), **selo de
+  fonte** em toda linha e junta tracejada onde o dado troca de sistema; **cliques NÃO é
+  degrau** (`inline_link_clicks || clicks` soma duas definições incompatíveis); quando duas
+  fontes discordam do mesmo fato, `valor: null` e a divergência vira nota — nunca escolha um
+  lado em silêncio (vale para o Calendly, quando ele for a 2ª fonte de reuniões). Abaixo de
+  `AMOSTRA_MINIMA` a cascata não imprime taxa nem custo unitário próprio; o custo da linha
+  Leads é o CPL de `kpisDoPeriodo`, com a régua do cartão do Início (`custoExibivel`).
 - **Fila de contato** (`src/lib/fila.ts`, puro): para quem ligar agora, por GRUPO na
   ordem fixa (`gruposDaFila`) e, dentro do grupo, por **atraso relativo** (`horas ÷ SLA`):
   6h num SLA de 2h é mais urgente que 3 dias num de 48h. Fonte ÚNICA dos prazos, rótulos
@@ -301,7 +328,15 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   barra e do alerta) e `semMensagemDoRobo` (o número do alerta, da frase do Início e de
   Integrações — e da B1 do motor). O estado (ligado, `lidoAte`, confiável, sync) sai SÓ de
   `estadoDoRoboAgora` — Fila, Início, Leads, exportação, ficha, layout, Integrações e o
-  aviso. Exceção até a Fase 3: o Funil ainda lê as views do robô no render (só contagens).
+  aviso. Nenhuma tela lê o banco do robô, o Funil incluído: `robo/client.ts` só tem o sync e
+  a configuração, e só `robo/sync.ts`, `robo/estado.ts` e a página de Integrações o importam
+  (`robo-client.test.ts` trava isso no `src` inteiro); as views `vw_robo_*` ficam no banco do
+  robô, sem leitor. Fim da conversa pelo robô = `encerramentoDoRobo` (nunca com aceite no episódio — nem
+  com opt-out depois: a pessoa está no "Aceitou o convite"; opt-out; esfriou depois
+  do convite — o robô não registra recusa — ou esfriou na conversa, só com resposta no
+  episódio; pausado não é fim; as datas são do episódio) — "Por que perdemos" (só para quem
+  está no trecho do robô) e as juntas do robô leem dali; a barra "Com o robô agora" segue com
+  o balde de `situacaoDoRobo` (o agora, pausado incluído).
 - **Texto na tela** (régua de nov/26): o título dá a resposta ("Resgate · 5 · 2 fora do
   prazo"); nada de descrição embaixo do título — a explicação vai para o ⓘ
   (`components/ui/info.tsx`); ação em até 12 palavras; uma linha por pessoa; instrução só
@@ -310,7 +345,10 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   `fase2-inicio-tela.test.ts` conta, com as datas que o gráfico desenha no navegador; o ⓘ
   fechado não). As barras do Início desenham no máximo 4 datas, sem o eixo Y e sem o
   "pausado" escrito (`BarrasDiarias` `semEixoY`/`semRotuloNasFaixas`/`maxDatasNoEixo`). Demais
-  páginas ≤ 200, Fila em até 3 telas de rolagem.
+  páginas ≤ 200 — o Funil é medido em `fase3-funil-tela.test.ts` (manchete ≤ 12, cada linha de
+  perda ≤ 12, nenhuma frase > 25) —, Fila em até 3 telas de rolagem. O `<summary>` de um bloco
+  recolhido é rótulo de navegação, não título de resposta (sem número). Todo `Info` leva
+  `rotulo` próprio ("Sobre …").
 - **Navegação** (`components/layout/nav-items.ts`): 7 páginas nomeadas pela PERGUNTA
   que respondem ou pelo DONO do trabalho — Início (`/`, ícone casa), Funil (`/funil`), Mídia
   (`/midia`), Conteúdo, Fila de contato, Leads (`/leads`), Configurações
@@ -328,19 +366,26 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   vai EXPLÍCITA (`range=all`) para destino cujo padrão é outro — o Início — via
   `comPeriodoDaTela` (senão Funil → Início abria em 7 dias). Rota
   antiga (`/jornada`, `/dinheiro`, `/pessoas`, `/config`…) = redirect em `next.config.ts`,
-  nunca 404 — exceção: `/live` redireciona na própria página (`destinoDaLive`), porque as
+  nunca 404; `/funil?vista=` antigo é ignorado (o Funil é só coorte) — exceção: `/live` redireciona na própria página (`destinoDaLive`), porque as
   datas da régua estão no store.
 - **Telas de diagnóstico** (Fase 6): cada página extrai sua visão de UMA função pura
   (`lib/funil.ts`, `lib/midia.ts`, `lib/leads-vista.ts`, `lib/conteudo.ts`,
-  `lib/configuracoes.ts`) — a página só carrega e renderiza. **Funil**: dois funis com
-  escopo próprio (conversão = a cascata, só campanhas de conversão; descoberta = alcance →
-  visitas ao perfil → seguidores), alternância `?vista=coorte` (período = reuniões pela
-  data do agendamento; coorte = pela entrada), coortes com TODA semana (0 lead = "campanha
-  pausada" ou "sem dados" pela cobertura), perdas confiáveis (sem teste, sem duplicado,
-  `everBooked`; "Onde atacar" é regra explícita: "Sem resposta" → comercial com < 3
-  tentativas ou 1ª fora do prazo, → mídia/formulário só com 3+ no prazo), selo de
-  confiança do registro (lote/atraso, constantes do motor), "Notas de medição" recolhidas
-  — "Onde não agir" não existe mais. **Mídia**: resumo primeiro (CPL e custo por reunião =
+  `lib/configuracoes.ts`) — a página só carrega e renderiza. **Funil** (Fase 3, nov/26;
+  `montarFunilDaTela` + `carregarFunil`): só COORTE e só conversão. De cima para baixo: a
+  manchete (`ondeTrava`, com o dono da etapa e o link da Fila); o funil (o topo da cascata +
+  o funil do processo, uma linha por degrau com n, %, selo e barra; a receita na linha de
+  Vendas e, no ⓘ dela, CAC, ROAS e ticket com 3+ vendas e o "≥"/"≤" da verba, valor por
+  reunião com 3+ agendaram); "Por que perdemos" (título "Perdemos N sem reunião"; uma linha
+  por motivo: n · motivo · quem encerrou — robô ou comercial, vale o primeiro — → onde
+  atacar, pela regra explícita: "Sem resposta" → comercial com < 3 tentativas ou 1ª fora do
+  prazo, → mídia/formulário só com 3+ no prazo; esfriou depois do convite → não dá para
+  dizer; esfriou na conversa → roteiro do robô; não quer mensagens → mídia/formulário; sem
+  teste, sem duplicado, sem `everBooked`); recolhidos, semana a semana e a coorte por semana
+  (TODA semana: 0 lead = "campanha pausada" ou "sem dados" pela cobertura; taxa com a régua
+  `AMOSTRA_MINIMA`). Com 0 lead, só a manchete e os recolhidos. Sem Δ, sem meta, sem vista
+  por período, sem descoberta (seguidores estão em Conteúdo), sem notas de medição (cliques e
+  Pixel estão no ⓘ do card). Confiança do registro (lote/atraso, constantes do motor) =
+  alerta `registro-suspeito` no ⚠ e uma frase no ⓘ das perdas. **Mídia**: resumo primeiro (CPL e custo por reunião =
   os do Início),
   tendência semanal, conjuntos por `adsetId` em blocos conversão × descoberta com colunas
   "Leads (painel)" e "Conversões Meta (Pixel)" (nunca "Leads" sozinho com Pixel), criativos
@@ -371,7 +416,7 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   Seguidores com a série
   parcial explicada (100+ seguidores) e UMA regra do líquido, `seguidoresDoPeriodo`
   (metrics.ts: último total conhecido, o 1º dia contra a véspera) — Início da awareness,
-  Funil, Conteúdo, IA e metas leem dali; registros manuais na vista Registros. As métricas
+  Conteúdo, IA e metas leem dali; registros manuais na vista Registros. As métricas
   da conta estão no MESMO dicionário (`lib/dicionario.ts`). **Configurações**: uma rota
   por vista, loader compartilhado (`_carregar.ts`), `lib/configuracoes.ts` é a fonte de
   qual vista tem qual âncora (`linkDeConfiguracoes`) e das pendências; guardas de papel no
@@ -433,7 +478,9 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   página registra com `<RegistrarAlertas>` — no Início, `alertasDoInicio` (travas, saúde do
   dado — só ele a registra —, atribuição, `lp-sem-dado` só em período já começado); no modo
   live, `alertasDaLive` (sem as travas de CPL/CPR, que a tela não mostra; com
-  `live-sem-campanhas`, que era faixa no painel). Trava `config` (meta, orçamento em branco)
+  `live-sem-campanhas`, que era faixa no painel); no Funil, `alertasDoFunil` (só as travas que
+  afetam verba ou CPL — sem as do custo por reunião nem a atribuição, que a tela não mostra —,
+  `lp-sem-dado` e `registro-suspeito`). Trava `config` (meta, orçamento em branco)
   NÃO entra no ⚠ (`alertasDeConfianca`): mora em Configurações → Pendências (`assessTrust` não
   muda). Não crie faixa de aviso no meio da tela — o que desqualifica um número fica colado
   nele ("—", "≥", "≤") e a explicação vai para o painel.

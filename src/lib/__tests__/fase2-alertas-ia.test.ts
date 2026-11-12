@@ -322,6 +322,17 @@ describe("C12: o briefing lê o Início (sem placar, sem o motor, sem pessoas)",
     ),
     // Inscrito da live.
     pessoa("6", "Teodora Liberato", { classe: "A", bem: "imovel" }),
+    // Três saudados há mais de 24 h, sem resposta (Fase 3): a maior perda em pessoas
+    // ("onde trava") existe — a busca de LGPD confere o `ondeTrava` com gente dentro.
+    ...["7", "8", "9"].map((id, i) =>
+      pessoa(id, ["Gervásia Montalvão", "Florisbela Quaresma", "Anacleta Vasconcelos"][i], {
+        createdAt: brt("2026-11-03", "09:00"),
+        roboVistoEm: brt("2026-11-03", "09:05"),
+        roboRecebidoEm: brt("2026-11-03", "09:00"),
+        roboSaudacaoEm: brt("2026-11-03", "09:01"),
+        roboEtapa: "nao_respondeu",
+      }),
+    ),
   ];
   const data = base({
     adDaily: [ad("2026-10-30", "100001", 450), ad("2026-10-31", "100001", 450)],
@@ -373,6 +384,10 @@ describe("C12: o briefing lê o Início (sem placar, sem o motor, sem pessoas)",
     // A Fila tem o 1º nome no resgate — conferir que o fixture o produz, para o teste valer.
     const fila = montarFila({ nowIso: AGORA, leads: data.leads, eventos, robo: ROBO });
     expect(fila.entradasDeResgate.map((r) => r.primeiroNome)).toContain("Quitéria");
+    // A trava existe (Fase 3, K8): a checagem abaixo nunca passa com o `ondeTrava` vazio.
+    const trava = briefing.inicio!.atendimento.ondeTrava;
+    expect(trava.situacao).toBe("trava");
+    expect(trava.pessoasParadas).toBeGreaterThanOrEqual(3);
     const json = JSON.stringify(briefing);
     for (const l of data.leads) {
       expect(json.includes(l.name), l.name).toBe(false);

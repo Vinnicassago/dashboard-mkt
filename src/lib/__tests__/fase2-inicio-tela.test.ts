@@ -17,24 +17,35 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { createElement, Fragment, isValidElement, type ReactElement, type ReactNode } from "react";
+import { createElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { buildSeedData, buildSeedLeadEvents } from "../data/seed";
 import { alertasDaLive, alertasDoInicio, montarModoLive } from "../bussola";
 import { chavesDaLive } from "../atalho-live";
-import { montarFilaDaLive } from "../fila-live";
 import { montarInicio, type EntradaInicio, type Inicio } from "../inicio";
 import { kpisDoPeriodo } from "../kpis";
 import { LIVE_PADRAO, type CampanhaDaLive } from "../live";
-import type { DateRange } from "../metrics";
 import { pageRange } from "../page-range";
-import type { RoboAgora } from "../robo/situacao";
 import { EXPEDIENTE_PADRAO } from "../turno";
-import type { Intervalo } from "../cobertura";
-import type { AdDaily, DashboardData, Lead, LeadEvent, ResumoSemanal } from "../types";
+import type { DashboardData, Lead, ResumoSemanal } from "../types";
 import { datasNoEixo } from "@/components/charts/eixo";
 import { DATAS_NO_EIXO_DO_INICIO } from "@/components/inicio/barras-do-inicio";
+import { componentesClient, conferirLgpd, contatosDe, inspecionar, palavras, trechos } from "@/test/tela";
+import {
+  ADS_DA_ANTERIOR,
+  ADS_DA_SEMANA,
+  LEADS_DA_ANTERIOR,
+  LEADS_DO_ROBO,
+  PARADO,
+  ROBO,
+  SEMANA,
+  ad,
+  base,
+  brt,
+  entradaDoRobo,
+  entradaDoSeed,
+  lead,
+} from "@/test/fixtures-robo";
 
 // ---------------------------------------------------------------- dublês da página
 
@@ -94,185 +105,8 @@ h.Redirecionou = Redirecionou;
 
 // ---------------------------------------------------------------- fixtures
 
-const brt = (dia: string, hhmm: string) => new Date(`${dia}T${hhmm}:00-03:00`).toISOString();
-
-function base(over: Partial<DashboardData> = {}): DashboardData {
-  return {
-    campaign: { id: "c", brand: "consorcio", name: "C", objective: "L", status: "ativa", startDate: "2026-09-01", budgetTotal: 0 },
-    igAccountDaily: [],
-    igPosts: [],
-    adDaily: [],
-    creatives: [],
-    lpDaily: [],
-    leads: [],
-    goals: [],
-    metas: [],
-    updatedAt: "2026-10-08T12:00:00.000Z",
-    ...over,
-  };
-}
-
-const ad = (date: string, adId: string, spend: number, extra: Partial<AdDaily> = {}): AdDaily => ({
-  brand: "consorcio",
-  date,
-  campaign: "Campanha",
-  adset: "Conjunto",
-  adId,
-  objective: "OUTCOME_LEADS",
-  spend,
-  impressions: 1000,
-  reach: 800,
-  frequency: 1.25,
-  clicks: 10,
-  leads: 1,
-  ...extra,
-});
-
-function porMarca(d: DashboardData, brand: string): DashboardData {
-  return {
-    ...d,
-    campaign: { ...d.campaign, brand },
-    igAccountDaily: d.igAccountDaily.filter((r) => r.brand === brand),
-    igPosts: d.igPosts.filter((r) => r.brand === brand),
-    adDaily: d.adDaily.filter((r) => r.brand === brand),
-    creatives: d.creatives.filter((r) => r.brand === brand),
-    lpDaily: d.lpDaily.filter((r) => r.brand === brand),
-    leads: d.leads.filter((r) => r.brand === brand && !r.deletedAt),
-    goals: d.goals.filter((r) => r.brand === brand),
-  };
-}
-
-// O robô de fixture: as colunas `robo_*` que o sync grava no lead (nunca o banco do robô).
-const HOJE = "2026-11-04";
-const ONTEM = "2026-11-03";
-const AGORA = brt(HOJE, "15:00");
-const LIDO = brt(HOJE, "14:55");
-const ROBO: RoboAgora = { ligado: true, lidoAte: LIDO, confiavel: true, sync: { ultimoOk: LIDO, falha: null } };
-const PARADO: RoboAgora = {
-  ligado: true,
-  lidoAte: brt(HOJE, "12:00"),
-  confiavel: false,
-  sync: { ultimoOk: brt(HOJE, "12:00"), falha: { desde: brt(HOJE, "12:30"), erro: "timeout" } },
-};
-const SEMANA: DateRange = { from: "2026-10-29", to: HOJE };
-
-let seq = 0;
-const lead = (id: string, over: Partial<Lead> = {}): Lead => ({
-  id,
-  brand: "consorcio",
-  createdAt: brt(HOJE, "09:00"),
-  name: `Pessoa ${id}`,
-  email: `pessoa.${id}@exemplo.com.br`,
-  phone: `55119888${String(++seq).padStart(5, "0")}`,
-  status: "lead",
-  utmSource: "meta",
-  utmContent: "Anúncio com um nome bem comprido para a coluna de origem truncar",
-  ...over,
-});
-const saudado = (dia: string, over: Partial<Lead> = {}): Partial<Lead> => ({
-  createdAt: brt(dia, "09:00"),
-  roboVistoEm: brt(dia, "09:05"),
-  roboRecebidoEm: brt(dia, "09:00"),
-  roboSaudacaoEm: brt(dia, "09:00"),
-  roboEtapa: "nao_respondeu",
-  ...over,
-});
-
-const LEADS_DO_ROBO: Lead[] = [
-  lead("conversa", {
-    ...saudado(HOJE),
-    roboRespondeuEm: brt(HOJE, "09:30"),
-    roboUltimaMsgClienteEm: brt(HOJE, "12:00"),
-    roboUltimaInteracaoEm: brt(HOJE, "12:00"),
-    roboEtapa: "em_conversa",
-  }),
-  lead("esperando", saudado(HOJE)),
-  lead("semresposta", saudado(ONTEM)),
-  lead("aceitou", {
-    ...saudado(ONTEM),
-    roboRespondeuEm: brt(ONTEM, "09:10"),
-    roboUltimaMsgClienteEm: brt(HOJE, "13:00"),
-    roboUltimaInteracaoEm: brt(HOJE, "13:00"),
-    roboConviteEm: brt(HOJE, "12:00"),
-    roboAceitouEm: brt(HOJE, "13:00"),
-    roboEtapa: "transferido",
-  }),
-  lead("naofalou", { createdAt: brt(HOJE, "11:00") }),
-  lead("naorecebeu", { createdAt: brt(HOJE, "14:30") }),
-  lead("novinho", { createdAt: brt(HOJE, "14:50") }),
-  lead("semtel", { createdAt: brt(HOJE, "10:00"), phone: undefined }),
-  lead("liveA", { createdAt: brt(HOJE, "10:00"), classe: "A", bem: "imovel" }),
-  lead("liveB", { createdAt: brt(ONTEM, "16:00"), classe: "B", bem: "imovel" }),
-  lead("agendado", {
-    ...saudado("2026-11-01"),
-    roboRespondeuEm: brt("2026-11-01", "09:10"),
-    roboAceitouEm: brt("2026-11-01", "10:00"),
-    roboEtapa: "transferido",
-    status: "agendado",
-    bookedAt: brt("2026-11-02", "10:00"),
-    meetingFor: brt("2026-11-05", "10:00"),
-  }),
-  lead("teste", { createdAt: brt(HOJE, "13:00"), name: "teste teste", email: "teste@teste.com" }),
-  lead("antes", { createdAt: brt("2026-10-20", "10:00") }),
-];
-
-const ADS_DA_SEMANA = [ad("2026-10-30", "100001", 80), ad("2026-11-01", "100001", 100), ad("2026-11-02", "100001", 100), ad(ONTEM, "100001", 100), ad(HOJE, "100001", 50)];
-
-/**
- * A semana ANTERIOR (22–28/10) com verba, leads e uma reunião: todos os cartões
- * ganham a seta — o pior caso do orçamento de palavras, junto com o fato do custo.
- */
-const ADS_DA_ANTERIOR = ["2026-10-22", "2026-10-24", "2026-10-26", "2026-10-28"].map((d) => ad(d, "100001", 90));
-const LEADS_DA_ANTERIOR: Lead[] = [
-  lead("ant1", { createdAt: brt("2026-10-23", "10:00") }),
-  lead("ant2", { createdAt: brt("2026-10-24", "10:00") }),
-  lead("ant3", { createdAt: brt("2026-10-25", "10:00"), status: "agendado", bookedAt: brt("2026-10-26", "10:00"), meetingFor: brt("2026-10-30", "10:00") }),
-];
-
-/** `robo: null` = o robô desligado (sem credencial, desativado ou outra marca). */
-function entradaDoRobo(
-  robo: RoboAgora | null = ROBO,
-  range: DateRange | null = SEMANA,
-  over: { leads?: Lead[]; adDaily?: AdDaily[] } = {},
-): EntradaInicio {
-  const data = base({ leads: over.leads ?? LEADS_DO_ROBO, adDaily: over.adDaily ?? ADS_DA_SEMANA });
-  const eventos: LeadEvent[] = [];
-  return {
-    data,
-    range: range ?? undefined,
-    rangeKey: range ? `${range.from}..${range.to}` : "all",
-    kpis: kpisDoPeriodo(data, range ?? undefined, { hoje: HOJE, agora: AGORA, comparar: true }),
-    eventos,
-    robo: robo ?? undefined,
-    cobertura: [{ from: "2026-10-01", to: ONTEM }],
-    expediente: EXPEDIENTE_PADRAO,
-    filaLive: montarFilaDaLive(data.leads, eventos, AGORA, EXPEDIENTE_PADRAO),
-    agora: AGORA,
-    hoje: HOJE,
-  };
-}
-
-const SEED = porMarca(buildSeedData(), "consorcio");
-const SEED_EVENTOS = buildSeedLeadEvents(SEED.leads);
-const SEED_HOJE = "2026-07-23";
-const SEED_AGORA = brt(SEED_HOJE, "15:00");
-const SEED_COBERTURA: Intervalo[] = [{ from: "2026-07-09", to: "2026-07-21" }];
-
-function entradaDoSeed(chave: string): EntradaInicio {
-  const { range, rangeKey } = pageRange(SEED, chave, SEED_HOJE);
-  return {
-    data: SEED,
-    range,
-    rangeKey,
-    kpis: kpisDoPeriodo(SEED, range, { cobertura: SEED_COBERTURA, hoje: SEED_HOJE, agora: SEED_AGORA, comparar: true }),
-    eventos: SEED_EVENTOS,
-    cobertura: SEED_COBERTURA,
-    expediente: EXPEDIENTE_PADRAO,
-    filaLive: montarFilaDaLive(SEED.leads, SEED_EVENTOS, SEED_AGORA, EXPEDIENTE_PADRAO),
-    agora: SEED_AGORA,
-    hoje: SEED_HOJE,
-  };
-}
+// O robô de fixture e o seed estão em `src/test/fixtures-robo.ts`; os helpers da
+// fronteira server → client, da LGPD e das palavras, em `src/test/tela.ts` (§8.0 da Fase 3).
 
 const RESUMO: ResumoSemanal = {
   id: "r1",
@@ -352,208 +186,7 @@ function carregadoLive(cfg: CampanhaDaLive, chave: string, hoje: string, resumos
   };
 }
 
-/** Telefones (crus e só dígitos) e e-mails de TODOS os leads da base. */
-function contatosDe(leads: readonly Lead[]): string[] {
-  const out = new Set<string>();
-  for (const l of leads) {
-    if (l.email) out.add(l.email.toLowerCase());
-    if (l.phone) {
-      out.add(l.phone);
-      const d = l.phone.replace(/\D/g, "");
-      if (d.length >= 8) out.add(d);
-    }
-  }
-  return [...out];
-}
-
-// ---------------------------------------------------------------- a fronteira server → client
-
-/**
- * Os componentes client que a tela pode usar: todo export de um arquivo "use
- * client" das pastas do Início, do painel da live, dos cartões, da ui e dos
- * gráficos, mais os dublês (`next/link`, `RegistrarAlertas`). Um client que
- * faltasse aqui seria CHAMADO como server pelo inspetor e quebraria no 1º hook.
- */
-async function componentesClient(): Promise<Map<unknown, string>> {
-  const raiz = path.resolve(__dirname, "../../components");
-  const out = new Map<unknown, string>();
-  for (const dir of ["inicio", "live", "kpi", "ui", "charts"]) {
-    for (const arq of fs.readdirSync(path.join(raiz, dir))) {
-      if (!arq.endsWith(".tsx")) continue;
-      const fonte = fs.readFileSync(path.join(raiz, dir, arq), "utf8");
-      if (!/^\s*["']use client["']/.test(fonte)) continue;
-      const mod = (await import(path.join(raiz, dir, arq))) as Record<string, unknown>;
-      for (const [nome, v] of Object.entries(mod)) if (typeof v === "function") out.set(v, `${dir}/${arq}:${nome}`);
-    }
-  }
-  out.set((await import("next/link")).default, "next/link");
-  out.set((await import("@/components/layout/alertas")).RegistrarAlertas, "layout/alertas:RegistrarAlertas");
-  return out;
-}
-
-interface Fronteira {
-  /** A árvore como o servidor a manda: tags, props e, para cada client, as props serializadas. */
-  arvore: unknown;
-  /** Cada componente client encontrado, com as props que ele recebe (sem `children`). */
-  clients: { nome: string; props: Record<string, unknown> }[];
-  /** Funções em props (Server Components não passam função para Client Components). */
-  funcoes: string[];
-}
-
-const FORWARD_REF = Symbol.for("react.forward_ref");
-const MEMO = Symbol.for("react.memo");
-
-/**
- * Expande os server components (chamando-os) até chegar em tags e em componentes
- * client — que NÃO são chamados: as props deles são o que cruza a fronteira.
- */
-async function inspecionar(raizDaTela: ReactNode, clientes: Map<unknown, string>): Promise<Fronteira> {
-  const clients: Fronteira["clients"] = [];
-  const funcoes: string[] = [];
-
-  async function valor(v: unknown, onde: string): Promise<unknown> {
-    if (v == null) return null;
-    if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") return v;
-    if (typeof v === "function") {
-      funcoes.push(onde);
-      return "[função]";
-    }
-    if (isValidElement(v)) return no(v);
-    if (Array.isArray(v)) return Promise.all(v.map((x, i) => valor(x, `${onde}[${i}]`)));
-    if (v instanceof Date) return v.toISOString();
-    if (typeof v === "object") {
-      const out: Record<string, unknown> = {};
-      for (const [k, x] of Object.entries(v as Record<string, unknown>)) out[k] = await valor(x, `${onde}.${k}`);
-      return out;
-    }
-    return String(v);
-  }
-
-  async function no(n: ReactNode): Promise<unknown> {
-    if (n == null || typeof n === "boolean") return null;
-    if (typeof n === "string" || typeof n === "number") return n;
-    if (Array.isArray(n)) return Promise.all(n.map(no));
-    if (!isValidElement(n)) return valor(n, "?");
-    const el = n as ReactElement<Record<string, unknown>>;
-    const { children, ...props } = el.props;
-    if (el.type === Fragment) return no(children as ReactNode);
-    if (typeof el.type === "string") return { tag: el.type, props: await valor(props, el.type), filhos: await no(children as ReactNode) };
-    const tipo = el.type as unknown as { $$typeof?: symbol; type?: unknown; displayName?: string; name?: string };
-    if (clientes.has(el.type)) {
-      const nome = clientes.get(el.type)!;
-      const p = (await valor(props, nome)) as Record<string, unknown>;
-      clients.push({ nome, props: p });
-      return { client: nome, props: p, filhos: await no(children as ReactNode) };
-    }
-    if (tipo.$$typeof === FORWARD_REF) return { icone: tipo.displayName ?? "forwardRef", props: await valor(props, "icone") };
-    if (tipo.$$typeof === MEMO) return no(createElement(tipo.type as never, el.props));
-    if (typeof el.type === "function") {
-      const saida = await (el.type as (p: unknown) => ReactNode | Promise<ReactNode>)(el.props);
-      return no(saida);
-    }
-    throw new Error(`tipo de elemento desconhecido: ${String(tipo.displayName ?? tipo.name ?? tipo.$$typeof?.toString())}`);
-  }
-
-  return { arvore: await no(raizDaTela), clients, funcoes };
-}
-
-/** Chaves que nenhum client pode receber: contato, a base, os eventos, a Fila e a linha de Leads. */
-const CHAVES_PROIBIDAS = [
-  "phone",
-  "email",
-  "telefone",
-  "adDaily",
-  "igPosts",
-  "lpDaily",
-  "eventos",
-  "grupos",
-  "itens",
-  "sinalizadores",
-  "atendimentoAgora",
-  "kpis",
-  "inicio",
-  "live",
-  "painel",
-];
-
-function chavesDe(v: unknown, out = new Set<string>()): Set<string> {
-  if (Array.isArray(v)) v.forEach((x) => chavesDe(x, out));
-  else if (v && typeof v === "object") {
-    for (const [k, x] of Object.entries(v)) {
-      out.add(k);
-      chavesDe(x, out);
-    }
-  }
-  return out;
-}
-
-function conferirLgpd(f: Fronteira, leads: readonly Lead[]) {
-  expect(f.funcoes, "função passada de server para client").toEqual([]);
-  const payload = JSON.stringify(f.arvore).toLowerCase();
-  for (const c of contatosDe(leads)) expect(payload.includes(c.toLowerCase()), `contato no payload: ${c}`).toBe(false);
-  for (const c of f.clients) {
-    const chaves = chavesDe(c.props);
-    for (const k of CHAVES_PROIBIDAS) expect(chaves.has(k), `${c.nome} recebe "${k}"`).toBe(false);
-  }
-  expect(/"(phone|email|telefone)"/.test(JSON.stringify(f.clients))).toBe(false);
-}
-
 // ---------------------------------------------------------------- palavras visíveis
-
-const VAZIOS = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"]);
-
-/**
- * As palavras que se LEEM no HTML: fora de `<table>`, de `<svg>`, do que é
- * `aria-hidden` e do miolo de `<details>` fechado (só o `<summary>` aparece). O ⓘ
- * fechado não tem texto no HTML (a caixa só existe aberta). Palavra = pedaço
- * separado por espaço com pelo menos uma letra ou um algarismo (número conta;
- * "·", "→", "—" e "≥" sozinhos, não).
- */
-function palavras(html: string): string[] {
-  const pilha: { tag: string; oculto: boolean; detalhesFechado: boolean }[] = [];
-  const out: string[] = [];
-  const re = /<(\/?)([a-zA-Z][a-zA-Z0-9]*)([^>]*?)(\/?)>|([^<]+)/g;
-  for (let m = re.exec(html); m; m = re.exec(html)) {
-    const [, fecha, tagBruta, attrs, autoFecha, texto] = m;
-    const topo = pilha.at(-1);
-    if (texto !== undefined) {
-      if (topo?.oculto) continue;
-      const limpo = texto
-        .replace(/&nbsp;/g, " ")
-        .replace(/&amp;/g, "&")
-        .replace(/&lt;/g, "<")
-        .replace(/&gt;/g, ">")
-        .replace(/&quot;/g, '"')
-        .replace(/&#x27;|&#39;/g, "'");
-      out.push(...limpo.split(/\s+/).filter((p) => /[\p{L}\p{N}]/u.test(p)));
-      continue;
-    }
-    const tag = tagBruta.toLowerCase();
-    if (fecha) {
-      while (pilha.length && pilha.pop()!.tag !== tag) {
-        /* desempilha até a tag */
-      }
-      continue;
-    }
-    if (autoFecha || VAZIOS.has(tag)) continue;
-    const pai = topo;
-    const dentroDeDetalheFechado = pai?.detalhesFechado && tag !== "summary";
-    const oculto =
-      Boolean(pai?.oculto) ||
-      Boolean(dentroDeDetalheFechado) ||
-      tag === "table" ||
-      tag === "svg" ||
-      /aria-hidden="true"/.test(attrs);
-    pilha.push({ tag, oculto, detalhesFechado: tag === "details" && !/\sopen(=|\s|$)/.test(attrs) });
-  }
-  return out;
-}
-
-/** O trecho do HTML de cada elemento que casa (sem aninhamento da mesma tag). */
-function trechos(html: string, tag: string, attr: string): string[] {
-  const re = new RegExp(`<${tag}[^>]*${attr}[^>]*>[\\s\\S]*?</${tag}>`, "g");
-  return html.match(re) ?? [];
-}
 
 const ORCAMENTO = { total: 100, cartoes: 25, titulos: 10, funil: 20, frases: 30, rodapeResumo: 15 };
 

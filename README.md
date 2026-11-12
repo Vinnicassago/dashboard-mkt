@@ -5,7 +5,7 @@ Reúne, numa só ferramenta que todo o time acompanha: **orgânico do Instagram*
 **tráfego pago**, **comparação de criativos** e o **funil de leads até a reunião**.
 
 North Star: **Custo por Reunião Agendada (CPR)**.
-Funil: `Impressões → Cliques → Leads → Reuniões`.
+Funil (por coorte): `Impressões → Visitas → Leads → robô (1ª mensagem → Responderam → Convite aceito) → Agendaram (Confirmaram) → Reuniões realizadas → Vendas`.
 
 ## Stack
 
@@ -38,7 +38,7 @@ src/
   app/
     (dashboard)/            # grupo de rotas com o layout (sidebar + header)
       page.tsx              # Início — cartões, leads chegando, atendimento, rodapé (ou o painel da live)
-      funil/                # funis de conversão e descoberta, coortes, perdas
+      funil/                # o funil do processo (robô → reunião → venda), onde trava, perdas, coortes
       midia/                # verba por campanha › conjunto, criativos, ritmo
       fila/                 # fila de contato única (painel + robô + especialista)
       leads/                # leads, ficha, revisão, excluídos, histórico
@@ -316,10 +316,12 @@ encerra o lead?" saem todos de lá. Status novo = uma entrada nessa tabela.
 
 Os quatro últimos encerram o lead. A distinção entre perda de **qualidade**
 (resolve-se na segmentação/criativo/formulário) e de **decisão** (resolve-se na
-oferta e no pitch) é o que o card **"Por que perdemos"**, no Funil, mostra.
+oferta e no pitch) é a base do "onde atacar" do card **"Por que perdemos"**, no Funil, que mostra uma
+linha por motivo e quem encerrou (robô ou comercial).
 
 Desistência **não** conta como reunião: quem marcou e caiu não gerou reunião, então
-sai do denominador do CPR e aparece como vazamento na quebra de perdas.
+sai do denominador do CPR; no Funil, o ⓘ de "Agendaram" diz quantos desistiram, e eles contam
+como "agendaram e a reunião não aconteceu".
 
 Migration: `supabase/migrations/0011_lead_status_reasons.sql`. Ela renomeia
 `agendou`/`compareceu` e joga o antigo `perdido` — que não guardava motivo — em

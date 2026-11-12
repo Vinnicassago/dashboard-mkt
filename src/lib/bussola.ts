@@ -19,9 +19,8 @@
  * `bussola-server.ts`.
  */
 
-import { alertasDeAtribuicao, alertasDeConfianca, alertasDeQualidade, type Alerta } from "./alertas";
+import { alertaLpSemDado, alertasDeAtribuicao, alertasDeConfianca, alertasDeQualidade, type Alerta } from "./alertas";
 import { rangeDoPainelLive, subAtalhosDaLive, type PeriodoDaLive, type RangeDoPainelLive } from "./atalho-live";
-import { temLpNoPeriodo } from "./gargalo";
 import { montarInicio, type EntradaInicio, type Inicio } from "./inicio";
 import type { KpisDoPeriodo } from "./kpis";
 import type { CampanhaDaLive } from "./live";
@@ -53,10 +52,10 @@ export function montarBussola(e: EntradaBussola): Bussola {
  * Pendências), a saúde do dado (só a home registra estes: se saírem daqui, somem
  * do painel), a atribuição e a landing page que parou de registrar.
  *
- * `lp-sem-dado` só para um período que JÁ começou (`range.from <= hoje`, C9) e
- * que termina depois do 1º dia rastreado (`range.to >= 1º lp_daily`): um período
- * futuro, ou de antes de a landing page existir, não tem linha de nada — e isso
- * não é o rastreio parado.
+ * `lp-sem-dado` é `alertaLpSemDado` (`alertas.ts`, o mesmo do Funil): só para um
+ * período que JÁ começou (`range.from <= hoje`, C9) e que termina depois do 1º dia
+ * rastreado (`lpParouNoPeriodo`): um período futuro, ou de antes de a landing page
+ * existir, não tem linha de nada — e isso não é o rastreio parado.
  */
 export function alertasDoInicio(e: {
   data: DashboardData;
@@ -65,23 +64,11 @@ export function alertasDoInicio(e: {
   hoje: string;
 }): Alerta[] {
   const { data, range } = e;
-  const inicioDoRastreio = data.lpDaily.reduce<string | undefined>((m, r) => (!m || r.date < m ? r.date : m), undefined);
   return [
     ...alertasDeConfianca(e.kpis.trust.travas),
     ...alertasDeQualidade(dataQualityChecks(data)),
     ...alertasDeAtribuicao(data, range),
-    ...(inicioDoRastreio && range && range.from <= e.hoje && range.to >= inicioDoRastreio && !temLpNoPeriodo(data, range)
-      ? [
-          {
-            id: "lp-sem-dado",
-            nivel: "aviso" as const,
-            titulo: "O rastreio da landing page parou: sem visitas registradas no período",
-            detalhe:
-              "Há histórico da landing page, mas nenhuma linha neste período: o rastreio (/api/track) pode ter parado — chave trocada, script fora da página. Visitas e envios ficam fora do funil até voltar.",
-            cta: { label: "Ver integrações", href: "/configuracoes/integracoes" },
-          },
-        ]
-      : []),
+    ...alertaLpSemDado(data, range, e.hoje),
   ];
 }
 

@@ -1,13 +1,15 @@
 /**
- * Fase 5 — motor de ações v2 (dormente até a Mídia da Fase 4), gargalo (Funil) e
+ * Fase 5 — motor de ações v2 (dormente até a Mídia da Fase 4), a landing page no
+ * período (o gargalo saiu na Fase 3 de nov/26: a resposta do Funil é `ondeTrava`) e
  * semanas; o placar e a série semanal saíram com o Início (Fase 2, nov/26). Fixture
  * sintética (nenhum dado real). Datas em UTC; Brasília = UTC−3.
  */
 import { describe, expect, it } from "vitest";
 import { kpisDoPeriodo } from "../kpis";
-import { montarBussola } from "../bussola";
+import { alertasDoInicio, montarBussola } from "../bussola";
 import { motorDeAcoes, resumoDasAcoes, semanaDaAcao, type Acao } from "../motor";
-import { gargalo, impactoEstimado, textoDoImpacto, transicoesDoFunil, type Transicao } from "../gargalo";
+import { alertaLpSemDado } from "../alertas";
+import { lpParouNoPeriodo, temLpNoPeriodo } from "../metrics";
 import { diasDoPeriodo, janelaAnterior, segundaDaSemana, semanaAnteriorFechada, ultimasSemanas } from "../semana";
 import { buildBriefing } from "../ai/briefing";
 import type { AcaoEstado, AdDaily, Creative, DashboardData, Lead, LeadEvent, LpDaily, Meta } from "../types";
@@ -129,100 +131,47 @@ describe("semanas (segunda a domingo, Brasília)", () => {
   });
 });
 
-// ---------------------------------------------------------------- gargalo
+// ---------------------------------------------------------------- a landing page no período (o gargalo saiu na Fase 3)
 
-describe("onde trava: transições com dono e o gargalo", () => {
-  // 50 leads na semana, 1 agendou; 20 com 1º contato no prazo; LP com 1.000 visitas.
-  const leads = [
-    ...Array.from({ length: 20 }, () => lead("2026-10-05", { status: "em_contato", firstContactAt: "2026-10-05T13:20:00.000Z" })),
-    ...leadsEncerrados(29, "2026-10-05"),
-    lead("2026-10-05", { status: "agendado", bookedAt: "2026-10-06T12:00:00.000Z", meetingFor: "2026-10-20T12:00:00.000Z", firstContactAt: "2026-10-05T13:10:00.000Z" }),
-  ];
-  const data = base({
-    // Em setembro (a janela da média): 2.000 visitas e 200 leads = 10%.
-    leads: [...leads, ...leadsEncerrados(200, "2026-09-10")],
-    lpDaily: [lp("2026-10-05", 1000, 60), lp("2026-09-10", 2000, 200)],
-    adDaily: [ad("2026-10-05", "100001", 500)],
-    metas: [meta("taxa_lead_agendada", 0.1), meta("primeiro_contato_no_prazo", 0.9)],
-  });
-  const k = kpisDe(data);
-  const t = transicoesDoFunil(data, SEMANA, k, { agora: AGORA, hoje: HOJE });
-  const porId = Object.fromEntries(t.map((x) => [x.id, x])) as Record<Transicao["id"], Transicao>;
+describe("landing page: só conta com linha NO período (`temLpNoPeriodo`, `lpParouNoPeriodo`, K13)", () => {
+  const leads = [...leadsEncerrados(5, "2026-10-05")];
+  const parou = base({ leads, lpDaily: [lp("2026-09-10", 2000, 200)] });
+  const comLinha = base({ leads, lpDaily: [lp("2026-09-10", 2000, 200), lp("2026-10-05", 1000, 60)] });
+  const semLp = base({ leads });
 
-  it("cada transição tem dono, entradas, saídas e a régua certa (meta ou média de 8 semanas)", () => {
-    expect(t.map((x) => x.id)).toEqual(["impressao_visita", "visita_lead", "lead_contato", "lead_agendada", "agendada_realizada"]);
-    expect(porId.lead_agendada).toMatchObject({ dono: "COM", entradas: 50, saidas: 1, metrica: "taxa_lead_agendada" });
-    expect(porId.lead_agendada.referencia).toMatchObject({ taxa: 0.1, origem: "meta" });
-    expect(porId.lead_agendada.razao).toBeCloseTo(0.2, 6);
-    expect(porId.lead_contato.referencia).toMatchObject({ taxa: 0.9, origem: "meta" });
-    expect(porId.lead_contato.taxa).toBeCloseTo(1, 6);
-    // Visita → lead não tem meta: a média das 8 semanas anteriores vira a régua, e o rótulo diz isso.
-    expect(porId.visita_lead.referencia).toMatchObject({ origem: "media8s", taxa: 0.1 });
-    expect(porId.agendada_realizada.taxa).toBeNull(); // nenhuma reunião com data passada: sem amostra
+  it("histórico sem linha no período = rastreio que parou (não '0%'); com linha, rastreio vivo; sem LP nenhuma, nada parou", () => {
+    expect(temLpNoPeriodo(parou, SEMANA)).toBe(false);
+    expect(lpParouNoPeriodo(parou, SEMANA)).toBe(true);
+    expect(temLpNoPeriodo(comLinha, SEMANA)).toBe(true);
+    expect(lpParouNoPeriodo(comLinha, SEMANA)).toBe(false);
+    expect(temLpNoPeriodo(semLp, SEMANA)).toBe(false);
+    expect(lpParouNoPeriodo(semLp, SEMANA)).toBe(false);
   });
 
-  it("o gargalo é a menor razão taxa ÷ régua, com o impacto inteiro em reuniões por semana", () => {
-    const g = gargalo(t, SEMANA)!;
-    expect(g.transicao.id).toBe("lead_agendada");
-    // 50 leads × (10% − 2%) = 4 reuniões a mais na semana.
-    expect(g.impacto).toMatchObject({ porSemana: 4, noPeriodo: 4, unidade: "reunioes_agendadas" });
+  it("período antes da 1ª linha da LP, ou a campanha inteira: não é rastreio parado", () => {
+    expect(lpParouNoPeriodo(parou, { from: "2026-08-01", to: "2026-08-31" })).toBe(false);
+    expect(temLpNoPeriodo(parou, undefined)).toBe(true);
+    expect(lpParouNoPeriodo(parou, undefined)).toBe(false);
   });
 
-  it("abaixo de 10 entradas a taxa não aparece nem concorre a gargalo", () => {
-    const pouco = base({ leads: leadsEncerrados(9, "2026-10-05"), metas: [meta("taxa_lead_agendada", 0.1)] });
-    const tt = transicoesDoFunil(pouco, SEMANA, kpisDe(pouco), { agora: AGORA, hoje: HOJE });
-    expect(tt.find((x) => x.id === "lead_agendada")?.taxa).toBeNull();
-    expect(gargalo(tt, SEMANA)).toBeNull();
-  });
-
-  it("reproduz o exemplo do relatório: 113 leads em 72 dias a 0,9% contra 10% ≈ 11 reuniões, 1 por semana", () => {
-    const relatorio: Transicao = {
-      id: "lead_agendada",
-      rotulo: "Lead → Agendada",
-      dono: "COM",
-      entradas: 113,
-      saidas: 1,
-      taxa: 1 / 113,
-      referencia: { taxa: 0.1, origem: "meta" },
-      razao: 1 / 113 / 0.1,
-      href: "/funil",
-    };
-    const { impacto } = impactoEstimado([relatorio], relatorio, { from: "2026-07-27", to: "2026-10-06" });
-    expect(impacto?.noPeriodo).toBe(10);
-    expect(impacto?.porSemana).toBe(1);
-  });
-
-  it("o impacto compõe as taxas seguintes até 'agendada' (meta quando a real é 0)", () => {
-    const visita: Transicao = { id: "visita_lead", rotulo: "Visita → Lead", dono: "LP", entradas: 700, saidas: 14, taxa: 0.02, referencia: { taxa: 0.05, origem: "media8s" }, razao: 0.4, href: "/funil" };
-    const agendada: Transicao = { id: "lead_agendada", rotulo: "Lead → Agendada", dono: "COM", entradas: 14, saidas: 0, taxa: 0, referencia: { taxa: 0.1, origem: "meta" }, razao: 0, href: "/funil" };
-    // 700 × 0,03 × 0,10 (a meta, porque a real é 0) = 2,1 reuniões na semana.
-    expect(impactoEstimado([visita, agendada], visita, SEMANA).impacto).toMatchObject({ porSemana: 2 });
-    expect(impactoEstimado([visita, agendada], visita, SEMANA).impacto?.unidade).toBe("reunioes_agendadas");
-  });
-
-  it("LP com histórico mas sem linha no período: as duas transições saem (não viram 0%) e não há gargalo inventado", () => {
-    const parou = base({
-      leads: [...leadsEncerrados(49, "2026-10-05"), lead("2026-10-05", { status: "agendado", bookedAt: "2026-10-06T12:00:00.000Z", meetingFor: "2026-11-01T12:00:00.000Z" })],
-      lpDaily: [lp("2026-09-10", 2000, 200)],
-      adDaily: [ad("2026-10-05", "100001", 500)],
-      metas: [meta("taxa_lead_agendada", 0.1)],
-    });
-    const tt = transicoesDoFunil(parou, SEMANA, kpisDe(parou), { agora: AGORA, hoje: HOJE });
-    expect(tt.map((x) => x.id)).toEqual(["lead_contato", "lead_agendada", "agendada_realizada"]);
-    expect(gargalo(tt, SEMANA)?.transicao.id).toBe("lead_agendada");
-  });
-
-  it("o texto do impacto respeita a unidade (reuniões realizadas no comparecimento)", () => {
-    const t: Transicao = { id: "agendada_realizada", rotulo: "Agendada → Realizada", dono: "ESP", entradas: 20, saidas: 8, taxa: 0.4, referencia: { taxa: 0.7, origem: "meta" }, razao: 0.4 / 0.7, href: "/fila" };
-    const g = gargalo([t], SEMANA)!;
-    expect(g.impacto).toMatchObject({ porSemana: 6, unidade: "reunioes_realizadas" });
-    expect(textoDoImpacto(g)).toBe("+6 reuniões realizadas por semana se batesse a meta");
-  });
-
-  it("campanha inteira: só metas servem de régua (não há 'antes' para a média)", () => {
-    const tt = transicoesDoFunil(data, undefined, kpisDe(data, undefined), { agora: AGORA, hoje: HOJE });
-    expect(tt.find((x) => x.id === "visita_lead")?.referencia).toBeUndefined();
-    expect(tt.find((x) => x.id === "lead_agendada")?.referencia?.origem).toBe("meta");
+  it("`alertaLpSemDado` é o MESMO alerta que o Início registrava (id, texto, cta) — e o Início o registra por ela", () => {
+    const esperado = [
+      {
+        id: "lp-sem-dado",
+        nivel: "aviso",
+        titulo: "O rastreio da landing page parou: sem visitas registradas no período",
+        detalhe:
+          "Há histórico da landing page, mas nenhuma linha neste período: o rastreio (/api/track) pode ter parado — chave trocada, script fora da página. Visitas e envios ficam fora do funil até voltar.",
+        cta: { label: "Ver integrações", href: "/configuracoes/integracoes" },
+      },
+    ];
+    expect(alertaLpSemDado(parou, SEMANA, HOJE)).toEqual(esperado);
+    expect(alertasDoInicio({ data: parou, range: SEMANA, kpis: kpisDe(parou), hoje: HOJE }).filter((a) => a.id === "lp-sem-dado")).toEqual(esperado);
+    // Com linha no período, sem LP nenhuma, na campanha inteira ou num período que ainda não começou: nada.
+    expect(alertaLpSemDado(comLinha, SEMANA, HOJE)).toEqual([]);
+    expect(alertaLpSemDado(semLp, SEMANA, HOJE)).toEqual([]);
+    expect(alertaLpSemDado(parou, undefined, HOJE)).toEqual([]);
+    expect(alertaLpSemDado(parou, { from: "2026-10-20", to: "2026-10-20" }, HOJE)).toEqual([]);
   });
 });
 

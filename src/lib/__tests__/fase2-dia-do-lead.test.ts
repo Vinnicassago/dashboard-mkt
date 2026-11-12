@@ -21,7 +21,7 @@ import {
 import { kpisDoPeriodo, periodoDaRegua, reguaDoPeriodo } from "../kpis";
 import { resumoDaMidia } from "../midia";
 import { pageRange } from "../page-range";
-import { coortesDoFunil, confiancaDoRegistro, montarFunil } from "../funil";
+import { coortesDoFunil, confiancaDoRegistro } from "../funil";
 import { motorDeAcoes } from "../motor";
 import { taxasObservadas } from "../metas";
 import { buildRecommendations } from "../recommendations";
@@ -233,28 +233,7 @@ describe("reuniões pela data do agendamento em Brasília", () => {
     expect(kpisDoPeriodo(d, DIA_09, { hoje: HOJE, agora: AGORA }).comparecimento.n).toBe(0);
   });
 
-  it("Funil por período: a reunião realizada às 22h conta no dia 08", () => {
-    const foi = lead(brt("2026-10-01", "10:00"), {
-      status: "reuniao_realizada",
-      bookedAt: brt("2026-10-02", "10:00"),
-      meetingFor: brt("2026-10-08", "21:00"),
-      attendedAt: brt("2026-10-08", "22:00"),
-    });
-    const d = base({ leads: [foi] });
-    const realizadas = (range: { from: string; to: string }) =>
-      montarFunil({
-        data: d,
-        range,
-        kpis: kpisDoPeriodo(d, range, { hoje: HOJE, agora: AGORA }),
-        robo: null,
-        comercial: null,
-        vista: "periodo",
-        hoje: HOJE,
-        agora: AGORA,
-      }).etapas.find((e) => e.key === "compareceu")?.valor;
-    expect(realizadas(DIA_08)).toBe(1);
-    expect(realizadas(DIA_09)).toBe(0);
-  });
+  // A regra das 22 h no Funil (o funil do processo, por coorte) mora em `fase3-processo.test.ts` (K19).
 });
 
 // ---------------------------------------------------------------- coortes
@@ -419,7 +398,7 @@ describe("dia depois de hoje é FUTURO: nem 'sem dados' nem 'sem veiculação'",
     expect(fimDoPeriodo(undefined, hoje)).toBe(hoje);
   });
 
-  it("régua de um período que ainda não começou: o alvo fica, o status não (Mídia, Funil, Configurações)", () => {
+  it("régua de um período que ainda não começou: o alvo fica, o status não (Mídia e Configurações)", () => {
     const meta = (metrica: Meta["metrica"], alvo: number): Meta => ({
       id: `${metrica}-2026-10-01`,
       brand: "consorcio",
@@ -449,10 +428,7 @@ describe("dia depois de hoje é FUTURO: nem 'sem dados' nem 'sem veiculação'",
     }
     // Mídia: o ritmo mostra o previsto, sem "Abaixo do ritmo (0%)".
     expect(resumoDaMidia(k, regua).ritmo).toMatchObject({ gasto: 0, alvo: 100, avaliacao: undefined });
-    // Funil: nenhum selo com status.
-    const f = montarFunil({ data, range, kpis: k, robo: null, comercial: null, vista: "periodo", hoje, agora });
-    expect(f.etapas.filter((e) => e.meta).map((e) => e.meta!.metrica)).toEqual(expect.arrayContaining(["leads", "reunioes_agendadas"]));
-    expect(f.etapas.filter((e) => e.meta).every((e) => e.meta!.avaliacao === undefined)).toBe(true);
+    // O Funil não leva meta (Fase 3, F3-D11): nada a conferir lá.
     // Um período que já passou, com as mesmas metas, continua julgado (a meta casa).
     const passado = { from: "2026-10-26", to: "2026-11-01" };
     const kp = kpisDoPeriodo(data, passado, { hoje, agora, cobertura });

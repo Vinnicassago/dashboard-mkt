@@ -776,7 +776,7 @@ export interface SeguidoresDoPeriodo {
 
 /**
  * Seguidores do período — a regra ÚNICA da variação. `igAccountTotals` (Início da
- * awareness, Funil, IA, Conteúdo) e `followerSeries` (os gráficos) leem daqui: um fato, um
+ * awareness, IA, Conteúdo) e `followerSeries` (os gráficos) leem daqui: um fato, um
  * número. `followers` é o total no FIM do dia, e 0 é desconhecido.
  *
  * - Série completa (todo dia do período com ganhos e perdas): cada dia varia
@@ -2338,6 +2338,23 @@ export function lpKpis(data: DashboardData, range?: DateRange): LpKpis {
     visitToLead: div(formSubmits, visits),
     ctaRate: div(clicks, visits),
   };
+}
+
+/** Há linha da landing page dentro do período (ou em qualquer data, na campanha inteira)? */
+export function temLpNoPeriodo(data: DashboardData, range: DateRange | undefined): boolean {
+  return data.lpDaily.some((r) => inRange(r.date, range));
+}
+
+/**
+ * A landing page PAROU no período: há histórico (`lpDaily` tem um 1º dia), o
+ * período termina depois dele e não tem nenhuma linha. É rastreio que parou
+ * (alerta `lp-sem-dado`, `alertaLpSemDado`), não "0 visitas" — e a taxa de Leads
+ * do Funil fica sem % em vez de trocar de base em silêncio. Período de antes de a
+ * landing page existir, ou sem LP nenhuma, não parou nada.
+ */
+export function lpParouNoPeriodo(data: DashboardData, range: DateRange | undefined): boolean {
+  const primeiroDia = data.lpDaily.reduce<string | undefined>((m, r) => (!m || r.date < m ? r.date : m), undefined);
+  return Boolean(primeiroDia && range && range.to >= primeiroDia && !temLpNoPeriodo(data, range));
 }
 
 // ---- deltas (period over period) -----------------------------------

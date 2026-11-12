@@ -7,9 +7,6 @@
  */
 import { describe, expect, it } from "vitest";
 import { kpisDoPeriodo } from "../kpis";
-import { montarCascata } from "../cascata";
-import { montarFunil } from "../funil";
-import { montarFila } from "../fila";
 import { motorDeAcoes, type Acao } from "../motor";
 import { montarFilaDaLive } from "../fila-live";
 import { EXPEDIENTE_PADRAO } from "../turno";
@@ -218,7 +215,7 @@ describe("C2, G1 e a ordem com o robô ligado", () => {
     expect(regra(rodar(data, { robo: roboOk() }), "C2")).toBeUndefined();
   });
 
-  it("o 1º contato no prazo não conta quem o robô recebeu (11.7) — nem os 'parados' do 1º contato com o robô ligado", () => {
+  it("o 1º contato no prazo não conta quem o robô recebeu (11.7)", () => {
     const data = base([
       lead({ createdAt: brt("2026-11-02", "10:00"), status: "em_contato", firstContactAt: brt("2026-11-02", "10:30") }),
       lead({ createdAt: brt("2026-11-02", "10:00"), roboVistoEm: brt("2026-11-02", "10:05") }), // com o robô, sem tentativa humana
@@ -227,22 +224,6 @@ describe("C2, G1 e a ordem com o robô ligado", () => {
     const k = kpisDoPeriodo(data, undefined, { hoje: HOJE, agora: AGORA });
     expect(k.primeiroContatoNoPrazo.n).toBe(2);
     expect(k.primeiroContatoNoPrazo.valor).toBeCloseTo(0.5, 5);
-    // Robô DESLIGADO (também depois de ter rodado: o lead visto pelo robô volta a
-    // "Novos"): os "parados" do 1º contato — na cascata (degrau "Agendaram reunião",
-    // sem a mesa do atendimento) e no Funil — são o grupo "Novos" da Fila, com link.
-    const novosNaFila = montarFila({ nowIso: AGORA, leads: data.leads, eventos: [] }).grupos.find((g) => g.etapa === "novo")!.total;
-    expect(novosNaFila).toBe(2);
-    const cascata = montarCascata({ data, range: undefined, robo: null, comercial: null, kpis: k });
-    expect(cascata.degraus.find((d) => d.key === "reunioes")).toMatchObject({ parados: novosNaFila, etapaFila: "novo" });
-    const funil = (roboLigado?: boolean) =>
-      montarFunil({ data, range: undefined, kpis: k, robo: null, comercial: null, roboLigado, vista: "coorte", hoje: HOJE, agora: AGORA });
-    expect(funil().etapas.find((e) => e.key === "primeiro_contato")).toMatchObject({ parados: novosNaFila, etapaFila: "novo" });
-    // Robô ligado: quem o robô recebeu sai dos parados, e a Fila não tem "Novos" — o
-    // número fica, sem link para um grupo que não existe.
-    expect(funil(true).etapas.find((e) => e.key === "primeiro_contato")).toMatchObject({ parados: 1, etapaFila: undefined });
-    expect(
-      montarCascata({ data, range: undefined, robo: null, comercial: null, kpis: k, roboLigado: true }).degraus.find((d) => d.key === "reunioes"),
-    ).toMatchObject({ parados: 1, etapaFila: undefined });
   });
 
   it("G1 não existe mais; a ordem é C1, depois B1, depois o resto pela prioridade", () => {

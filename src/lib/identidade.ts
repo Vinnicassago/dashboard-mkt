@@ -159,6 +159,23 @@ export function gruposDuplicados(leads: Lead[]): GrupoDuplicado[] {
   return out.sort((a, b) => b.duplicados.length - a.duplicados.length);
 }
 
+/**
+ * Os cadastros que não contam como PESSOA numa perda (K5): os que parecem teste
+ * (`pareceTeste`) e as CÓPIAS de duplicado (`gruposDuplicados` sobre a marca
+ * inteira, sem os testes — a cópia pode ter entrado em outro período; o principal
+ * fica). A régua ÚNICA de "Por que perdemos" (`perdasConfiaveis`) e das juntas do
+ * funil do processo (`funilDoProcesso`): um teste do time não vira "parado", e a
+ * mesma pessoa em dois cadastros não conta duas vezes. Excluídos não entram.
+ */
+export function testesEDuplicados(leads: readonly Lead[]): { testes: Set<string>; duplicados: Set<string> } {
+  const vivos = leads.filter((l) => !l.deletedAt);
+  const testes = new Set(vivos.filter((l) => pareceTeste(l)).map((l) => l.id));
+  const duplicados = new Set(
+    gruposDuplicados(vivos.filter((l) => !testes.has(l.id))).flatMap((g) => g.duplicados.map((d) => d.id)),
+  );
+  return { testes, duplicados };
+}
+
 export interface Revisao {
   /** Cara de cadastro de teste — confirmar e excluir (sai de "Contato inválido"). */
   testes: { lead: Lead; porque: string }[];

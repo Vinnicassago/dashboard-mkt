@@ -1,8 +1,9 @@
 /**
  * Fase 3 — um número por métrica. Fixture sintética (nenhum dado real). O portão
  * confere também o Início (Fase 2, nov/26): cartões, funil curto e frases leem os
- * MESMOS números; o Funil (`transicoesDoFunil`) e o motor (dormente até a Mídia)
- * continuam conferidos direto. Instantes em Z ou pelo `brt(dia, "HH:MM")`.
+ * MESMOS números; o Funil (`montarFunilDaTela`, Fase 3 de nov/26) e o motor
+ * (dormente até a Mídia) continuam conferidos direto. Instantes em Z ou pelo
+ * `brt(dia, "HH:MM")`.
  */
 import { describe, expect, it } from "vitest";
 import { buildSeedData, buildSeedLeadEvents } from "../data/seed";
@@ -21,7 +22,7 @@ import {
 import { custoExibivel, fatoDoCustoPorReuniao, kpisDoPeriodo, mostrar } from "../kpis";
 import { AMOSTRA_MINIMA, montarCascata } from "../cascata";
 import { montarBussola } from "../bussola";
-import { transicoesDoFunil } from "../gargalo";
+import { montarFunilDaTela } from "../funil";
 import { motorDeAcoes } from "../motor";
 import { montarFila } from "../fila";
 import { montarFilaDaLive } from "../fila-live";
@@ -282,20 +283,23 @@ describe("portão da Fase 3: mesmo nome, mesmo número (3 períodos × 2 marcas)
         expect(obj.conversao.meetings).toBe(k.reunioesConversao.valor);
         expect(obj.conversao.cpr).toBe(k.custoPorReuniao.valor);
 
-        // A cascata lê os mesmos leads e, no degrau Leads, o mesmo CPL.
-        const c = montarCascata({ data, range, robo: null, comercial: null, kpis: k });
-        const leadsDegrau = c.degraus.find((d) => d.key === "leads")!;
-        expect(leadsDegrau.valor).toBe(k.leads.valor);
-        if (leadsDegrau.custoUnitario !== undefined) expect(leadsDegrau.custoUnitario).toBe(k.cpl.valor);
-        // E não imprime um segundo custo por reunião.
-        expect(c.degraus.find((d) => d.key === "reunioes")?.custoUnitario).toBeUndefined();
-
         const AGORA = "2026-10-08T12:00:00.000Z";
         const HOJE = "2026-10-08";
-        // O Funil (`transicoesDoFunil`, que continua no /funil) lê ESTES números.
-        const leadAgendada = transicoesDoFunil(data, range, k, { agora: AGORA, hoje: HOJE }).find((t) => t.id === "lead_agendada")!;
-        expect(leadAgendada.entradas).toBe(k.leads.valor);
-        expect(leadAgendada.saidas).toBe(k.agendaram.valor);
+        // O Funil (`montarFunilDaTela`, a tela do /funil) lê ESTES números: Leads, o CPL do
+        // cartão do Início e Agendaram — e não imprime um segundo custo por reunião.
+        const funil = montarFunilDaTela({ data, range, rangeKey: range ? `${range.from}..${range.to}` : "all", kpis: k, eventos: [], agora: AGORA, hoje: HOJE }).funil;
+        if (k.leads.valor === 0) expect(funil).toBeNull();
+        else {
+          const linha = (id: string) => funil!.linhas.find((l) => l.id === id);
+          expect(linha("leads")?.texto).toBe(formatInt(k.leads.valor));
+          expect(linha("leads")?.extra).toBe(custoExibivel(k.cpl) ? `CPL ${mostrar(k.cpl, "moeda")}` : null);
+          expect(linha("agendaram")?.texto).toBe(formatInt(k.agendaram.valor));
+          for (const l of funil!.linhas) expect([l.rotulo, l.texto, l.taxa ?? "", l.extra ?? ""].join(" "), l.id).not.toMatch(/por reunião/);
+        }
+        // O topo (`montarCascata`) lê os mesmos leads; o CPL da linha é o da tela (acima), não um 2º.
+        const c = montarCascata({ data, range, kpis: k });
+        const leadsDegrau = c.degraus.find((d) => d.key === "leads")!;
+        expect(leadsDegrau.valor).toBe(k.leads.valor);
 
         // O Início (só a marca de conversão: a awareness tem a home dela) lê ESTES números.
         let inicio: Inicio | undefined;

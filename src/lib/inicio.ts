@@ -10,10 +10,11 @@
  *      Pixel) e os 8 mais recentes do período, saídos de `montarLinhasDeLeads`
  *      com a entrada de /leads (sem telefone, e-mail ou motivo de teste);
  *   3. ATENDIMENTO — o título com quem espera o comercial (`esperandoOComercial`,
- *      o número da Fila), o funil curto da COORTE do período (`funilDoAtendimento`,
- *      pelas colunas `robo_*` lidas por `situacaoDoRobo`, nunca o banco do robô) e
- *      até três frases de AGORA, cada uma com o número do grupo da MESMA
- *      `montarFila` da /fila;
+ *      o número da Fila), o funil curto da COORTE do período (`funilDoAtendimento`
+ *      = um RECORTE do funil do processo do Funil, `lib/funil-processo.ts`, pelas
+ *      colunas `robo_*` lidas por `situacaoDoRobo`, nunca o banco do robô) e até
+ *      três frases de AGORA, cada uma com o número do grupo da MESMA `montarFila`
+ *      da /fila. `ondeTrava` (a manchete do Funil) vai junto só como DADO para a IA;
  *   4. RODAPÉ — Funil, Mídia e o último post da grade (`ultimoPostDaGrade`).
  *
  * Os links já saem com o período (`comPeriodo`, idempotente: o componente pode
@@ -21,29 +22,34 @@
  * robô, turno da live) é o servidor; aqui nada faz I/O.
  */
 
-import { AMOSTRA_MINIMA } from "./cascata";
 import { diaCoberto, type Intervalo } from "./cobertura";
 import { dica } from "./dicionario";
 import type { Dono } from "./dono";
 import { esperandoOComercial, FILA_ETAPAS, gruposDaFila, montarFila, type FilaEtapa, type FilaResult } from "./fila";
 import type { ItemDaFilaLive } from "./fila-live";
-import { formatDateTimeCurta, formatInt, formatarEspera } from "./format";
+import { formatInt, formatarEspera } from "./format";
+import {
+  RECORTE_DO_INICIO,
+  dicaDoRecorteDoRobo,
+  funilDoProcesso,
+  linhaDaLeituraParada,
+  recortarProcesso,
+  recorteDoFunil,
+  type ForaDoRobo,
+  type FunilDoProcesso,
+} from "./funil-processo";
 import { diaDoLead } from "./horario-util";
 import { fatoDoCustoPorReuniao, mostrar, type FatoDoCustoPorReuniao, type FormatoMedida, type KpisDoPeriodo, type Medida } from "./kpis";
 import { montarLinhasDeLeads } from "./leads-vista";
 import { bucketOfAd, dailySeries, filterAds, filterLeads, ultimoPostDaGrade, type DateRange } from "./metrics";
-import { chaveTelefoneValida } from "./phone";
-import { classeDoLead } from "./qualificacao";
+import { ondeTrava, resumoDaTrava, type ResumoDaTrava } from "./onde-trava";
 import { comPeriodo } from "./range";
 import {
   ROBO_INICIO,
-  ROBO_SEM_MSG_MIN,
   leituraDoRoboParada,
   reabertosNoPainel,
   reabertosPorLead,
-  refDoRobo,
   semMensagemDoRobo,
-  situacaoDoRobo,
   type RoboAgora,
 } from "./robo/situacao";
 import type { Expediente } from "./turno";
@@ -169,21 +175,9 @@ export interface DegrauCurto {
   doRobo: boolean;
 }
 
-/** Por que um lead da coorte fica fora de "Com o robô" (o ⓘ do funil diz quantos de cada). */
-export interface ForaDoRobo {
-  /** Entrou antes de 29/10 e o robô nunca o viu (`antesDoRobo`). */
-  antes: number;
-  /** Sem telefone utilizável (`chaveTelefoneValida`). */
-  semTelefone: number;
-  /** Inscrito da live (com classe): a Fila da live, não o robô. */
-  live: number;
-  /** Entrou há menos de `ROBO_SEM_MSG_MIN` (contra agora): o robô ainda não teve tempo. */
-  recentes: number;
-  /** Entrou depois da última leitura do robô (menos os 15 min): o painel ainda não sabe. */
-  depoisDaLeitura: number;
-  /** Reaberto no PAINEL sem fala nova do robô: a reabertura nunca chega a ele. */
-  reabertosNoPainel: number;
-}
+// Movidos para o funil do processo (Fase 3): o Início os reexporta (nenhum leitor muda).
+export { dicaDoRecorteDoRobo, recorteDoFunil };
+export type { ForaDoRobo };
 
 export interface FunilDoAtendimento {
   /** O funil mostra o trecho do robô: ligado e o período não é todo anterior a ele. */
@@ -232,6 +226,12 @@ export interface AtendimentoDoInicio {
   frases: FraseDoAtendimento[];
   /** Sem frase nenhuma: "Nada esperando o comercial agora."; senão `null`. */
   vazio: string | null;
+  /**
+   * Onde trava (Fase 3, K14): a MESMA `ondeTrava` da manchete do Funil, sobre o MESMO
+   * funil do processo do recorte acima. Só DADO, para a IA (`inicioParaIA`) — nenhuma
+   * marca nem palavra na tela. Sempre um objeto (K8).
+   */
+  ondeTrava: ResumoDaTrava;
 }
 
 export interface RodapeDoInicio {
@@ -307,13 +307,6 @@ function trechos<T extends { date: string }>(dias: readonly T[], marca: (d: T) =
   return out;
 }
 
-/** "leads de 30/10 a 05/11", "leads de 05/11", "leads da campanha". */
-export function recorteDoFunil(range: DateRange | undefined): string {
-  if (!range) return "leads da campanha";
-  return range.from === range.to ? `leads de ${dm(range.from)}` : `leads de ${dm(range.from)} a ${dm(range.to)}`;
-}
-
-const taxaCom = (valor: number, base: number): number | null => (base >= AMOSTRA_MINIMA ? Math.min(1, valor / base) : null);
 
 // ---------------------------------------------------------------- 1. cartões
 
@@ -503,187 +496,55 @@ function leadsChegando(e: EntradaInicio): LeadsChegando {
 // ---------------------------------------------------------------- 3. atendimento
 
 /**
- * O funil curto do atendimento — a COORTE dos leads do período (`filterLeads`),
- * por cadastro (aninha com `kpis.leads`), lido das colunas `robo_*` por
- * `situacaoDoRobo` com os MESMOS insumos da Fila e de Leads (ref, reabertos).
+ * O funil curto do atendimento — um RECORTE do funil do processo do Funil
+ * (`recortarProcesso(funilDoProcesso(…), RECORTE_DO_INICIO)`, `lib/funil-processo.ts`,
+ * Fase 3): a COORTE dos leads do período, lida das colunas `robo_*` por
+ * `situacaoDoRobo` com os MESMOS insumos da Fila e de Leads (ref, reabertos), com os
+ * mesmos números e o mesmo texto do % (`textoDaTaxa`) nos degraus que os dois mostram.
  *
- * Robô ligado: Leads → Com o robô (sem os de antes de 29/10, sem telefone
- * utilizável, os inscritos da live — com classe —, quem entrou há menos de
- * `ROBO_SEM_MSG_MIN` antes da leitura e quem o administrador reabriu sem fala nova
- * do robô: a reabertura do painel não chega a ele) → 1ª mensagem (a fala do robô
- * NESTE episódio, `situacao.falouEm`: a saudação ou, num reaberto que o robô seguiu
- * sem regravá-la, a interação dele depois do reaberto — a MESMA régua do resgate,
- * da barra e do alerta "sem a 1ª mensagem") → Responderam → Convite aceito; e,
- * em ramo paralelo, Agendaram (= `kpis.agendaram`, taxa "dos leads"). Cada degrau
- * do robô é a interseção com o anterior: taxa ≤ 1 por construção. Taxa só com base
- * ≥ `AMOSTRA_MINIMA`. Com a leitura parada, todo degrau do robô (o "Com o robô"
- * também: quem entrou depois da leitura ainda não conta) vira "≥ N", sem taxa.
- * "Com o robô" = 0 não derruba o trecho do robô (uma semana só de inscritos da live,
- * por exemplo): o ⓘ diz o motivo (`fora`). Só o período TODO anterior ao robô
- * (`range.to < 29/10`, ou todo lead dele de antes do robô) cai no funil do painel.
+ * Robô ligado: Leads → Com o robô (recorte sem taxa; o ⓘ diz quem ficou fora) → 1ª
+ * mensagem → Responderam → Convite aceito (interseções: taxa ≤ 1) e, em ramo
+ * paralelo, Agendaram (= `kpis.agendaram`, taxa "dos leads"). Com a leitura parada,
+ * todo degrau do robô vira "≥ N", sem taxa. Só o período TODO anterior ao robô cai
+ * no funil do painel. Robô desligado: Leads → Agendaram → Reuniões realizadas
+ * (sobre Agendaram). Taxa só com base ≥ `AMOSTRA_MINIMA`.
  *
- * Robô desligado: Leads → Agendaram → Reuniões realizadas (`kpis.overview.attended`,
- * coorte, como a vista de coorte do Funil), com a taxa sobre Agendaram.
+ * `p` opcional (K37): `atendimentoDoInicio` calcula o processo UMA vez (com a Fila
+ * que já montou) e o passa.
  */
-export function funilDoAtendimento(e: {
-  data: DashboardData;
-  range: DateRange | undefined;
-  kpis: KpisDoPeriodo;
-  eventos: readonly LeadEvent[];
-  robo?: RoboAgora;
-  agora: string;
-}): FunilDoAtendimento {
-  const leads = e.kpis.leads.valor;
-  const degrau = (d: Omit<DegrauCurto, "texto"> & { texto?: string }): DegrauCurto => ({
-    ...d,
-    texto: d.texto ?? `${d.piso ? "≥ " : ""}${formatInt(d.valor)}`,
-  });
-  const dLeads = degrau({ id: "leads", rotulo: "Leads", valor: leads, taxa: null, base: null, piso: false, dono: "MKT", doRobo: false });
-  const agendaram = e.kpis.agendaram.valor;
-  const dAgendaram = degrau({
-    id: "agendaram",
-    rotulo: "Agendaram",
-    valor: agendaram,
-    taxa: leads >= AMOSTRA_MINIMA ? Math.min(1, e.kpis.taxaLeadAgendada.valor) : null,
-    base: "leads",
-    piso: false,
-    dono: "COM",
-    doRobo: false,
-  });
-
-  const robo = e.robo?.ligado ? e.robo : undefined;
-  const parada = robo ? leituraDoRoboParada(robo, e.agora) : false;
-  const fora: ForaDoRobo = { antes: 0, semTelefone: 0, live: 0, recentes: 0, depoisDaLeitura: 0, reabertosNoPainel: 0 };
-  if (robo) {
-    const ref = refDoRobo(robo, e.agora);
-    const limite = Date.parse(ref) - ROBO_SEM_MSG_MIN * MIN_MS;
-    const recente = Date.parse(e.agora) - ROBO_SEM_MSG_MIN * MIN_MS;
-    const reabertos = reabertosPorLead(e.eventos);
-    const noPainel = reabertosNoPainel(e.eventos);
-    let coorte = 0;
-    let comRobo = 0;
-    let primeira = 0;
-    let responderam = 0;
-    let aceitaram = 0;
-    for (const l of filterLeads(e.data.leads, e.range)) {
-      if (l.deletedAt) continue;
-      coorte += 1;
-      const reabertoEm = reabertos.get(l.id);
-      const reabertoNoPainel = noPainel.has(l.id);
-      const s = situacaoDoRobo(l, { agora: e.agora, ref, ligado: true, reabertoEm, reabertoNoPainel });
-      if (s.antesDoRobo) {
-        fora.antes += 1;
-        continue;
-      }
-      if (!chaveTelefoneValida(l.phone)) {
-        fora.semTelefone += 1;
-        continue;
-      }
-      if (classeDoLead(l)) {
-        fora.live += 1;
-        continue;
-      }
-      // O robô ainda não teve tempo (a mesma régua dos 15 min da B1 e do alerta, contra a leitura).
-      const base = reabertoEm && Date.parse(reabertoEm) > Date.parse(l.createdAt) ? reabertoEm : l.createdAt;
-      if (!(Date.parse(base) <= limite)) {
-        if (Date.parse(base) > recente) fora.recentes += 1;
-        else fora.depoisDaLeitura += 1;
-        continue;
-      }
-      // A fala do robô NESTE episódio (`situacaoDoRobo`): a saudação ou, num reaberto
-      // que o robô seguiu sem regravá-la, a interação dele depois do reaberto.
-      const falou = Boolean(s.falouEm);
-      // Reaberto no PAINEL e sem fala nova: a reabertura nunca chega ao robô — não é dele.
-      if (reabertoNoPainel && !falou) {
-        fora.reabertosNoPainel += 1;
-        continue;
-      }
-      comRobo += 1;
-      if (!falou) continue;
-      primeira += 1;
-      if (!s.respondeu) continue;
-      responderam += 1;
-      if (s.aceitouEm) aceitaram += 1;
-    }
-    // Só o período TODO anterior ao robô cai no funil do painel; "Com o robô" = 0 por
-    // outro motivo (só inscritos da live, sem telefone, leitura atrasada) fica no
-    // funil do robô, e o ⓘ diz o motivo.
-    const todoAntes = (e.range !== undefined && e.range.to < ROBO_INICIO) || (coorte > 0 && fora.antes === coorte);
-    if (!todoAntes) {
-      const doRobo = (id: DegrauCurtoId, rotulo: string, valor: number, anterior: number): DegrauCurto =>
-        degrau({
-          id,
-          rotulo,
-          valor,
-          taxa: parada ? null : taxaCom(valor, anterior),
-          base: "anterior",
-          piso: parada,
-          dono: "BOT",
-          doRobo: true,
-        });
-      return {
-        comRobo: true,
-        leads,
-        noRobo: comRobo,
-        fora,
-        parada,
-        degraus: [
-          dLeads,
-          // Um recorte dos leads, não uma passagem: sem taxa (o ⓘ diz "N dos M"). Com a
-          // leitura parada é piso também: quem entrou depois dela ainda não conta.
-          degrau({ id: "com-robo", rotulo: "Com o robô", valor: comRobo, taxa: null, base: null, piso: parada, dono: "BOT", doRobo: true }),
-          doRobo("primeira-msg", "1ª mensagem", primeira, comRobo),
-          doRobo("responderam", "Responderam", responderam, primeira),
-          // "Convite aceito" (não "Aceitaram o convite"): o funil cabe nas 20 palavras (C13).
-          doRobo("aceitaram", "Convite aceito", aceitaram, responderam),
-          dAgendaram,
-        ],
-      };
-    }
-  }
-
-  const realizadas = e.kpis.overview.attended;
+export function funilDoAtendimento(
+  e: {
+    data: DashboardData;
+    range: DateRange | undefined;
+    kpis: KpisDoPeriodo;
+    eventos: readonly LeadEvent[];
+    robo?: RoboAgora;
+    agora: string;
+    fila?: Pick<FilaResult, "itens">;
+  },
+  p: FunilDoProcesso = funilDoProcesso(e),
+): FunilDoAtendimento {
+  const ids = p.comRobo ? RECORTE_DO_INICIO.comRobo : RECORTE_DO_INICIO.semRobo;
   return {
-    comRobo: false,
-    leads,
-    noRobo: 0,
-    fora: { antes: 0, semTelefone: 0, live: 0, recentes: 0, depoisDaLeitura: 0, reabertosNoPainel: 0 },
-    parada,
-    degraus: [
-      dLeads,
-      dAgendaram,
-      degrau({
-        id: "realizadas",
-        rotulo: "Reuniões realizadas",
-        valor: realizadas,
-        taxa: taxaCom(realizadas, agendaram),
-        base: "anterior",
-        piso: false,
-        dono: "COM",
-        doRobo: false,
+    comRobo: p.comRobo,
+    leads: p.leads,
+    noRobo: p.noRobo,
+    fora: p.fora,
+    parada: p.parada,
+    degraus: recortarProcesso(p, ids).map(
+      (d): DegrauCurto => ({
+        id: d.id as DegrauCurtoId,
+        rotulo: d.rotulo,
+        valor: d.n,
+        texto: d.texto,
+        taxa: d.taxa,
+        base: d.base === null ? null : d.base === "leads" ? "leads" : "anterior",
+        piso: d.piso,
+        dono: d.dono,
+        doRobo: d.doRobo,
       }),
-    ],
+    ),
   };
-}
-
-/**
- * O ⓘ do "Com o robô": "8 dos 12 leads passam pelo robô; fora: 1 sem telefone, 1
- * inscrito da live." — o motivo REAL de cada um que ficou fora (uma semana só de
- * inscritos da live dá "0 dos 4 … fora: 4 inscritos da live", nunca "o robô não
- * existia"). Com a leitura parada, "≥ N".
- */
-export function dicaDoRecorteDoRobo(f: Pick<FunilDoAtendimento, "noRobo" | "leads" | "fora" | "parada">): string {
-  const n = (v: number, um: string, varios: string) => `${formatInt(v)} ${v === 1 ? um : varios}`;
-  const motivos = [
-    f.fora.antes > 0 ? n(f.fora.antes, `de antes de ${dm(ROBO_INICIO)}`, `de antes de ${dm(ROBO_INICIO)}`) : "",
-    f.fora.semTelefone > 0 ? n(f.fora.semTelefone, "sem telefone", "sem telefone") : "",
-    f.fora.live > 0 ? n(f.fora.live, "inscrito da live", "inscritos da live") : "",
-    f.fora.recentes > 0 ? n(f.fora.recentes, "recém-chegado (o robô ainda não teve tempo)", "recém-chegados (o robô ainda não teve tempo)") : "",
-    f.fora.depoisDaLeitura > 0 ? n(f.fora.depoisDaLeitura, "depois da última leitura do robô", "depois da última leitura do robô") : "",
-    f.fora.reabertosNoPainel > 0 ? n(f.fora.reabertosNoPainel, "reaberto no painel", "reabertos no painel") : "",
-  ].filter(Boolean);
-  const passam = `${f.parada ? "≥ " : ""}${formatInt(f.noRobo)} dos ${formatInt(f.leads)} leads ${f.noRobo === 1 && !f.parada ? "passa" : "passam"} pelo robô`;
-  return motivos.length > 0 ? `${passam}; fora: ${motivos.join(", ")}.` : `${passam}.`;
 }
 
 const LIVE_NA_FILA = "Live 01/12"; // o título da seção da live na /fila
@@ -757,10 +618,11 @@ function atendimentoDoInicio(e: EntradaInicio): AtendimentoDoInicio {
     robo && !parada
       ? semMensagemDoRobo(e.data.leads, reabertosPorLead(e.eventos), robo, e.agora, reabertosNoPainel(e.eventos)).total
       : null;
-  const funil = funilDoAtendimento(e);
+  // O funil do processo UMA vez, com a MESMA Fila: o recorte do funil e a trava saem dele.
+  const p = funilDoProcesso({ ...e, fila });
+  const funil = funilDoAtendimento(e, p);
   const frases = frasesDoAtendimento({ fila, filaLive: e.filaLive, roboLigado, semMensagem, rangeKey: e.rangeKey });
 
-  const desde = robo && parada ? (robo.sync.falha?.desde ?? robo.sync.ultimoOk ?? null) : null;
   const dicaFunil = funil.comRobo
     ? dicaDoRecorteDoRobo(funil)
     : roboLigado
@@ -774,12 +636,12 @@ function atendimentoDoInicio(e: EntradaInicio): AtendimentoDoInicio {
       funil.parada && funil.comRobo ? " Leitura do robô parada: os números do robô são o mínimo, sem taxa." : ""
     }`,
     recorte: recorteDoFunil(e.range),
-    leituraParada:
-      robo && parada ? { desde, texto: desde ? `Robô sem leitura desde ${formatDateTimeCurta(desde)} ⚠` : "Robô ainda não lido ⚠" } : null,
+    leituraParada: linhaDaLeituraParada(robo, e.agora),
     funil: funil.degraus,
     funilComRobo: funil.comRobo,
     frases,
     vazio: frases.length === 0 ? "Nada esperando o comercial agora." : null,
+    ondeTrava: resumoDaTrava(ondeTrava(p, { rangeKey: e.rangeKey })),
   };
 }
 

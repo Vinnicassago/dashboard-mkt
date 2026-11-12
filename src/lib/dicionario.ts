@@ -31,6 +31,15 @@ export type MetricaId =
   | "primeiro_contato_no_prazo"
   | "comparecimento"
   | "conversoes_pixel"
+  // ---- funil do processo (Funil e Início, Fase 3 de nov/26) ----
+  | "com_robo"
+  | "primeira_mensagem"
+  | "responderam"
+  | "convite_aceito"
+  | "confirmaram"
+  | "reunioes_realizadas"
+  | "vendas"
+  | "onde_trava"
   // ---- conta do Instagram (Conteúdo, Fase 6) ----
   | "seguidores"
   | "cliques_link_bio"
@@ -193,6 +202,86 @@ export const DICIONARIO: Record<MetricaId, Definicao> = {
     fonte: "Meta Ads",
     inclui: "reenvios e eventos duplicados",
     exclui: "nada — por isso não é o “lead” do painel",
+  },
+  // ---- funil do processo (`lib/funil-processo.ts`): a COORTE do período, lida do
+  // lead (colunas `robo_*` pelo sync e os marcos), nunca do banco do robô. O Funil e
+  // o Início (recorte) leem as MESMAS entradas. ----
+  com_robo: {
+    id: "com_robo",
+    nome: "Com o robô",
+    definicao:
+      "Leads do período que o robô de WhatsApp deveria atender: fora os de antes de 29/10, sem telefone, inscritos da live, recém-chegados, os que entraram depois da última leitura do robô e reabertos no painel.",
+    formula: "leads do período − os que ficam fora do robô (por motivo)",
+    fonte: "Painel (colunas do robô, pelo sync)",
+    inclui: "teste e duplicado, como o cartão Leads",
+    exclui: "antes de 29/10, sem telefone, inscritos da live, recém-chegados, depois da última leitura, reabertos no painel sem fala do robô",
+  },
+  primeira_mensagem: {
+    id: "primeira_mensagem",
+    nome: "1ª mensagem",
+    definicao:
+      "O robô falou com a pessoa neste episódio (a saudação, ou a interação dele depois de um reaberto). Não prova entrega.",
+    formula: "dos que estão com o robô, os com a fala do robô no episódio",
+    fonte: "Robô (pelo sync)",
+    inclui: "a interação do robô depois de um reaberto, sem saudação nova",
+    exclui: "a saudação de uma conversa anterior ao reaberto",
+  },
+  responderam: {
+    id: "responderam",
+    nome: "Responderam",
+    definicao: "Dos que receberam a 1ª mensagem, quem mandou mensagem ao robô neste episódio.",
+    formula: "dos com a 1ª mensagem, os com resposta da pessoa no episódio",
+    fonte: "Robô (pelo sync)",
+    inclui: "a resposta depois de um reaberto",
+    exclui: "a resposta de uma conversa anterior ao reaberto",
+  },
+  convite_aceito: {
+    id: "convite_aceito",
+    nome: "Convite aceito",
+    definicao: "Dos que responderam, quem aceitou o convite e recebeu o link do Calendly.",
+    formula: "dos que responderam, os com o aceite no episódio",
+    fonte: "Robô (pelo sync)",
+    inclui: "quem aceitou e ainda não agendou",
+    exclui: "o aceite de uma conversa anterior ao reaberto",
+  },
+  confirmaram: {
+    id: "confirmaram",
+    nome: "Confirmaram",
+    definicao:
+      "Dos que agendaram, quem teve a confirmação da reunião registrada ao menos uma vez (Fila, ficha ou n8n). O registro existe desde 04/11.",
+    formula: "dos que agendaram, os com a confirmação registrada (o campo ou o evento da ficha)",
+    fonte: "Painel",
+    inclui: "a confirmação limpa por uma remarcação depois",
+    exclui: "reunião realizada sem confirmação registrada; desistências",
+  },
+  reunioes_realizadas: {
+    id: "reunioes_realizadas",
+    nome: "Reuniões realizadas",
+    definicao: "Dos leads do período, quem fez a reunião (o marco; desistência fora). O % é sobre os que agendaram.",
+    formula: "nº de leads do período com o marco da reunião realizada",
+    fonte: "Painel (marco de comparecimento)",
+    inclui: "reunião em qualquer data, de lead que entrou no período",
+    exclui: "desistência",
+  },
+  vendas: {
+    id: "vendas",
+    nome: "Vendas",
+    definicao: "Dos leads do período, quem virou cliente (o marco do fechamento).",
+    formula: "nº de leads do período com o marco do fechamento",
+    fonte: "Painel (marco de fechamento)",
+    inclui: "venda sem valor registrado (legado)",
+    exclui: "venda de lead que entrou antes do período",
+  },
+  onde_trava: {
+    id: "onde_trava",
+    nome: "Onde trava",
+    definicao:
+      "A etapa com mais pessoas paradas: não passaram, não agendaram por outro caminho e o prazo da etapa já venceu (as 2 h e 24 h do robô, 48 h sem atividade na conversa, as 2 h úteis do convite aceito, as 24 h úteis da reunião sem desfecho, 30 dias de negociação; sem o robô, o prazo da Fila). Sem meta nem média.",
+    formula: "por etapa: entraram − passaram − outro caminho − ainda no prazo; vence o maior (empate: a mais funda), com 3 ou mais",
+    fonte: "Painel + Robô",
+    inclui: "quem desistiu depois de agendar (trava em “a reunião não aconteceu”)",
+    exclui:
+      "testes, cópias de duplicado e inscritos da live (a Fila da live) e, com o robô no período, os de antes de 29/10 que não estão na Fila",
   },
   // ---- conta do Instagram (Conteúdo). Não são KPI do funil, mas o ⓘ e o
   // briefing leem do MESMO dicionário — um fato, um lugar. ----

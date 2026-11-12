@@ -276,6 +276,96 @@ export function fatoDoEpisodio(iso: string | null | undefined, reabertoEm?: stri
   return !Number.isFinite(reab) || ms(iso) >= reab ? iso : undefined;
 }
 
+/**
+ * A pessoa mandou mensagem ao robô NESTE episódio: o `respondeu_em` do episódio, ou
+ * a última mensagem dela posterior ao reaberto ("respondeu depois do reaberto").
+ * Regra ÚNICA de `situacaoDoRobo` e de `encerramentoDoRobo` (K15).
+ */
+function respondeuNoEpisodio(
+  l: Pick<Lead, "roboRespondeuEm" | "roboUltimaMsgClienteEm">,
+  reabertoEm?: string,
+): boolean {
+  const reab = ms(reabertoEm);
+  const ultimaMsgCliente = l.roboUltimaMsgClienteEm;
+  return Boolean(
+    fatoDoEpisodio(l.roboRespondeuEm, reabertoEm) ||
+      (ultimaMsgCliente && (!Number.isFinite(reab) || ms(ultimaMsgCliente) > reab)),
+  );
+}
+
+/**
+ * A etapa do robô que vale NESTE episódio. A etapa é SOBRESCREVE: num lead
+ * reaberto, ela só vale se o robô mexeu na conversa depois do reaberto (senão é a
+ * da conversa antiga). Sem WhatsApp e opt-out valem sempre. Regra ÚNICA de
+ * `situacaoDoRobo` e de `encerramentoDoRobo`.
+ */
+function etapaDoEpisodio(l: Lead, reabertoEm?: string): RoboEtapa | null {
+  const reab = ms(reabertoEm);
+  const visto = fatoDoEpisodio(l.roboVistoEm, reabertoEm);
+  const convite = fatoDoEpisodio(l.roboConviteEm, reabertoEm);
+  const aceitou = fatoDoEpisodio(l.roboAceitouEm, reabertoEm);
+  const optOut = Boolean(l.roboOptOutEm) || l.roboEtapa === "opt_out";
+  let etapa: RoboEtapa | null = l.roboEtapa ?? null;
+  if (
+    etapa &&
+    etapa !== "sem_whatsapp" &&
+    etapa !== "opt_out" &&
+    Number.isFinite(reab) &&
+    !(ms(l.roboUltimaInteracaoEm) > reab)
+  ) {
+    etapa = visto ? "sem_mensagem" : null;
+  }
+  // "Transferido" sem o aceite NESTE episódio: o `transferido_em` é da conversa de
+  // antes do reaberto (o robô não o limpa) e a pessoa voltou a falar com o robô —
+  // é uma conversa nova, não um aceite (senão ficava sem grupo, sem balde e sem dono).
+  if (etapa === "transferido" && !aceitou) etapa = convite ? "convite_pendente" : "em_conversa";
+  if (optOut) etapa = "opt_out";
+  return etapa;
+}
+
+/** Por que o ROBÔ encerrou a conversa (fim registrado por ele; o status no painel não muda). */
+export type MotivoDoRobo = "pos-convite" | "esfriou" | "opt-out";
+
+/**
+ * O fim da conversa pelo robô (F3-D3, Fase 3) — predicado ÚNICO de "Por que
+ * perdemos" (as linhas do robô) e de "encerrado" nas três juntas do robô do funil
+ * do processo. PURO.
+ *
+ *  0. Aceite NESTE episódio → nunca é fim pelo robô, nem com opt-out depois: o convite
+ *     virou Calendly, a pessoa está no "Aceitou o convite" da Fila (do comercial, que
+ *     liga quando não há WhatsApp) e a barra também não a põe em "encerrados"
+ *     (`situacaoDoRobo` exige `!aceitou` no balde). Assim "Por que perdemos" e a junta
+ *     `agendou-apos-aceite` contam a mesma pessoa do mesmo jeito.
+ *  1. Opt-out (vale sempre, como em `situacaoDoRobo`), com ou sem resposta.
+ *  2. Os outros só com resposta da pessoa NESTE episódio: quem o robô encerrou sem
+ *     resposta continua no Resgate do comercial (não é linha do robô).
+ *  3. Pela etapa do episódio: "declinou" (o robô grava frio com o convite enviado —
+ *     não é uma recusa registrada, K24) → `pos-convite`; "frio" ou `encerrado_em` do
+ *     episódio → `esfriou`.
+ *  4. Pausado sozinho NÃO é fim: alguém assumiu (D4).
+ *
+ * `em` é do episódio (K15): o `encerrado_em` do episódio, senão a última interação
+ * do robô quando posterior ao reaberto; uma data de conversa antiga nunca ganha o
+ * "vale o primeiro" contra o registro do comercial de agora.
+ */
+export function encerramentoDoRobo(l: Lead, reabertoEm?: string): { motivo: MotivoDoRobo; em: string | null } | null {
+  if (fatoDoEpisodio(l.roboAceitouEm, reabertoEm)) return null;
+  if (l.roboOptOutEm || l.roboEtapa === "opt_out") return { motivo: "opt-out", em: l.roboOptOutEm ?? null };
+  if (!respondeuNoEpisodio(l, reabertoEm)) return null;
+  const etapa = etapaDoEpisodio(l, reabertoEm);
+  const encerradoEm = fatoDoEpisodio(l.roboEncerradoEm, reabertoEm);
+  let motivo: MotivoDoRobo | null = null;
+  if (etapa === "declinou") motivo = "pos-convite";
+  else if (etapa === "frio" || encerradoEm) motivo = "esfriou";
+  if (!motivo) return null;
+  const reab = ms(reabertoEm);
+  const ultima =
+    l.roboUltimaInteracaoEm && (!Number.isFinite(reab) || ms(l.roboUltimaInteracaoEm) > reab)
+      ? l.roboUltimaInteracaoEm
+      : undefined;
+  return { motivo, em: encerradoEm ?? ultima ?? null };
+}
+
 export function situacaoDoRobo(l: Lead, ctx: ContextoSituacao): SituacaoRobo {
   if (!ctx.ligado) return { ...DESLIGADA };
   const reab = ms(ctx.reabertoEm);
@@ -289,32 +379,12 @@ export function situacaoDoRobo(l: Lead, ctx: ContextoSituacao): SituacaoRobo {
   const aceitou = doEpisodio(l.roboAceitouEm);
   const encerradoEm = doEpisodio(l.roboEncerradoEm);
   const ultimaInteracao = l.roboUltimaInteracaoEm;
-  const ultimaMsgCliente = l.roboUltimaMsgClienteEm;
   // "Respondeu depois do reaberto" = a última mensagem da pessoa é posterior a ele.
-  const respondeu = Boolean(
-    doEpisodio(l.roboRespondeuEm) ||
-      (ultimaMsgCliente && (!Number.isFinite(reab) || ms(ultimaMsgCliente) > reab)),
-  );
+  const respondeu = respondeuNoEpisodio(l, ctx.reabertoEm);
   const optOut = Boolean(l.roboOptOutEm) || l.roboEtapa === "opt_out";
 
-  // A etapa é SOBRESCREVE: num lead reaberto, ela só vale se o robô mexeu na
-  // conversa depois do reaberto (senão é a da conversa antiga). Sem WhatsApp e
-  // opt-out valem sempre.
-  let etapa: RoboEtapa | null = l.roboEtapa ?? null;
-  if (
-    etapa &&
-    etapa !== "sem_whatsapp" &&
-    etapa !== "opt_out" &&
-    Number.isFinite(reab) &&
-    !(ms(ultimaInteracao) > reab)
-  ) {
-    etapa = visto ? "sem_mensagem" : null;
-  }
-  // "Transferido" sem o aceite NESTE episódio: o `transferido_em` é da conversa de
-  // antes do reaberto (o robô não o limpa) e a pessoa voltou a falar com o robô —
-  // é uma conversa nova, não um aceite (senão ficava sem grupo, sem balde e sem dono).
-  if (etapa === "transferido" && !aceitou) etapa = convite ? "convite_pendente" : "em_conversa";
-  if (optOut) etapa = "opt_out";
+  // A etapa do episódio (SOBRESCREVE só vale se o robô mexeu depois do reaberto).
+  const etapa = etapaDoEpisodio(l, ctx.reabertoEm);
 
   const base = maxIso(l.createdAt, ctx.reabertoEm) ?? l.createdAt;
   const antesDoRobo = diaBrt(base) < ROBO_INICIO && !l.roboVistoEm;

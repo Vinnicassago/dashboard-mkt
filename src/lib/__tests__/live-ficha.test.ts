@@ -1,11 +1,13 @@
 /**
  * Live 01/12 — etapa 2 (E1-15): a ficha do lead. Vocabulário das respostas, as
  * leituras derivadas (atendimento em cinco estados, estado da reunião), os
- * filtros e o CSV de Leads e as etapas novas do funil. Fixture sintética.
+ * filtros e o CSV de Leads; no Funil, a live fica fora do trecho do robô (Fase 3).
+ * Fixture sintética.
  */
 import { describe, expect, it } from "vitest";
 import { kpisDoPeriodo } from "../kpis";
-import { montarFunil } from "../funil";
+import { montarFunilDaTela } from "../funil";
+import { funilDoProcesso } from "../funil-processo";
 import {
   CSV_CABECALHO,
   FILTRO_VAZIO,
@@ -199,46 +201,42 @@ describe("Leads — filtros e CSV da ficha", () => {
   });
 });
 
-describe("Funil — Qualificado e Clicou na comunidade entre Leads e o 1º contato", () => {
-  const kp = (data: DashboardData) => kpisDoPeriodo(data, CAPTACAO, { hoje: HOJE, agora: AGORA });
-  const funil = (data: DashboardData, vista: "periodo" | "coorte") =>
-    montarFunil({ data, range: CAPTACAO, kpis: kp(data), robo: null, comercial: null, vista, hoje: HOJE, agora: AGORA });
-
-  it("sem nenhum lead com classe ou clique, o funil fica como era", () => {
-    const data = base([lead("1", "2026-11-16T19:00:00.000Z"), lead("2", "2026-11-17T19:00:00.000Z")]);
-    expect(funil(data, "coorte").etapas.map((e) => e.key)).not.toContain("qualificados");
-  });
-
-  it("com a ficha: a ordem é Leads → Qualificado → Comunidade → 1º contato, e a taxa diz sobre quem", () => {
-    const leads = [
-      ...["A", "A", "B", "C", "X"].map((c, i) =>
-        lead(String(i + 1), `2026-11-1${6 + (i % 3)}T19:00:00.000Z`, {
-          classe: c as Lead["classe"],
-          comunidadeEm: i < 2 ? "2026-11-18T19:00:00.000Z" : undefined,
-        }),
-      ),
-      lead("9", "2026-11-18T19:00:00.000Z"), // sem as respostas
-    ];
-    const f = funil(base(leads), "coorte");
-    const keys = f.etapas.map((e) => e.key);
-    const i = keys.indexOf("leads");
-    expect(keys.slice(i, i + 4)).toEqual(["leads", "qualificados", "comunidade", "primeiro_contato"]);
-    const q = f.etapas.find((e) => e.key === "qualificados")!;
-    expect(q.valor).toBe(3);
-    expect(q.daAnterior).toBeCloseTo(3 / 5); // sobre os 5 com classe, não os 6
-    expect(q.baseDaTaxa).toBe("dos que têm classe");
-    expect(q.nota).toContain("1 lead sem classe");
-    const c = f.etapas.find((e) => e.key === "comunidade")!;
-    expect(c.valor).toBe(2);
-    expect(c.baseDaTaxa).toBe("dos leads");
-    expect(f.etapas.find((e) => e.key === "primeiro_contato")!.baseDaTaxa).toBe("dos leads");
-  });
-
-  it("vista de período: a comunidade conta cliques do período (eventos) — sem taxa", () => {
-    const leads = [lead("1", "2026-11-16T19:00:00.000Z", { classe: "A", comunidadeEm: "2026-11-19T10:00:00.000Z" })];
-    const c = funil(base(leads), "periodo").etapas.find((e) => e.key === "comunidade")!;
-    expect(c.valor).toBe(1);
-    expect(c.daAnterior).toBeUndefined();
-    expect(c.semTaxa).toBeDefined();
+describe("Funil — a live fica fora do trecho do robô e das juntas antes de Agendaram (F3-D1)", () => {
+  it("inscritos da live ficam fora do trecho do robô (`fora.live`), fora das juntas antes de Agendaram (`foraDasJuntas.live`) e dentro de Agendaram em diante; o Funil não tem degrau 'qualificados' nem 'comunidade'", () => {
+    const robo = { ligado: true, lidoAte: "2026-11-20T14:55:00.000Z", confiavel: true, sync: { ultimoOk: "2026-11-20T14:55:00.000Z", falha: null } };
+    const data = base([
+      lead("1", "2026-11-16T19:00:00.000Z", { classe: "A", comunidadeEm: "2026-11-18T19:00:00.000Z" }),
+      lead("2", "2026-11-17T19:00:00.000Z", { classe: "B", status: "agendado", bookedAt: "2026-11-18T19:00:00.000Z", meetingFor: "2026-11-25T13:00:00.000Z" }),
+      lead("3", "2026-11-17T20:00:00.000Z", { classe: "C" }),
+      lead("9", "2026-11-18T19:00:00.000Z"), // sem as respostas: é do robô
+    ]);
+    const kpis = kpisDoPeriodo(data, CAPTACAO, { hoje: HOJE, agora: AGORA });
+    const ligado = funilDoProcesso({ data, range: CAPTACAO, kpis, eventos: [], robo, agora: AGORA });
+    expect(ligado.comRobo).toBe(true);
+    expect(ligado.fora.live).toBe(3);
+    expect(ligado.noRobo).toBe(1);
+    expect(ligado.foraDasJuntas.live).toBe(3);
+    const junta = (p: typeof ligado, id: string) => p.juntas.find((j) => j.id === id)!;
+    // Antes de Agendaram, só o lead sem classe é julgado (na cadeia do robô).
+    expect(junta(ligado, "robo-falou").entradas + junta(ligado, "fora-agendou").entradas).toBe(1);
+    // De Agendaram em diante, a live conta: o B que agendou está em Agendaram e em `realizou`.
+    expect(ligado.degraus.find((d) => d.id === "agendaram")?.n).toBe(kpis.agendaram.valor);
+    expect(kpis.agendaram.valor).toBe(1);
+    expect(junta(ligado, "realizou").entradas).toBe(1);
+    // Sem o robô, a live também não entra em `agendou`.
+    const desligado = funilDoProcesso({ data, range: CAPTACAO, kpis, eventos: [], agora: AGORA });
+    expect(desligado.foraDasJuntas.live).toBe(3);
+    expect(junta(desligado, "agendou").entradas).toBe(1);
+    // Os degraus da live saíram do Funil (o painel da live no Início é o lugar deles).
+    for (const p of [ligado, desligado]) {
+      const ids = p.degraus.map((d) => d.id as string);
+      expect(ids).not.toContain("qualificados");
+      expect(ids).not.toContain("comunidade");
+    }
+    const tela = montarFunilDaTela({ data, range: CAPTACAO, rangeKey: `${CAPTACAO.from}..${CAPTACAO.to}`, kpis, eventos: [], robo, agora: AGORA, hoje: HOJE });
+    const linhas = (tela.funil?.linhas ?? []).map((l) => l.id as string);
+    expect(linhas).toContain("agendaram");
+    expect(linhas).not.toContain("qualificados");
+    expect(linhas).not.toContain("comunidade");
   });
 });

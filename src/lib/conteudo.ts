@@ -198,7 +198,7 @@ const temOsDoisLados = (r: IgAccountDaily) => r.followsDay != null && r.unfollow
  *
  * Total, início e líquido são os de `seguidoresDoPeriodo` (metrics.ts), a regra
  * ÚNICA — a mesma de `igAccountTotals`, que o Início da marca de seguidores
- * (cards), o Funil e a IA leem: um fato, um número. Líquido e ganhos/perdas
+ * (cards) e a IA leem: um fato, um número. Líquido e ganhos/perdas
  * cobrem os MESMOS dias (o início é a véspera do período), e com a série
  * completa o líquido É ganhos − perdas. Total 0 é desconhecido: `fim` é o
  * último total CONHECIDO e `temTotal` diz se há algum.
@@ -350,7 +350,7 @@ const div = (a: number, b: number) => (b > 0 ? a / b : 0);
  * e chamar isto de "funil orgânico" fazia 200 mil de alcance de anúncio virar
  * "gancho fraco". Os novos seguidores são o líquido de `seguidoresDoPeriodo`
  * (via `netNew`): os mesmos dias da nota do card Seguidores, e o mesmo número
- * do funil de descoberta (Funil) e do Início da marca de seguidores.
+ * do Início da marca de seguidores.
  */
 export function funilDoPerfil(rows: IgAccountDaily[], range?: DateRange): FunnelStage[] {
   const t = igAccountTotals(rows, range);

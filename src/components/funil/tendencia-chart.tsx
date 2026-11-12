@@ -6,14 +6,15 @@ import type { PontoTendencia } from "@/lib/funil";
 import { formatDateShort, formatInt, formatPercent } from "@/lib/format";
 
 /**
- * As três taxas-chave, semana a semana. Semana sem denominador fica sem ponto
- * (lacuna na linha), não em 0%. A dica mostra a amostra de cada taxa: 100% com
- * 1 lead se vê, mas se vê como 1 lead.
+ * As duas taxas do funil, semana a semana: visita → lead e lead → agendada.
+ * Semana com menos de `AMOSTRA_MINIMA` na base fica sem ponto (lacuna na linha),
+ * não em 0% — a MESMA régua do funil (`tendenciaDasTaxas`). A dica mostra a
+ * amostra de cada taxa. O "1º contato no prazo" saiu (Fase 3, F3-D14): desde o
+ * robô ele mede só quem não passa por ele.
  */
 
 const SERIES = [
   { key: "visitaLead", label: "Visita → lead", n: "visitas", color: CHART.series[1] },
-  { key: "leadContatoNoPrazo", label: "Lead → 1º contato no prazo", n: "contato", color: CHART.series[2] },
   { key: "leadAgendada", label: "Lead → agendada", n: "leads", color: CHART.series[0] },
 ] as const;
 

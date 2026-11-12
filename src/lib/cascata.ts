@@ -1,17 +1,14 @@
 /**
- * A CASCATA — do anúncio à venda, os quatro sistemas na mesma coluna.
+ * A CASCATA — o topo do funil (Meta → LP → Leads), com as duas âncoras e o selo.
  *
- * O problema que ela resolve é literalmente a queixa que originou o redesenho:
- * as etapas da campanha existem, são medidas, e vivem em telas separadas que
- * nunca somam. Impressões em /trafego, visitas em /funil, leads em /leads,
- * conversas em /robo, reuniões em /comercial — e nenhuma tela mostra a coluna
- * inteira, então ninguém vê onde o dinheiro para.
+ * De Leads para baixo o funil é o do PROCESSO (`lib/funil-processo.ts`: robô,
+ * agendamento, reunião, venda — a coorte lida do lead). Aqui ficam só os três
+ * degraus de cima, que vêm de outros sistemas:
  *
- * Três decisões que fazem a leitura funcionar:
- *
- * 1. DUAS ÂNCORAS. Os degraus do topo medem % das impressões; a partir de LEADS,
- *    Leads = 100%. Com uma âncora só, oito linhas seguidas imprimem "0,0% do
- *    topo" — o que é mentira por arredondamento, não informação.
+ * 1. DUAS ÂNCORAS. Acima de Leads, a base são as impressões e cada degrau é "% da
+ *    anterior"; de Leads para baixo, Leads = 100%. Com uma âncora só, oito linhas
+ *    seguidas imprimiam "0,0% do topo" — mentira por arredondamento, não
+ *    informação.
  *
  * 2. SELO DE FONTE em cada degrau, e junta tracejada onde o dado troca de
  *    sistema. Quando dois números não batem, saber que vieram de bancos
@@ -23,22 +20,22 @@
  *    duas definições incompatíveis e chamar de etapa produzia a maior "perda"
  *    do funil, que não existe.
  *
- * Função PURA: recebe os números dos quatro sistemas já carregados.
+ * `Degrau.valor` é `number`: no topo não há duas fontes para o mesmo fato. Quando
+ * houver (o Calendly, 2ª fonte de reuniões), a regra é `valor: null` + nota —
+ * nunca escolher um lado em silêncio.
+ *
+ * Função PURA.
  */
 
-import { bucketOfAd, countAttended, countClients, countMeetings, filterAds, filterLeads } from "./metrics";
+import { bucketOfAd, filterAds, lpParouNoPeriodo } from "./metrics";
 import type { DateRange } from "./metrics";
 import type { DashboardData } from "./types";
-import type { FilaEtapa } from "./fila";
-import type { Dono } from "./dono";
 import { MIN_REUNIOES } from "./trust";
-import { custoExibivel, type KpisDoPeriodo } from "./kpis";
-import { formatDecimal, formatInt } from "./format";
+import type { KpisDoPeriodo } from "./kpis";
 
 // ---------------------------------------------------------------- vocabulário
 
-export type Fonte = "meta" | "lp" | "crm" | "robo" | "comercial";
-export type { Dono };
+export type Fonte = "meta" | "lp" | "crm" | "robo";
 
 /**
  * Abaixo disto um número não sustenta taxa nem custo: "1 de 1" imprime "100,0%" e
@@ -52,483 +49,96 @@ export const FONTE_META: Record<Fonte, { label: string; sistema: string }> = {
   lp: { label: "Landing page", sistema: "LP" },
   crm: { label: "Painel", sistema: "Painel" },
   robo: { label: "Robô (WhatsApp)", sistema: "Robô" },
-  // Mesmo banco do robô, mas outra mesa: quem age aqui é o especialista, não o
-  // bot. Rotular de "Robô" faria o degrau parecer automático quando ele é o
-  // ponto do funil que mais depende de alguém pegar o telefone.
-  comercial: { label: "Atendimento", sistema: "Atendimento" },
 };
 
 export interface Degrau {
-  key: string;
+  key: "impressoes" | "visitas" | "leads";
   label: string;
-  /** `null` = não dá para afirmar (sem leitura, ou fontes divergem). */
-  valor: number | null;
+  valor: number;
   fonte: Fonte;
-  /** Conversão a partir do degrau anterior (0–1). */
+  /** Conversão a partir do degrau anterior (0–1): só com base ≥ `AMOSTRA_MINIMA` e valor ≤ base. */
   daAnterior?: number;
-  /** Fração da âncora vigente (0–1). */
-  daAncora?: number;
-  /** Este degrau reinicia a contagem percentual (vira 100%). */
-  ehAncora?: boolean;
+  /** Por que não há "% da anterior" quando HÁ um degrau de base. */
+  semTaxa?: "amostra" | "nao-aninhada" | "lp-sem-dado";
   /** O dado troca de sistema ANTES deste degrau — junta tracejada. */
   trocaDeSistema?: boolean;
-  /** Quanto da verba de conversão foi gasto por unidade que chegou aqui. */
-  custoUnitario?: number;
-  /** "≥" (piso) ou "≤" (teto): a mesma ressalva que o investimento tem no cartão do Início. */
-  custoPrefixo?: "≥" | "≤";
-  /** Pessoas perdidas em relação ao degrau anterior. */
-  perda?: number;
-  /** De quem é a ação nesta junta. */
-  dono?: Dono;
-  /** Quantos estão parados na junta que leva a este degrau — o que dá para recuperar. */
-  parados?: number;
-  /**
-   * Mídia já paga por essas pessoas, ao custo do degrau onde elas ESTÃO — não
-   * do que ainda não alcançaram. Quem espera o 1º contato já foi transferido:
-   * custou o preço de um transferido, não o de um abordado. A primeira versão
-   * usava o custo do destino e inflou o número do farol em 4,6×.
-   */
-  midiaParada?: number;
-  /** Etapa da Fila correspondente — fonte única de rótulo, prazo e dono. */
-  etapaFila?: FilaEtapa;
-  /** Ressalva colada ao degrau. */
-  nota?: string;
-}
-
-/** Onde o funil mais perde gente depois do lead — a resposta a "onde vaza". */
-export interface Vazamento {
-  degrau: Degrau;
-  anterior: Degrau;
-  /** Perdidas na junta, sem contar quem está parado nela (esses voltam pela Fila). */
-  pessoas: number;
-  frase: string;
-}
-
-/** O que a perda quer dizer em cada junta, na língua de quem age. */
-const FRASE_PERDA: Record<string, string> = {
-  conversas: "não receberam a 1ª mensagem do robô",
-  responderam: "não responderam à 1ª mensagem do robô",
-  convite: "responderam, mas não chegaram ao convite",
-  transferidos: "não aceitaram o convite para falar com o especialista",
-  abordados: "não foram abordados pelo especialista",
-  reuniao: "foram abordados e não chegaram à reunião",
-  negocio: "fizeram reunião e não fecharam",
-  reunioes: "não agendaram reunião",
-  compareceu: "agendaram e não compareceram",
-  clientes: "fizeram reunião e não fecharam",
-};
-
-/**
- * A maior perda em PESSOAS depois do lead, descontando quem está parado na junta
- * (esses são fila, não vazamento). Com toda junta abaixo de 50% pintada de
- * vermelho, o Funil acendia quatro alarmes do mesmo tamanho — dois deles
- * artefatos de medição — e não respondia à própria pergunta. Função pura.
- */
-export function maiorVazamento(degraus: Degrau[]): Vazamento | null {
-  const inicio = degraus.findIndex((d) => d.key === "leads");
-  let maior: Vazamento | null = null;
-  for (let i = Math.max(1, inicio + 1); i < degraus.length; i++) {
-    const d = degraus[i];
-    const ant = degraus[i - 1];
-    if (d.ehAncora || d.valor == null || ant.valor == null || ant.valor < AMOSTRA_MINIMA) continue;
-    const pessoas = Math.max(0, ant.valor - d.valor) - (d.parados ?? 0);
-    if (pessoas <= 0 || (maior && pessoas <= maior.pessoas)) continue;
-    maior = {
-      degrau: d,
-      anterior: ant,
-      pessoas,
-      frase: FRASE_PERDA[d.key] ?? `não chegaram a “${d.label.toLowerCase()}”`,
-    };
-  }
-  return maior;
-}
-
-/**
- * Versão curta da cascata, para a home.
- *
- * Onze degraus com selo de fonte, custo unitário e nota é peça de consulta. Aqui
- * ficam, de Leads para baixo: os degraus com gente parada, o maior vazamento (e o
- * degrau de onde ele parte, para a perda sair com o número certo) e o fim do
- * funil. Começa em Leads porque acima dele a unidade é impressão: o maior número
- * do bloco era o menos acionável. As taxas são RECALCULADAS entre os que sobraram,
- * senão o percentual apontaria para um degrau que não está mais na tela.
- *
- * A versão completa continua em /funil.
- */
-export function resumirCascata(degraus: Degrau[]): Degrau[] {
-  const base = degraus.slice(Math.max(0, degraus.findIndex((d) => d.key === "leads")));
-  const vazamento = maiorVazamento(base);
-  const iv = vazamento ? base.indexOf(vazamento.degrau) : -1;
-  const manter = base.filter(
-    (d, i) =>
-      i === 0 ||
-      d.ehAncora ||
-      // Reunião é a north star: o resumo nunca pula de Leads para Clientes (B22).
-      d.key === "reunioes" ||
-      d.key === "reuniao" ||
-      (d.parados ?? 0) > 0 ||
-      i === iv ||
-      i === iv - 1 ||
-      i === base.length - 1 ||
-      d.valor === null,
-  );
-
-  return manter.map((d, i) => {
-    if (i === 0) return { ...d, daAnterior: undefined, perda: undefined };
-    const ant = manter[i - 1];
-    // Ao cruzar uma âncora a unidade muda (impressões → pessoas): uma "perda"
-    // de 380 mil entre impressões e leads não é gente perdida, é troca de base.
-    // E abaixo da amostra mínima a taxa não é taxa.
-    const podeCalcular =
-      !d.ehAncora && d.valor != null && ant.valor != null && ant.valor >= AMOSTRA_MINIMA;
-    return {
-      ...d,
-      // Sem trocaDeSistema no resumo: com degraus omitidos, a junta deixaria de
-      // marcar uma fronteira real e viraria enfeite.
-      trocaDeSistema: false,
-      daAnterior: podeCalcular ? d.valor! / ant.valor! : undefined,
-      perda: podeCalcular ? Math.max(0, ant.valor! - d.valor!) : undefined,
-    };
-  });
-}
-
-/** Coisa que parece perda e não é — metade da resposta a "para onde olhar". */
-export interface NaoAgir {
-  titulo: string;
-  detalhe: string;
-}
-
-export interface CascataResult {
-  degraus: Degrau[];
-  naoAgir: NaoAgir[];
-  /** Verba de conversão do período — o denominador de todo custo unitário. */
-  investimentoConversao: number;
-  /** Número da Meta que NÃO entra em nenhuma taxa. */
-  conversoesPixel: number;
-}
-
-// ---------------------------------------------------------------- entradas
-
-export interface CascataRobo {
-  conversas: number;
-  responderam: number;
-  convidados: number;
-  transferidos: number;
-  /** Parados esperando responder ao convite. */
-  convitePendente: number;
-}
-
-export interface CascataComercial {
-  abordados: number;
-  reunioesRealizadas: number;
-  negociosFechados: number;
-  /** Transferidos que ainda não receberam o primeiro contato. */
-  aguardandoAbordagem: number;
 }
 
 export interface CascataInput {
   data: DashboardData;
   range?: DateRange;
-  /** `null` quando o robô está desligado ou a leitura falhou. */
-  robo: CascataRobo | null;
-  comercial: CascataComercial | null;
   /**
-   * O robô faz o 1º contato (`estadoDoRoboAgora(...).ligado`, a MESMA chave da
-   * Fila). Ligado, a Fila não tem mais o grupo "Novos": os parados do 1º contato
-   * humano ficam sem link (o número não é o de grupo nenhum da página). Ausente =
-   * desligado.
+   * Os KPIs do período (`kpisDoPeriodo`). A cascata não recalcula leads: lê daqui,
+   * para o degrau "Leads" ser o mesmo número do resto do painel. O CPL e a verba da
+   * linha Leads são os de `kpisDoPeriodo`, escritos pela tela (`montarFunilDaTela`,
+   * com `custoExibivel` + `mostrar`) — um texto por fato, não um 2º aqui.
    */
-  roboLigado?: boolean;
-  /**
-   * Os KPIs do período (`kpisDoPeriodo`). A cascata não recalcula leads, CPL nem
-   * verba: lê daqui, para o degrau "Leads" e o "R$ X cada" dele serem os mesmos
-   * números do resto do painel.
-   */
-  kpis: Pick<KpisDoPeriodo, "leads" | "leadsConversao" | "cpl" | "investimentoConversao">;
+  kpis: Pick<KpisDoPeriodo, "leads">;
+}
+
+export interface CascataResult {
+  degraus: Degrau[];
+  /** Impressões de descoberta do período — fora da coluna (o ⓘ de Impressões diz quantas). */
+  impressoesDescoberta: number;
 }
 
 // ---------------------------------------------------------------- montagem
 
-const div = (a: number, b: number) => (b > 0 ? a / b : 0);
+/**
+ * "% da anterior" só entre populações ANINHADAS e com amostra: abaixo de
+ * `AMOSTRA_MINIMA` na base não é taxa; mais gente que na base é outra população.
+ */
+function taxaAninhada(d: Degrau, base: number): void {
+  if (base < AMOSTRA_MINIMA) d.semTaxa = "amostra";
+  else if (d.valor > base) d.semTaxa = "nao-aninhada";
+  else d.daAnterior = d.valor / base;
+}
 
 export function montarCascata(input: CascataInput): CascataResult {
-  const { data, range, robo, comercial, kpis } = input;
+  const { data, range, kpis } = input;
   const todosAds = filterAds(data.adDaily, range);
   // Escopo de CONVERSÃO no topo (S16): impressões de alcance/engajamento contra
   // verba e leads de conversão misturavam dois funis numa coluna só.
-  const ads = todosAds.filter((r) => bucketOfAd(r) === "conversao");
-  const impressoesDescoberta = todosAds
-    .filter((r) => bucketOfAd(r) === "descoberta")
-    .reduce((s, r) => s + r.impressions, 0);
-  const leads = filterLeads(data.leads, range);
-  const lp = (data.lpDaily ?? []).filter(
-    (r) => !range || (r.date >= range.from && r.date <= range.to),
-  );
-
-  const impressoes = ads.reduce((s, r) => s + r.impressions, 0);
-  const cliquesBrutos = todosAds.reduce((s, r) => s + r.clicks, 0);
-  const conversoesPixel = todosAds.reduce((s, r) => s + (r.leads ?? 0), 0);
-  const visitas = lp.reduce((s, r) => s + r.visits, 0);
-  const ctaCliques = lp.reduce((s, r) => s + r.clicks, 0);
-  const envios = lp.reduce((s, r) => s + r.formSubmits, 0);
-
-  const leadCount = kpis.leads.valor;
-  // Daqui para baixo a cascata é COORTE: dos leads que entraram no período,
-  // quantos agendaram, compareceram, fecharam. As reuniões agendadas NO período
-  // (a north star) são outro número, com outro nome (ver dicionario.ts).
-  const reunioesPainel = countMeetings(leads);
-  const compareceuPainel = countAttended(leads);
-  const clientesPainel = countClients(leads);
-
-  const verba = kpis.investimentoConversao.valor;
-  /** O custo de um lead é o CPL do dicionário — não verba ÷ todos os leads. */
-  const custoLead = custoExibivel(kpis.cpl) && kpis.cpl.n >= AMOSTRA_MINIMA ? kpis.cpl.valor : undefined;
+  const impressoes = todosAds.filter((r) => bucketOfAd(r) === "conversao").reduce((s, r) => s + r.impressions, 0);
+  const impressoesDescoberta = todosAds.filter((r) => bucketOfAd(r) === "descoberta").reduce((s, r) => s + r.impressions, 0);
+  const visitas = (data.lpDaily ?? [])
+    .filter((r) => !range || (r.date >= range.from && r.date <= range.to))
+    .reduce((s, r) => s + r.visits, 0);
 
   const degraus: Degrau[] = [];
-  const push = (d: Degrau) => degraus.push(d);
 
-  /**
-   * Custo por unidade que chegou até aqui — só com amostra: com 1 pessoa,
-   * "R$ 1.925,56 cada" é a verba inteira, não um custo.
-   */
-  const custo = (v: number | null) => (v && v >= AMOSTRA_MINIMA ? verba / v : undefined);
-
-  // ---- topo: âncora nas impressões -------------------------------------
-  push({
-    key: "impressoes",
-    label: "Impressões",
-    valor: impressoes,
-    fonte: "meta",
-    ehAncora: true,
-    daAncora: 1,
-    nota:
-      impressoesDescoberta > 0
-        ? `só anúncios de conversão — ${formatInt(impressoesDescoberta)} de descoberta ficam fora desta coluna`
-        : undefined,
-  });
+  // ---- topo: âncora nas impressões (só com impressões de conversão) ----
+  if (impressoes > 0) {
+    degraus.push({ key: "impressoes", label: "Impressões", valor: impressoes, fonte: "meta" });
+  }
 
   if (visitas > 0) {
-    push({
+    const visita: Degrau = {
       key: "visitas",
-      label: "Visitas na landing page",
+      label: "Visitas na LP",
       valor: visitas,
       fonte: "lp",
-      trocaDeSistema: true,
-      daAnterior: div(visitas, impressoes),
-      daAncora: div(visitas, impressoes),
-      custoUnitario: custo(visitas),
-      dono: "MKT",
-    });
-    push({
-      key: "envios",
-      label: "Envios de formulário",
-      valor: envios,
-      fonte: "lp",
-      daAnterior: div(envios, visitas),
-      daAncora: div(envios, impressoes),
-      nota: "eventos, não pessoas — um mesmo visitante pode enviar duas vezes",
-    });
+      trocaDeSistema: impressoes > 0,
+    };
+    if (impressoes > 0) taxaAninhada(visita, impressoes);
+    degraus.push(visita);
   }
 
   // ---- LEADS: a segunda âncora. Daqui para baixo, Leads = 100% ----------
-  const antesDeLeads = visitas > 0 ? envios : impressoes;
-  push({
+  const leads: Degrau = {
     key: "leads",
     label: "Leads",
-    valor: leadCount,
+    valor: kpis.leads.valor,
     fonte: "crm",
-    trocaDeSistema: visitas > 0,
-    ehAncora: true,
-    daAnterior: div(leadCount, antesDeLeads),
-    daAncora: 1,
-    custoUnitario: custoLead,
-    custoPrefixo:
-      custoLead !== undefined && kpis.cpl.confianca
-        ? kpis.cpl.confianca.nivel === "piso"
-          ? "≥"
-          : "≤"
-        : undefined,
-    perda: Math.max(0, antesDeLeads - leadCount),
-    dono: "MKT",
-    nota:
-      custoLead !== undefined && kpis.leadsConversao.valor !== leadCount
-        ? `pessoas cadastradas; o custo é o CPL, sobre os ${formatInt(kpis.leadsConversao.valor)} leads de conversão`
-        : "pessoas cadastradas — é este número que se chama “lead”",
-  });
+    trocaDeSistema: degraus.length > 0,
+  };
+  // A base de Leads: as visitas, senão as impressões. A landing page que PAROU no
+  // período (há histórico, nenhuma linha agora) não troca a base em silêncio para
+  // as impressões: sem taxa, e o alerta `lp-sem-dado` diz por quê (K13).
+  const base = visitas > 0 ? visitas : impressoes > 0 ? impressoes : 0;
+  if (lpParouNoPeriodo(data, range)) leads.semTaxa = "lp-sem-dado";
+  else if (base > 0) taxaAninhada(leads, base);
+  degraus.push(leads);
 
-  // ---- robô ------------------------------------------------------------
-  if (robo) {
-    const seq: [string, string, number, Dono, number | undefined][] = [
-      // Quem inicia é o robô: chamar de "conversa" contava como interação quem
-      // nunca respondeu — e escondia que a queda está na primeira mensagem.
-      ["conversas", "Robô mandou a 1ª mensagem", robo.conversas, "MKT", undefined],
-      ["responderam", "Responderam à 1ª mensagem", robo.responderam, "BOT", undefined],
-      ["convite", "Receberam convite", robo.convidados, "BOT", undefined],
-      ["transferidos", "Transferidos ao especialista", robo.transferidos, "BOT", robo.convitePendente],
-    ];
-    let anterior = leadCount;
-    for (const [key, label, valor, dono, parados] of seq) {
-      push({
-        key,
-        label,
-        valor,
-        fonte: "robo",
-        trocaDeSistema: key === "conversas",
-        daAnterior: div(valor, anterior),
-        daAncora: div(valor, leadCount),
-        custoUnitario: custo(valor),
-        perda: Math.max(0, anterior - valor),
-        dono,
-        parados: parados && parados > 0 ? parados : undefined,
-        midiaParada: parados && parados > 0 ? parados * ((anterior === leadCount ? custoLead : custo(anterior)) ?? 0) : undefined,
-        // O convite pendente é do robô (barra "Com o robô agora" da Fila): não há grupo
-        // do comercial para ele desde nov/26 — o degrau fica sem link para a Fila.
-        etapaFila: undefined,
-        // O robô não guarda data: a contagem dele é da campanha inteira.
-        nota: key === "conversas" && range ? "contagem do robô: campanha inteira, não o período" : undefined,
-      });
-      anterior = valor;
-    }
-  }
-
-  // ---- comercial -------------------------------------------------------
-  if (comercial) {
-    const anteriorCom = robo ? robo.transferidos : leadCount;
-    push({
-      key: "abordados",
-      label: "Abordados pelo especialista",
-      valor: comercial.abordados,
-      fonte: "comercial",
-      trocaDeSistema: true,
-      daAnterior: div(comercial.abordados, anteriorCom),
-      daAncora: div(comercial.abordados, leadCount),
-      custoUnitario: custo(comercial.abordados),
-      perda: Math.max(0, anteriorCom - comercial.abordados),
-      dono: "COM",
-      parados: comercial.aguardandoAbordagem > 0 ? comercial.aguardandoAbordagem : undefined,
-      midiaParada:
-        comercial.aguardandoAbordagem > 0
-          ? comercial.aguardandoAbordagem * ((robo ? custo(anteriorCom) : custoLead) ?? 0)
-          : undefined,
-      etapaFila: comercial.aguardandoAbordagem > 0 ? "convite-aceito" : undefined,
-      nota: comercial.abordados <= 1 ? "n=1 — não é uma taxa" : undefined,
-    });
-
-    /*
-     * Reunião: dois sistemas afirmam sobre o MESMO fato. Quando discordam, o
-     * degrau não escolhe um lado — mostra "—" e nomeia a divergência. Publicar
-     * um dos dois números aqui seria escolher em silêncio.
-     */
-    const divergem =
-      comercial.reunioesRealizadas > 0 && reunioesPainel === 0 && !range;
-    push({
-      key: "reuniao",
-      label: "Reunião realizada",
-      valor: divergem ? null : Math.max(comercial.reunioesRealizadas, compareceuPainel),
-      fonte: "comercial",
-      daAnterior: divergem ? undefined : div(comercial.reunioesRealizadas, comercial.abordados),
-      daAncora: divergem ? undefined : div(comercial.reunioesRealizadas, leadCount),
-      custoUnitario: divergem ? undefined : custo(comercial.reunioesRealizadas),
-      dono: "COM",
-      nota: divergem
-        ? `o atendimento registra ${comercial.reunioesRealizadas} e o funil do painel conta ${reunioesPainel} — as fontes discordam`
-        : undefined,
-    });
-
-    push({
-      key: "negocio",
-      label: "Negócio fechado",
-      valor: divergem ? null : Math.max(comercial.negociosFechados, clientesPainel),
-      fonte: "comercial",
-      daAnterior: divergem ? undefined : div(comercial.negociosFechados, comercial.reunioesRealizadas),
-      daAncora: divergem ? undefined : div(comercial.negociosFechados, leadCount),
-      dono: "COM",
-      nota: divergem ? "idem — e sem valor de carta registrado" : undefined,
-    });
-  } else {
-    // Sem robô/comercial, o fundo do funil é o do painel — e quem espera o 1º
-    // contato está parado AQUI, entre virar lead e ter reunião. Conta todos os
-    // leads ainda sem nenhuma tentativa (sem recorte de período). Com o robô
-    // DESLIGADO é a aba "Novos" da Fila (o número do marcador é o número da página) e
-    // o marcador linka para ela — todo "Novo" conta, com `roboVistoEm` ou não (o
-    // robô desligado depois de ter rodado devolve essas pessoas a "Novos"). Com o
-    // robô LIGADO, quem o robô recebeu não espera o 1º contato humano (11.7), a
-    // Fila não tem grupo com essa população (antes do robô, live, quem o robô ainda
-    // tem) e o marcador fica sem link.
-    const semContato = data.leads.filter((l) => l.status === "lead" && (!input.roboLigado || !l.roboVistoEm)).length;
-    push({
-      key: "reunioes",
-      label: "Agendaram reunião",
-      valor: reunioesPainel,
-      fonte: "crm",
-      daAnterior: div(reunioesPainel, leadCount),
-      daAncora: div(reunioesPainel, leadCount),
-      // Sem "R$ X cada": o custo por reunião tem definição e régua próprias
-      // (dicionario.ts, MIN_REUNIOES) e mora em `fatoDoCustoPorReuniao` (Início e
-      // Mídia) — um segundo, por coorte,
-      // aqui, era o 5º custo por reunião do painel.
-      perda: Math.max(0, leadCount - reunioesPainel),
-      dono: "COM",
-      parados: semContato > 0 ? semContato : undefined,
-      midiaParada: semContato > 0 ? semContato * (custoLead ?? 0) : undefined,
-      etapaFila: semContato > 0 && !input.roboLigado ? "novo" : undefined,
-      nota: "dos leads que entraram no período, em qualquer data",
-    });
-    push({
-      key: "compareceu",
-      label: "Reunião realizada",
-      valor: compareceuPainel,
-      fonte: "crm",
-      daAnterior: div(compareceuPainel, reunioesPainel),
-      daAncora: div(compareceuPainel, leadCount),
-      dono: "COM",
-    });
-    push({
-      key: "clientes",
-      label: "Clientes",
-      valor: clientesPainel,
-      fonte: "crm",
-      daAnterior: div(clientesPainel, compareceuPainel),
-      daAncora: div(clientesPainel, leadCount),
-      dono: "COM",
-    });
-  }
-
-  // Taxa entre números pequenos não é taxa: "1 de 1" imprime "100,0%" e parece
-  // medição. Abaixo da amostra mínima a junta mostra só o dono.
-  for (let i = 1; i < degraus.length; i++) {
-    const ant = degraus[i - 1];
-    if (!degraus[i].ehAncora && ant.valor != null && ant.valor < AMOSTRA_MINIMA) {
-      degraus[i] = { ...degraus[i], daAnterior: undefined };
-    }
-  }
-
-  // ---- o que parece perda e não é --------------------------------------
-  const naoAgir: NaoAgir[] = [];
-
-  if (cliquesBrutos > 0 && visitas > 0 && cliquesBrutos > visitas * 1.5) {
-    const descoberta = todosAds.filter((r) => bucketOfAd(r) === "descoberta");
-    naoAgir.push({
-      titulo: `${formatInt(cliquesBrutos - visitas)} “cliques” que não viraram visita`,
-      detalhe:
-        `A maior perda aparente do funil é artefato de medição, não gente perdida. Nos ${descoberta.length > 0 ? "conjuntos de descoberta" : "posts impulsionados"} — sem link para clicar — o painel conta curtida, comentário e toque no perfil como clique. Por isso “cliques” não é degrau desta cascata.`,
-    });
-  }
-
-  if (visitas > 0 && envios > 0 && visitas > envios) {
-    naoAgir.push({
-      titulo: `${formatInt(visitas - envios)} visitas que não preencheram`,
-      detalhe:
-        "A maior perda percentual, e a menos recuperável: são visitantes anônimos que já foram embora. Melhorar a landing page muda o tráfego futuro — não traz nenhum destes de volta.",
-    });
-  }
-
-  if (ctaCliques > visitas && visitas > 0) {
-    naoAgir.push({
-      titulo: `${formatInt(ctaCliques)} cliques no CTA contra ${formatInt(visitas)} visitas`,
-      detalhe: `Não é dado corrompido: são ${formatDecimal(ctaCliques / visitas, 2)} eventos por visita. Um contador de evento ao lado de um contador de sessão — não é etapa e não tem taxa.`,
-    });
-  }
-
-  return { degraus, naoAgir, investimentoConversao: verba, conversoesPixel };
+  return { degraus, impressoesDescoberta };
 }

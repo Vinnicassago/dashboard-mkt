@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Info } from "@/components/ui/info";
 import type { AtendimentoDoInicio, DegrauCurto } from "@/lib/inicio";
-import { formatPercent } from "@/lib/format";
+import { textoDaTaxa } from "@/lib/funil-processo";
 import { cn } from "@/lib/utils";
 
 /** Sobre quem a taxa do degrau é — no `title` (o ⓘ do bloco explica o funil). */
@@ -53,7 +53,7 @@ export function AtendimentoBloco({ bloco, className }: { bloco: AtendimentoDoIni
                 {d.taxa !== null && d.base ? (
                   <span className="text-muted-foreground" title={SOBRE[d.base]}>
                     {" "}
-                    · {formatPercent(d.taxa, 0)}
+                    · {textoDaTaxa(d.taxa)}
                   </span>
                 ) : null}
               </span>

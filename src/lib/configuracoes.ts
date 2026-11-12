@@ -217,7 +217,7 @@ export function estadoDoRobo(r: {
     return {
       estado: "desativado",
       rotulo: "Desativado",
-      detalhe: "Desligado por escolha: as etapas do robô não aparecem na cascata, na Fila nem em Leads. Desligado não é erro.",
+      detalhe: "Desligado por escolha: as etapas do robô não aparecem no Início, no Funil, na Fila nem em Leads. Desligado não é erro.",
     };
   }
   if (r.registro) {
@@ -260,7 +260,7 @@ export function estadoDoRobo(r: {
   return {
     estado: "ativo",
     rotulo: "Ativo",
-    detalhe: "O painel lê o robô: convites pendentes e transferidos entram na cascata, na Fila e em Leads.",
+    detalhe: "O painel lê o robô: as etapas da conversa (sem o texto) entram no Início, no Funil, na Fila e em Leads.",
   };
 }
 

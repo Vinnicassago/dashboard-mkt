@@ -20,8 +20,11 @@ const LARGURA_MAX = 288;
  *
  * A caixa vai para o `<body>` (portal) com posição fixa calculada do botão e
  * presa à tela: nunca sai pela borda, nem a 375 px; sem espaço embaixo, abre em
- * cima. Acessível: `<button>` com `aria-expanded`/`aria-controls`, a caixa ligada
- * por `aria-describedby`, o foco volta ao botão no Esc.
+ * cima; sem espaço nem em cima, fica dentro da tela, no máximo da altura dela,
+ * e o texto longo rola dentro da caixa. Se a página rola e o botão sai da tela, a
+ * caixa fecha (não fica presa à borda, solta dele). Acessível: `<button>` com
+ * `aria-expanded`/`aria-controls`, a caixa ligada por `aria-describedby`, o foco
+ * volta ao botão no Esc.
  */
 export function Info({
   texto,
@@ -39,7 +42,7 @@ export function Info({
 }) {
   const conteudo = texto ?? (metrica ? dica(metrica) : "");
   const [aberto, setAberto] = useState(false);
-  const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [pos, setPos] = useState<{ top: number; left: number; width: number; maxHeight: number } | null>(null);
   const botao = useRef<HTMLButtonElement>(null);
   const caixa = useRef<HTMLDivElement>(null);
   const id = useId();
@@ -52,11 +55,15 @@ export function Info({
     const vh = window.innerHeight;
     const width = Math.min(LARGURA_MAX, vw - 2 * MARGEM);
     const left = Math.min(Math.max(MARGEM, r.left + r.width / 2 - width / 2), vw - width - MARGEM);
-    const altura = caixa.current?.offsetHeight ?? 0;
+    // A caixa nunca passa da altura da tela: o texto longo rola DENTRO dela.
+    const maxHeight = Math.max(0, vh - 2 * MARGEM);
+    const altura = Math.min(caixa.current?.offsetHeight ?? 0, maxHeight);
     const embaixo = r.bottom + AFASTAMENTO;
     const emCima = r.top - AFASTAMENTO - altura;
-    const top = embaixo + altura > vh - MARGEM && emCima >= MARGEM ? emCima : embaixo;
-    setPos({ top, left, width });
+    const preferido = embaixo + altura > vh - MARGEM && emCima >= MARGEM ? emCima : embaixo;
+    // Sem espaço nem embaixo nem em cima (ⓘ longo a 375 × 667): presa à tela.
+    const top = Math.max(MARGEM, Math.min(preferido, vh - MARGEM - altura));
+    setPos({ top, left, width, maxHeight });
   }, []);
 
   // Fechar zera a posição junto: a próxima abertura mede de novo, escondida.
@@ -82,7 +89,13 @@ export function Info({
       fechar();
       botao.current?.focus();
     };
-    const mover = () => posicionar();
+    // A caixa acompanha o botão; se ele sai da tela (rolagem), ela fecha — presa à
+    // borda, ficaria solta do botão, cobrindo o conteúdo.
+    const mover = () => {
+      const r = botao.current?.getBoundingClientRect();
+      if (r && (r.bottom < 0 || r.top > window.innerHeight)) fechar();
+      else posicionar();
+    };
     document.addEventListener("pointerdown", fora);
     document.addEventListener("keydown", tecla);
     window.addEventListener("resize", mover);
@@ -124,10 +137,17 @@ export function Info({
               role="tooltip"
               style={
                 pos
-                  ? { position: "fixed", top: pos.top, left: pos.left, width: pos.width }
-                  : { position: "fixed", top: 0, left: 0, width: LARGURA_MAX, visibility: "hidden" }
+                  ? { position: "fixed", top: pos.top, left: pos.left, width: pos.width, maxHeight: pos.maxHeight }
+                  : {
+                      position: "fixed",
+                      top: 0,
+                      left: 0,
+                      width: LARGURA_MAX,
+                      maxHeight: `calc(100vh - ${2 * MARGEM}px)`,
+                      visibility: "hidden",
+                    }
               }
-              className="z-50 rounded-lg border bg-card p-3 text-xs leading-relaxed font-normal text-card-foreground shadow-lg"
+              className="z-50 overflow-y-auto overscroll-contain rounded-lg border bg-card p-3 text-xs leading-relaxed font-normal text-card-foreground shadow-lg"
             >
               {conteudo}
             </div>,

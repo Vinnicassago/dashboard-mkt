@@ -25,10 +25,8 @@ import {
   postingCadence,
   seguidoresDoPeriodo,
 } from "../metrics";
-import { funilDeDescoberta } from "../funil";
-import { kpisDoPeriodo } from "../kpis";
 import { buildBriefing } from "../ai/briefing";
-import type { AdDaily, Creative, DashboardData, Goal, IgAccountDaily, IgPost } from "../types";
+import type { Creative, DashboardData, Goal, IgAccountDaily, IgPost } from "../types";
 
 const post = (id: string, publishedAt: string, caption: string, over: Partial<IgPost> = {}): IgPost => ({
   id,
@@ -515,20 +513,6 @@ describe("6.5 — verificação: o líquido de seguidores é o mesmo em todas as
     ),
   ];
   const range = { from: "2026-10-01", to: "2026-10-07" };
-  const anuncio = (date: string, spend: number): AdDaily => ({
-    brand: "consorcio",
-    date,
-    campaign: "Campanha de perfil",
-    adset: "Conjunto",
-    adId: "300001",
-    objective: "OUTCOME_ENGAGEMENT",
-    spend,
-    impressions: 1000,
-    reach: 800,
-    frequency: 1.25,
-    clicks: 10,
-    leads: 0,
-  });
   const dados = (igAccountDaily: IgAccountDaily[], over: Partial<DashboardData> = {}): DashboardData => ({
     campaign: { id: "c", brand: "consorcio", name: "C", objective: "L", status: "ativa", startDate: "2026-09-01", budgetTotal: 0 },
     igAccountDaily,
@@ -553,7 +537,7 @@ describe("6.5 — verificação: o líquido de seguidores é o mesmo em todas as
     expect(followerSeries(semana, range).map((p) => p.gain)).toEqual([8, 0, 0, 0, 0, 0, 0]);
   });
 
-  it("igAccountTotals (Funil de descoberta, IA): fim − início é o “+8 no período” do card Seguidores do Conteúdo", () => {
+  it("igAccountTotals (IA): fim − início é o “+8 no período” do card Seguidores do Conteúdo", () => {
     const ig = igAccountTotals(semana, range);
     const seg = resumoSeguidores(semana, range);
     expect(ig.followersEnd - ig.followersStart).toBe(8); // antes: 1008 − 1008 = 0
@@ -594,19 +578,6 @@ describe("6.5 — verificação: o líquido de seguidores é o mesmo em todas as
       expect(seg.fim).toBe(ig.followersEnd);
       if (seg.serieCompleta) expect(ig.netNew).toBe(seg.ganhos - seg.perdas);
     }
-  });
-
-  it("Funil → descoberta: “Novos seguidores (líquido)” é o 8 do Conteúdo, ao lado de +10 / −2, e o custo por seguidor usa o mesmo 8", () => {
-    const data = dados(semana, { adDaily: [anuncio("2026-10-02", 80)] });
-    const f = funilDeDescoberta(data, range, kpisDoPeriodo(data, range));
-    const seguidores = f.etapas.find((e) => e.key === "seguidores")!;
-    expect(seguidores.valor).toBe(8); // antes: 0, com a nota "ganhos brutos 10 · deixaram de seguir 2"
-    expect(seguidores.nota).toBe("ganhos brutos 10 · deixaram de seguir 2");
-    expect(seguidores.custo).toMatchObject({ valor: 10, rotulo: "por seguidor" }); // R$ 80 ÷ 8
-    // O "Funil do perfil" do Conteúdo, mesmo rótulo de etapa, mesmo número.
-    const perfil = funilDoPerfil(semana, range);
-    expect(perfil[2]).toMatchObject({ label: seguidores.label, value: 8 });
-    expect(buildOrganicFunnel(semana, range)[2].value).toBe(8);
   });
 
   it("IA: o briefing manda o total e o líquido que a tela mostra (último total conhecido, véspera inclusa)", () => {

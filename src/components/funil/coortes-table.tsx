@@ -1,68 +1,56 @@
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { AMOSTRA_MINIMA } from "@/lib/cascata";
 import type { CoorteSemana } from "@/lib/funil";
-import { dica } from "@/lib/dicionario";
-import { formatInt, formatPercent } from "@/lib/format";
+import { textoDaTaxa } from "@/lib/funil-processo";
+import { formatInt } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-/** Abaixo disto, a taxa lead → reunião de uma semana é anedota, não taxa. */
-export const AMOSTRA_COORTE = 5;
-
-const VEICULACAO: Record<CoorteSemana["veiculacao"], { rotulo: string; title: string } | null> = {
+/** A marca da semana sem linha de anúncio (ADR-06); a explicação está no ⓘ do recolhido. */
+const VEICULACAO: Record<CoorteSemana["veiculacao"], string | null> = {
   ok: null,
-  pausada: { rotulo: "campanha pausada", title: "O sync cobriu a semana e nenhuma linha de anúncio veio: a campanha estava parada" },
-  sem_dados: { rotulo: "sem dados do anúncio", title: "Nenhum sync bem-sucedido cobriu esta semana: pode ter havido gasto que o painel não viu" },
+  pausada: "campanha pausada",
+  sem_dados: "sem dados do anúncio",
 };
 
 /**
  * Coorte por semana de ENTRADA, todas as semanas — a de 0 lead aparece com 0 e
  * o motivo (B21). Coortes em maturação ficam sombreadas: não compare a conversão
- * delas com as semanas mais antigas. Cronológica, sem ordenação.
+ * delas com as semanas mais antigas. Cronológica, sem ordenação. "Agendaram" é
+ * coorte (dos leads daquela semana); "Lead → agendada" só com `AMOSTRA_MINIMA`
+ * leads, a MESMA régua do funil, e com o MESMO texto do % (`textoDaTaxa`).
+ * Server component: as explicações das colunas e
+ * das marcas vão para o ⓘ do recolhido (`coortes.dica`), nunca para `title=`.
  */
 export function CoortesTable({ coortes }: { coortes: CoorteSemana[] }) {
+  if (coortes.length === 0) return <p className="text-sm text-muted-foreground">Nenhuma semana com lead.</p>;
   return (
-    <Table>
+    <Table className="text-xs sm:text-sm">
       <THead>
         <TR className="hover:bg-transparent">
-          <TH>Semana</TH>
-          <TH className="text-right" title={dica("leads")}>Leads</TH>
-          <TH className="text-right" title={dica("primeiro_contato_no_prazo")}>1º contato no prazo</TH>
-          <TH className="text-right" title={dica("agendaram")}>Agendadas</TH>
-          <TH className="text-right" title={dica("comparecimento")}>Realizadas</TH>
-          <TH className="text-right">Vendas</TH>
-          <TH className="text-right" title={dica("taxa_lead_agendada")}>Lead → agendada</TH>
+          <TH className="px-2 sm:px-3">Semana</TH>
+          <TH className="px-2 text-right sm:px-3">Leads</TH>
+          <TH className="px-2 text-right sm:px-3">Agendaram</TH>
+          <TH className="px-2 text-right sm:px-3">Realizadas</TH>
+          <TH className="px-2 text-right sm:px-3">Vendas</TH>
+          <TH className="px-2 text-right sm:px-3">Lead → agendada</TH>
         </TR>
       </THead>
       <TBody>
         {coortes.map((c) => {
           const v = VEICULACAO[c.veiculacao];
-          const pc = c.primeiroContatoNoPrazo;
           return (
             <TR key={c.semana} className={cn(c.immature && "bg-foreground/[0.04] text-muted-foreground")}>
-              <TD className="font-medium">
+              <TD className="px-2 font-medium sm:px-3">
                 {c.label}
-                {c.immature ? (
-                  <span className="ml-1.5 text-xs font-normal text-muted-foreground" title="Coorte recente: ainda maturando">
-                    (maturando)
-                  </span>
-                ) : null}
-                {v ? (
-                  <span className="ml-1.5 text-xs font-normal text-muted-foreground" title={v.title}>
-                    ({v.rotulo})
-                  </span>
-                ) : null}
+                {c.immature ? <span className="ml-1.5 text-xs font-normal text-muted-foreground">(maturando)</span> : null}
+                {v ? <span className="ml-1.5 text-xs font-normal text-muted-foreground">({v})</span> : null}
               </TD>
-              <TD className="text-right tabular">{formatInt(c.leads)}</TD>
-              <TD className="text-right tabular" title={pc.n > 0 ? `n = ${formatInt(pc.n)} leads julgados` : "nenhum lead com prazo fechado"}>
-                {pc.n > 0 ? formatPercent(pc.valor) : "—"}
-              </TD>
-              <TD className="text-right tabular">{formatInt(c.agendadas)}</TD>
-              <TD className="text-right tabular">{formatInt(c.realizadas)}</TD>
-              <TD className="text-right tabular">{formatInt(c.vendas)}</TD>
-              <TD
-                className="text-right tabular"
-                title={c.leads > 0 && c.leads < AMOSTRA_COORTE ? `Só ${c.leads} lead(s): ainda não é taxa` : undefined}
-              >
-                {c.leadAgendada != null && c.leads >= AMOSTRA_COORTE ? formatPercent(c.leadAgendada) : "—"}
+              <TD className="px-2 text-right tabular sm:px-3">{formatInt(c.leads)}</TD>
+              <TD className="px-2 text-right tabular sm:px-3">{formatInt(c.agendadas)}</TD>
+              <TD className="px-2 text-right tabular sm:px-3">{formatInt(c.realizadas)}</TD>
+              <TD className="px-2 text-right tabular sm:px-3">{formatInt(c.vendas)}</TD>
+              <TD className="px-2 text-right tabular sm:px-3">
+                {c.leadAgendada != null && c.leads >= AMOSTRA_MINIMA ? textoDaTaxa(c.leadAgendada) : "—"}
               </TD>
             </TR>
           );

@@ -37,6 +37,8 @@ import { MIN_REUNIOES } from "../trust";
 import { hojeEmBrasilia } from "../range";
 import { custoExibivel, kpisDoPeriodo, reguaDoPeriodo, type KpisDoPeriodo } from "../kpis";
 import type { Inicio } from "../inicio";
+import { DONO_LABEL } from "../dono";
+import type { ResumoDaTrava } from "../onde-trava";
 import { META_DEF } from "../metas";
 import { DICIONARIO } from "../dicionario";
 import { buildRecommendations } from "../recommendations";
@@ -88,10 +90,32 @@ export interface BriefingOptions {
 }
 
 /**
+ * "Onde trava" para a IA (Fase 3, K8): SEMPRE um objeto, com a `situacao` que
+ * distingue os quatro estados (trava · abaixo-da-amostra · sem-leads ·
+ * leitura-parada) — nunca um `null` só. A frase é a da manchete do Funil (a MESMA
+ * `ondeTrava`), sobre os leads do período DESTE briefing. Só contagens e textos.
+ */
+function ondeTravaParaIA(t: ResumoDaTrava) {
+  const trava = t.situacao === "trava";
+  return {
+    frase: t.titulo,
+    situacao: t.situacao,
+    semEtapasDoRobo: t.semEtapasDoRobo,
+    dono: t.dono ? DONO_LABEL[t.dono] : null,
+    pessoasParadas: trava ? t.travados : null,
+    entraram: trava ? t.entradas : null,
+    aindaNoPrazo: trava ? t.emAndamento : null,
+    abertos: trava ? t.abertos : null,
+    encerrados: trava ? t.encerrados : null,
+  };
+}
+
+/**
  * O bloco `inicio` do briefing: o que o Início MOSTRA, só textos e contagens —
  * nunca a lista de pessoas (`leadsChegando.ultimos`), nome, telefone ou e-mail.
  * O atendimento (título, frases) é a foto do MOMENTO da geração (segunda 08:00),
- * não da semana resumida; o funil curto é a coorte do período.
+ * não da semana resumida; o funil curto é a coorte do período. `ondeTrava` (a
+ * manchete do Funil sobre a coorte do período) vai sempre, só contagens e a `situacao`.
  */
 export function inicioParaIA(i: Inicio) {
   return {
@@ -122,6 +146,7 @@ export function inicioParaIA(i: Inicio) {
       },
       frases: i.atendimento.frases.map((f) => f.texto),
       nadaEsperando: i.atendimento.vazio,
+      ondeTrava: ondeTravaParaIA(i.atendimento.ondeTrava),
     },
     diasDesdeOUltimoPost: i.rodape.diasDesdeUltimoPost,
   };

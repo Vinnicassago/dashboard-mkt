@@ -95,10 +95,9 @@ export async function carregarBussola(
   ]);
   const { range, rangeKey, naoComecou } = pageRange(data, rangeKeyParam ?? PERIODO_PADRAO_DA_BUSSOLA, hoje);
 
-  // A trava "fontes divergem" (reuniões do atendimento × do painel) fica dormente
-  // até a Fase 3: as reuniões do atendimento vinham da leitura AO VIVO da mesa do
-  // atendimento (`vw_robo_comercial_kpis`), que saiu — o painel não lê o banco do
-  // robô no render.
+  // A trava "fontes divergem" (reuniões do atendimento × do painel) fica dormente:
+  // sem fonte de reuniões do atendimento (era `vw_robo_comercial_kpis`); volta quando
+  // o Calendly entrar. O painel não lê o banco do robô no render (F3-D18).
   const roboReunioes = null;
   const kpis = kpisDoPeriodo(data, range, {
     brandRules,

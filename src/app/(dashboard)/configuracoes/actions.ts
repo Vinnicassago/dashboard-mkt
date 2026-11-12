@@ -742,7 +742,7 @@ export async function setRoboAtivoAction(ativo: boolean): Promise<ActionState> {
   return {
     ok: true,
     message: ativo
-      ? "Robô ativado: as etapas dele voltam para a cascata, a Fila e Leads."
+      ? "Robô ativado: as etapas dele voltam para o Início, o Funil, a Fila e Leads."
       : "Robô desativado: as etapas dele saem do painel até você religar.",
   };
 }

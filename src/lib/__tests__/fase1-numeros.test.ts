@@ -12,7 +12,8 @@ import {
   trechosSemDado,
 } from "../metrics";
 import { assessTrust } from "../trust";
-import { resumirCascata, type Degrau } from "../cascata";
+import { funilDoProcesso } from "../funil-processo";
+import { kpisDoPeriodo } from "../kpis";
 import { resolveRange } from "../range";
 import { frescorDaFonte } from "../frescor";
 import { mensagemHumana } from "../erros";
@@ -148,18 +149,28 @@ describe("B21 — coorte mostra a semana sem lead", () => {
   });
 });
 
-describe("B22 — o resumo da cascata não pula as reuniões", () => {
-  it("mantém 'Reuniões agendadas' entre Leads e Clientes", () => {
-    const d = (key: string, valor: number, extra: Partial<Degrau> = {}): Degrau =>
-      ({ key, label: key, valor, fonte: "painel", ...extra }) as Degrau;
-    const resumo = resumirCascata([
-      d("impressoes", 100000, { ehAncora: true }),
-      d("leads", 113, { ehAncora: true }),
-      d("reunioes", 1),
-      d("compareceu", 0),
-      d("clientes", 0),
-    ]);
-    expect(resumo.map((x) => x.key)).toContain("reunioes");
+describe("B22 — o funil do processo nunca pula Agendaram", () => {
+  it("todo `funilDoProcesso` tem o degrau 'Agendaram' (= kpis.agendaram), com e sem o robô", () => {
+    const AGORA = "2026-11-04T18:00:00.000Z";
+    const data = dataset({
+      leads: [
+        lead("a", "2026-11-02T13:00:00Z", { phone: "5511987600001" }),
+        lead("b", "2026-11-02T14:00:00Z", { phone: "5511987600002", status: "agendado", bookedAt: "2026-11-03T13:00:00Z", meetingFor: "2026-11-10T13:00:00Z" }),
+        lead("c", "2026-10-10T14:00:00Z", { phone: "5511987600003", status: "sem_interesse", lostAt: "2026-10-12T13:00:00Z" }),
+      ],
+    });
+    const robo = { ligado: true, lidoAte: "2026-11-04T17:55:00.000Z", confiavel: true, sync: { ultimoOk: "2026-11-04T17:55:00.000Z", falha: null } };
+    for (const range of [undefined, { from: "2026-10-29", to: "2026-11-04" }, { from: "2026-10-01", to: "2026-10-28" }]) {
+      const kpis = kpisDoPeriodo(data, range, { hoje: "2026-11-04", agora: AGORA });
+      for (const r of [undefined, robo]) {
+        const p = funilDoProcesso({ data, range, kpis, eventos: [], robo: r, agora: AGORA });
+        const ids = p.degraus.map((d) => d.id);
+        expect(ids).toContain("agendaram");
+        expect(ids.indexOf("agendaram")).toBeGreaterThan(ids.indexOf("leads"));
+        expect(ids.indexOf("agendaram")).toBeLessThan(ids.indexOf("realizadas"));
+        expect(p.degraus.find((d) => d.id === "agendaram")?.n).toBe(kpis.agendaram.valor);
+      }
+    }
   });
 });
 

@@ -3,7 +3,12 @@
  * com o supabase-js dublado: lista EXPLÍCITA de colunas (nada de conversa, nome
  * ou e-mail), ordem estável, paginação até a página vazia, timeout por página e
  * erro que vira exceção (nunca lista vazia). Nenhum banco de verdade.
+ *
+ * Fase 3 (nov/26, K23) — nenhuma tela lê o banco do robô, o Funil incluído: a
+ * trava ESTÁTICA, sobre o `src` inteiro, de quem importa `robo/client` e `robo/sync`.
  */
+import fs from "node:fs";
+import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 interface Pedido {
@@ -128,5 +133,73 @@ describe("lerLeadsDoRobo", () => {
   it("erro do PostgREST vira exceção — nunca lista vazia", async () => {
     sb.erro = 'permission denied for table "Leads WhatsApp"';
     await expect(client.lerLeadsDoRobo()).rejects.toThrow(/permission denied/);
+  });
+});
+
+// ---------------------------------------------------------------- Fase 3: nenhuma tela lê o banco do robô (K23)
+
+const SRC = path.resolve(process.cwd(), "src");
+
+/** Todo `.ts`/`.tsx` de `src`, fora de `__tests__`. */
+function arquivosDoSrc(dir = SRC): string[] {
+  const out: string[] = [];
+  for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, ent.name);
+    if (ent.isDirectory()) {
+      if (ent.name !== "__tests__" && ent.name !== "node_modules") out.push(...arquivosDoSrc(p));
+    } else if (/\.tsx?$/.test(ent.name) && !ent.name.endsWith(".d.ts")) out.push(p);
+  }
+  return out;
+}
+
+/** Os módulos que um arquivo importa (estático, dinâmico ou re-export), resolvidos para o caminho sem extensão. */
+function importsDe(arq: string): string[] {
+  const fonte = fs.readFileSync(arq, "utf8");
+  const out: string[] = [];
+  for (const m of fonte.matchAll(/(?:\bfrom\s+|\bimport\s*\(\s*|^\s*import\s+)["']([^"']+)["']/gm)) {
+    const spec = m[1];
+    const alvo = spec.startsWith("@/") ? path.join(SRC, spec.slice(2)) : spec.startsWith(".") ? path.resolve(path.dirname(arq), spec) : null;
+    if (alvo) out.push(alvo.replace(/\.tsx?$/, ""));
+  }
+  return out;
+}
+
+const rel = (arq: string) => path.relative(SRC, arq).split(path.sep).join("/");
+
+describe("nenhuma tela lê o banco do robô (estático, o src inteiro — K23)", () => {
+  const todos = arquivosDoSrc();
+  const CLIENTE = path.join(SRC, "lib/robo/client");
+  const SYNC = path.join(SRC, "lib/robo/sync");
+  const importadores = (alvo: string) =>
+    todos
+      .filter((a) => importsDe(a).includes(alvo))
+      .map(rel)
+      .sort();
+
+  it("`robo/client.ts` só lê \"Leads WhatsApp\": nenhuma view `vw_robo_*`, nem `getRoboSnapshot`/`getCascataFontes`", () => {
+    const fonte = fs.readFileSync(`${CLIENTE}.ts`, "utf8");
+    expect(fonte).not.toContain('from("vw_');
+    expect(fonte).not.toMatch(/export\s+(async\s+)?(function|const)\s+(getRoboSnapshot|getCascataFontes)\b/);
+    expect("getRoboSnapshot" in client).toBe(false);
+    expect("getCascataFontes" in client).toBe(false);
+  });
+
+  it("só o sync importa `lerLeadsDoRobo`", () => {
+    const importam = todos.filter((a) => /\bimport\s*(type\s+)?\{[^}]*\blerLeadsDoRobo\b[^}]*\}\s*from/.test(fs.readFileSync(a, "utf8"))).map(rel);
+    expect(importam).toEqual(["lib/robo/sync.ts"]);
+  });
+
+  it("só o sync, o estado e a página de Integrações importam `robo/client`", () => {
+    expect(importadores(CLIENTE)).toEqual(["app/(dashboard)/configuracoes/integracoes/page.tsx", "lib/robo/estado.ts", "lib/robo/sync.ts"]);
+  });
+
+  it("nenhum carregador de tela (`*-server.ts`) importa `robo/client` nem `robo/sync`", () => {
+    const carregadores = todos.filter((a) => a.endsWith("-server.ts"));
+    expect(carregadores.map(rel)).toContain("lib/funil-server.ts");
+    for (const a of carregadores) {
+      const imps = importsDe(a);
+      expect(imps.includes(CLIENTE), rel(a)).toBe(false);
+      expect(imps.includes(SYNC), rel(a)).toBe(false);
+    }
   });
 });
