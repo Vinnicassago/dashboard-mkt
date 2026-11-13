@@ -322,9 +322,11 @@ export interface Creative {
    */
   creativeId?: string;
   thumbnailUrl?: string;
-  // video engagement (for hook rate / retention study)
-  videoPlays?: number; // 3s plays
-  thruPlays?: number; // 15s / completed
+  // vídeo: somas da janela do último sync, NÃO do período (o Gancho e a Retenção saíram na Fase 4, F4-D14)
+  /** Reproduções iniciadas (video_play_actions) somadas na janela do último sync — não é do período nem de 3 s; sem leitor desde a Fase 4. */
+  videoPlays?: number;
+  /** ThruPlays somados na janela do último sync — não é do período; sem leitor desde a Fase 4. */
+  thruPlays?: number;
   /** Mídia do IG por trás do anúncio (effective_instagram_media_id). Se casa com
    *  um IgPost da marca → post impulsionado; se não casa → dark post (anúncio
    *  sem post na grade). O permalink é o fallback de match entre superfícies. */

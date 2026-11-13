@@ -1,376 +1,58 @@
-import Link from "next/link";
-import { AlertTriangle, Award, Radio, TrendingUp } from "lucide-react";
-import { ResumoMidiaCard } from "@/components/midia/resumo-midia";
-import { TendenciaSemanal } from "@/components/midia/tendencia-semanal";
-import { ConjuntosTable } from "@/components/midia/conjuntos-table";
-import { CreativesTable } from "@/components/tables/creatives-table";
-import { BarrasDiarias } from "@/components/charts/barras-diarias";
-import { ChartCard } from "@/components/ui/chart-card";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { getData, listConferencias } from "@/lib/data/store";
-import { activeBrandSlug } from "@/lib/active-brand";
-import { pageRange } from "@/lib/page-range";
-import { dailySeries, fimDoPeriodo, trechosSemDado, trechosSemVeiculacao } from "@/lib/metrics";
-import { contextoDeMarcas } from "@/lib/meta/config";
-import { custoExibivel, kpisDoPeriodo, reguaDoPeriodo } from "@/lib/kpis";
-import {
-  SEMANAS_DA_TENDENCIA,
-  amostraDoRanking,
-  conjuntosPorId,
-  cplAlvoDaMidia,
-  criativosAgregados,
-  descobertaDaMidia,
-  faixaDeSaude,
-  moedaOuTraco,
-  notaDeNaoAtribuidos,
-  rankingsDeCriativos,
-  REGRA_ATRIBUICAO_REUNIAO,
-  resumoDaMidia,
-  tendenciaSemanalMidia,
-  textoRegraSaude,
-  VOLUME_MINIMO_RANKING,
-  type NaoAtribuidos,
-} from "@/lib/midia";
-import { comPeriodo, hojeEmBrasilia, parseCustomRange, rangeLabel } from "@/lib/range";
-import { dica } from "@/lib/dicionario";
-import { coberturaDeAnuncios, estadoDaFonte } from "@/lib/sincronizacao";
-import { alertasDeAtribuicao, alertasDeConfianca } from "@/lib/alertas";
 import { RegistrarAlertas } from "@/components/layout/alertas";
-import { MIN_REUNIOES } from "@/lib/trust";
-import { formatCurrency0, formatInt, formatIntComSinal, formatPercent } from "@/lib/format";
+import { Recolhido } from "@/components/funil/recolhido";
 import { CriativosDaLiveCard } from "@/components/midia/criativos-live";
-import { ConferenciaGerenciador } from "@/components/midia/conferencia-gerenciador";
-import { can } from "@/lib/auth/guard";
-import { criativosDaLive } from "@/lib/criativos-live";
-import { campanhaDaLive } from "@/lib/live-server";
-import { isAwareness } from "@/lib/brands";
+import { CriativosNoAr } from "@/components/midia/criativos-no-ar";
+import { Detalhes } from "@/components/midia/detalhes";
+import { Pausados } from "@/components/midia/pausados";
+import { ResumoDaMidia } from "@/components/midia/resumo-da-midia";
+import { Verba } from "@/components/midia/verba";
+import { RolarParaAncora } from "@/components/ui/rolar-para-ancora";
+import { activeBrandSlug } from "@/lib/active-brand";
+import { carregarMidia } from "@/lib/midia-server";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Mídia — "onde a verba vira reunião, e o que escalar ou pausar?" (relatório
- * §7.3). A ordem da página é a da pergunta: o resumo responde no primeiro
- * viewport; a tendência diz se está melhorando; campanhas → conjuntos dizem
- * ONDE; criativos dizem O QUÊ escalar ou pausar; descoberta e o gráfico diário
- * fecham. Toda conta mora em `lib/midia.ts` (puro) e lê `kpisDoPeriodo` — o
- * CPL daqui é o do Início.
+ * Mídia — o que faço com a verba esta semana? Sem `?range=`, os últimos 7 dias. O resumo
+ * é o do Início em uma linha; "Para onde vai a verba" compara gasto e leads por conjunto
+ * no ar; os cartões dão o sinal de cada criativo no ar. O resto fica recolhido.
  */
-export default async function MidiaPage({ searchParams }: { searchParams: Promise<{ range?: string }> }) {
+export default async function MidiaPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ range?: string | string[]; [chave: string]: string | string[] | undefined }>;
+}) {
   const brand = await activeBrandSlug();
-  const data = await getData(brand);
-  const { range, rangeKey } = pageRange(data, (await searchParams).range);
-  const [cobertura, { brandRules, campanhasDaConta }, syncAds, conferencias, podeConferir] = await Promise.all([
-    coberturaDeAnuncios(brand),
-    contextoDeMarcas(),
-    estadoDaFonte("ads", brand),
-    listConferencias({ brand, limit: 10 }),
-    can("data:write"),
-  ]);
-  const hoje = hojeEmBrasilia();
-  // O último dia que já aconteceu: min(fim do período, hoje) — dia futuro não é julgado (C9).
-  const fim = fimDoPeriodo(range, hoje);
-
-  const kp = kpisDoPeriodo(data, range, { brandRules, campanhasDaConta, cobertura, hoje });
-  const regua = reguaDoPeriodo(kp, data, range, hoje);
-  const resumo = resumoDaMidia(kp, regua);
-  const cprExibivel = custoExibivel(kp.custoPorReuniao);
-
-  const tendencia = tendenciaSemanalMidia(data, { fim, hoje, kpis: { brandRules, campanhasDaConta, cobertura } });
-  const conjuntos = conjuntosPorId(data, range, { custoPorReuniaoExibivel: cprExibivel });
-  const cplAlvo = cplAlvoDaMidia(data, kp, fim);
-  // `fim` (e não `range?.to`): sem `?range=` a Mídia olha o histórico inteiro e
-  // as janelas da saúde têm de terminar HOJE — senão cada anúncio pausado seria
-  // julgado pelos seus próprios últimos 14 dias e sairia "Saudável" ou
-  // "Fadigando" ao lado dos ativos. Com o fim certo, pausado sai "Parado" — mas
-  // só onde o sync confirmou a falta de veiculação (`cobertura`, a mesma do
-  // gráfico diário); sem cobertura, "Sem dados" (ADR-06). O motor e o briefing
-  // passam o mesmo fim e a mesma cobertura a `creativePerformance`.
-  const criativos = criativosAgregados(data, range, { fim, cobertura, cplAlvo: cplAlvo.alvo, custoPorReuniaoExibivel: cprExibivel });
-  const regraSaude = textoRegraSaude(cplAlvo);
-  const ranking = rankingsDeCriativos(criativos.conversao);
-  // A faixa cita cada criativo pelo rótulo desambiguado (dois "Carrossel -" não
-  // saem iguais) — o texto inteiro sai de `lib/midia.ts`.
-  const faixa = faixaDeSaude(criativos);
-  const descoberta = descobertaDaMidia(kp);
-
-  // Criativos da live: o período da página dentro da campanha da live (sem `?range=`, a campanha da live até hoje).
-  const cfgLive = await campanhaDaLive();
-  const rangeLive = {
-    de: range?.from && range.from > cfgLive.periodo.de ? range.from : cfgLive.periodo.de,
-    ate: [range?.to ?? hoje, cfgLive.periodo.ate, hoje].sort()[0],
-  };
-  const criativosLive =
-    !isAwareness(brand) && rangeLive.de <= rangeLive.ate ? criativosDaLive(data, cfgLive, rangeLive, hoje) : null;
-
-  const serie = dailySeries(data, range, cobertura, hoje);
-  const faixas = [
-    ...trechosSemVeiculacao(serie).map((t) => ({ ...t, tom: "pausa" as const })),
-    ...trechosSemDado(serie).map((t) => ({ ...t, tom: "falha" as const })),
-  ];
+  const sp = await searchParams;
+  const r = Array.isArray(sp.range) ? sp.range[0] : sp.range;
+  // Sem `?range=` o carregador resolve o padrão da Mídia (`PERIODO_PADRAO_DA_MIDIA`, 7 dias).
+  const { midia: m } = await carregarMidia(brand, r);
 
   return (
     <div className="space-y-6">
-      <RegistrarAlertas alertas={[...alertasDeConfianca(kp.trust.travas), ...alertasDeAtribuicao(data, range)]} />
+      <RegistrarAlertas alertas={m.alertas} />
+      {/* Abre o <details> da âncora e rola até ela: na chegada, no hashchange e no clique em <a href="#…"> (K27). */}
+      <RolarParaAncora abrirDetalhes />
 
-      {/* 1. RESUMO — a resposta, no primeiro viewport. */}
-      <ResumoMidiaCard resumo={resumo} rangeKey={rangeKey} />
+      {/* 1–2. A resposta em uma linha (os números do Início) e o link da conferência. */}
+      <ResumoDaMidia resumo={m.resumo} conferir={m.conferir} />
 
-      {/* 1b. CONFERIR COM O GERENCIADOR — o investimento acima contra o que a Meta cobra (E2-23). */}
-      <Card id="conferir" className="scroll-mt-24">
-        <CardHeader>
-          <CardTitle>Conferir com o Gerenciador</CardTitle>
-          <CardDescription>
-            Digite o gasto que o Gerenciador de Anúncios mostra para o mesmo período: até 5% de diferença é normal (a
-            Meta revisa os números por até 48 h); acima disso, vale olhar o sync e as marcas. Cada conferência fica
-            guardada.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <ConferenciaGerenciador
-            gastoPainel={kp.investimento.valor}
-            periodo={
-              range
-                ? `${parseCustomRange(rangeKey) ? "" : `${rangeLabel(rangeKey)}, `}${range.from.split("-").reverse().join("/")} a ${range.to.split("-").reverse().join("/")}`
-                : "campanha inteira"
-            }
-            ultimoSync={syncAds.ultimoOk}
-            rangeKey={rangeKey}
-            historico={conferencias}
-            podeEditar={podeConferir}
-          />
-        </CardContent>
-      </Card>
+      {/* 3. Para onde vai a verba: % do gasto × % dos leads por conjunto no ar. */}
+      {m.verba ? <Verba verba={m.verba} /> : null}
 
-      {/* 2. TENDÊNCIA SEMANAL — gasto, leads e CPL por semana. */}
-      <ChartCard
-        title="Tendência semanal"
-        description={`Gasto (barras), leads do painel (linha) e CPL (tracejado, valor escrito) por semana de segunda a domingo, nas últimas ${SEMANAS_DA_TENDENCIA} semanas até o fim do período. A semana em curso sai vazada; o CPL some quando não se sustenta.`}
-      >
-        <TendenciaSemanal pontos={tendencia} />
-      </ChartCard>
+      {/* 4. Os criativos de conversão no ar, com o sinal de cada um. */}
+      {m.criativos ? <CriativosNoAr criativos={m.criativos} colunasDoRobo={m.colunasDoRobo} /> : null}
 
-      {/* 3. CAMPANHAS → CONJUNTOS — conversão e descoberta em blocos separados. */}
-      <Card id="conjuntos" className="scroll-mt-24">
-        <CardHeader>
-          <CardTitle>Campanhas e conjuntos de conversão</CardTitle>
-          <CardDescription>
-            Onde a verba vira reunião. Agrupado pelo id da Meta — dois conjuntos com o mesmo nome em campanhas diferentes são duas linhas. {REGRA_ATRIBUICAO_REUNIAO}{" "}
-            {cprExibivel
-              ? `O custo por agendada aparece só com ${MIN_REUNIOES} reuniões ou mais na linha.`
-              : `O custo por agendada fica em “—” até ${MIN_REUNIOES} reuniões de conversão no período (hoje ${formatInt(kp.reunioesConversao.valor)}).`}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <ConjuntosTable linhas={conjuntos.conversao} bucket="conversao" />
-          <NotaNaoAtribuidos n={conjuntos.naoAtribuidos} rangeKey={rangeKey} />
-        </CardContent>
-      </Card>
-
-      {conjuntos.descoberta.length > 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Campanhas e conjuntos de descoberta</CardTitle>
-            <CardDescription>
-              Alcance, engajamento e seguidores: não geram lead, então não têm CPL nem custo por reunião. O alcance é somado por anúncio e por dia (conta a mesma pessoa mais de uma vez).
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ConjuntosTable linhas={conjuntos.descoberta} bucket="descoberta" />
-          </CardContent>
-        </Card>
+      {/* 5–7. Recolhidos: a live (o mesmo conteúdo), o que parou e os detalhes. */}
+      {m.live ? (
+        <Recolhido id="criativos-live" resumo="Criativos da live 01/12" dica={m.live.dica} rotulo="Sobre os criativos da live">
+          <CriativosDaLiveCard r={m.live.r} />
+        </Recolhido>
       ) : null}
-
-      {/* 4. CRIATIVOS — o que escalar e o que pausar. */}
-      <section id="criativos" className="scroll-mt-24 space-y-4">
-        <div className="space-y-1">
-          <h2 className="text-base font-semibold">Criativos: o que escalar e o que pausar</h2>
-          <p className="text-sm text-muted-foreground">
-            Agregados por criativo (o mesmo criativo roda em vários conjuntos); expanda para ver anúncio a anúncio, CTR, CPC e o número do Pixel.
-          </p>
-        </div>
-
-        {faixa.fadigando || faixa.semResultado ? (
-          <div className="flex items-start gap-2.5 rounded-xl border border-[var(--status-fora)]/30 bg-[var(--status-fora)]/[0.04] px-4 py-3 text-sm">
-            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-[var(--status-fora-text)]" />
-            <div className="space-y-0.5 text-muted-foreground">
-              {[faixa.fadigando, faixa.semResultado].map((f) =>
-                f ? (
-                  <p key={f.rotulo}>
-                    <span className="font-medium text-foreground">{f.rotulo}</span> {f.texto}
-                  </p>
-                ) : null,
-              )}
-            </div>
-          </div>
-        ) : null}
-
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Card>
-            <CardContent className="flex items-center gap-4 p-5">
-              <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-[var(--status-ok)]/12 text-[var(--status-ok-text)]">
-                <Award className="size-5" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs text-muted-foreground" title={dica("cpl")}>
-                  Melhor CPL (painel)
-                </p>
-                {ranking.melhorCpl ? (
-                  <>
-                    <p className="truncate font-semibold" title={ranking.melhorCpl.nome}>
-                      {ranking.melhorCpl.nome}
-                    </p>
-                    <p className="text-sm text-muted-foreground">
-                      {moedaOuTraco(ranking.melhorCpl.cplPainel)} por lead · {formatInt(ranking.melhorCpl.agendadas)}{" "}
-                      {ranking.melhorCpl.agendadas === 1 ? "agendada" : "agendadas"}
-                    </p>
-                    <p className="text-xs text-muted-foreground">{amostraDoRanking(ranking.melhorCpl)}</p>
-                  </>
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    Nenhum criativo com volume mínimo (≥ {VOLUME_MINIMO_RANKING.leads} leads do painel ou ≥ {formatCurrency0(VOLUME_MINIMO_RANKING.gasto)}) e lead no período.
-                  </p>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="flex items-center gap-4 p-5">
-              <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                <TrendingUp className="size-5" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs text-muted-foreground">Maior CTR</p>
-                {ranking.maiorCtr ? (
-                  <>
-                    <p className="truncate font-semibold" title={ranking.maiorCtr.nome}>
-                      {ranking.maiorCtr.nome}
-                    </p>
-                    <p className="text-sm text-muted-foreground">{formatPercent(ranking.maiorCtr.ctr)} de cliques</p>
-                    <p className="text-xs text-muted-foreground">{amostraDoRanking(ranking.maiorCtr)}</p>
-                  </>
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    Nenhum criativo com volume mínimo (≥ {VOLUME_MINIMO_RANKING.leads} leads do painel ou ≥ {formatCurrency0(VOLUME_MINIMO_RANKING.gasto)}).
-                  </p>
-                )}
-                {ranking.descartados > 0 ? (
-                  <p className="pt-0.5 text-xs text-muted-foreground">
-                    {ranking.descartados === 1 ? "1 criativo fora dos rankings por volume baixo." : `${ranking.descartados} criativos fora dos rankings por volume baixo.`}
-                  </p>
-                ) : null}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Criativos de conversão</CardTitle>
-            <CardDescription>
-              {REGRA_ATRIBUICAO_REUNIAO} Nome que existe em mais de um anúncio aparece como atribuição ambígua e não entra em ninguém. Passe o mouse no cabeçalho “Saúde” para ver a regra; no selo, o motivo.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <CreativesTable linhas={criativos.conversao} bucket="conversao" regraSaude={regraSaude} />
-          </CardContent>
-        </Card>
-
-        {criativos.descoberta.length > 0 ? (
-          <Card>
-            <CardHeader>
-              <CardTitle>Criativos de descoberta</CardTitle>
-              <CardDescription>Julgados por CPM, gancho e retenção — não por leads.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <CreativesTable linhas={criativos.descoberta} bucket="descoberta" regraSaude={regraSaude} />
-            </CardContent>
-          </Card>
-        ) : null}
-      </section>
-
-      {/* 4b. CRIATIVOS DA LIVE — os anúncios das campanhas da live (E3-02). */}
-      {criativosLive ? (
-        <Card id="criativos-live" className="scroll-mt-24">
-          <CardHeader>
-            <CardTitle>Criativos da live 01/12</CardTitle>
-            <CardDescription>
-              Os anúncios das campanhas da live, por criativo, no período ({rangeLive.de.split("-").reverse().slice(0, 2).join("/")} a{" "}
-              {rangeLive.ate.split("-").reverse().slice(0, 2).join("/")}). Qualificado = classe A ou B; inscrito ligado ao anúncio pela
-              mesma junção da Mídia.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <CriativosDaLiveCard r={criativosLive} />
-          </CardContent>
-        </Card>
+      {m.pausados ? (
+        <Pausados pausados={m.pausados} colunasDoRobo={m.colunasDoRobo} piso={m.pisoDeGasto} regras={m.detalhes.criativos.regras} />
       ) : null}
-
-      {/* 5. DESCOBERTA — alcance, CPM, custo por mil alcançados, seguidores estimados. */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Radio className="size-4 text-muted-foreground" />
-            Descoberta — alcance e seguidores
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {descoberta.temDescoberta ? (
-            <div className="space-y-3">
-              <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3 lg:grid-cols-6">
-                <Stat rotulo="Investimento" valor={formatCurrency0(descoberta.investimento)} dica={dica("investimento_descoberta")} />
-                <Stat rotulo="Alcance somado por anúncio e por dia" valor={formatInt(descoberta.alcanceSomado)} dica="Soma do alcance diário de cada anúncio: conta a mesma pessoa mais de uma vez. Não é o alcance único do período." />
-                <Stat rotulo="CPM" valor={moedaOuTraco(descoberta.cpm)} />
-                <Stat rotulo="Custo / mil alcançados" valor={moedaOuTraco(descoberta.custoPorMilAlcancados)} dica="Gasto em descoberta ÷ alcance somado × 1.000 — como o alcance é somado, é um piso." />
-                <Stat rotulo="Seguidores no período" valor={formatIntComSinal(descoberta.seguidores)} />
-                <Stat rotulo="Custo / seguidor (est.)" valor={moedaOuTraco(descoberta.custoPorSeguidorEst)} destaque />
-              </dl>
-              <p className="text-xs text-muted-foreground">
-                Estimativa: seguidores são da conta (orgânico + pago); a Meta não atribui seguidores por anúncio. O alcance acima é a soma diária por anúncio (conta a mesma pessoa mais de uma vez) — não é alcance único.
-              </p>
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">Nenhum anúncio de descoberta no período. Todo o orçamento foi para conversão.</p>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* 6. GRÁFICO DIÁRIO — barras, eixo linear, lacunas e pausas marcadas (B12). */}
-      <ChartCard
-        title="Investimento por dia"
-        description="Uma barra por dia, todo dia do período no eixo. Faixa cinza “pausado” = um sync confirmou que não houve veiculação. Hachura âmbar “sem dados” = nenhuma sincronização cobriu o dia: pode ter havido gasto que o painel não viu."
-      >
-        <BarrasDiarias
-          dados={serie.map((p) => ({ date: p.date, valor: p.spend, semDado: p.semDado, semVeiculacao: p.semVeiculacao }))}
-          faixas={faixas}
-          valueFormat="currency"
-          yFormat="currency0"
-        />
-      </ChartCard>
+      <Detalhes detalhes={m.detalhes} colunasDoRobo={m.colunasDoRobo} piso={m.pisoDeGasto} />
     </div>
-  );
-}
-
-function Stat({ rotulo, valor, dica: titulo, destaque }: { rotulo: string; valor: string; dica?: string; destaque?: boolean }) {
-  return (
-    <div className="min-w-0" title={titulo}>
-      <dt className="text-xs text-muted-foreground">{rotulo}</dt>
-      <dd className={`tabular text-lg font-semibold ${destaque ? "text-primary" : ""}`}>{valor}</dd>
-    </div>
-  );
-}
-
-/** Leads e reuniões do período que não entraram em nenhuma linha, e por quê (o texto sai de `lib/midia.ts`). */
-function NotaNaoAtribuidos({ n, rangeKey }: { n: NaoAtribuidos; rangeKey?: string }) {
-  const nota = notaDeNaoAtribuidos(n);
-  if (!nota) return null;
-  return (
-    <p className="text-xs text-muted-foreground">
-      {[nota.leads, nota.reunioes].filter(Boolean).join(" ")}{" "}
-      {nota.linkUtm ? (
-        <Link href={comPeriodo("/configuracoes/ferramentas#utm", rangeKey)} className="text-primary underline-offset-4 hover:underline">
-          Gerar o link com {"{{ad.id}}"} →
-        </Link>
-      ) : null}
-    </p>
   );
 }

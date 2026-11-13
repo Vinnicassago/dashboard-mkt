@@ -1,14 +1,6 @@
 import type { DashboardData } from "./types";
-import {
-  awarenessKpis,
-  creativePerformance,
-  rotuloCriativo,
-  type DateRange,
-} from "./metrics";
+import { awarenessKpis, type DateRange } from "./metrics";
 import { custoExibivel, kpisDoPeriodo } from "./kpis";
-
-/** Abaixo disto, "melhor criativo por CPL" é sorte, não ranking (mesma régua da Mídia). */
-const MIN_LEADS_RANKING = 5;
 import { isAwareness } from "./brands";
 import {
   formatCompact,
@@ -24,9 +16,6 @@ export function buildInsights(data: DashboardData, range?: DateRange): string[] 
   if (isAwareness(data.campaign.brand)) return buildAwarenessInsights(data, range);
 
   const out: string[] = [];
-  const perf = creativePerformance(data, range);
-  // Ranking pelo CPL do PAINEL (o mesmo CPL das outras telas), não pelo do Pixel.
-  const creatives = perf.filter((c) => c.leadsPainel >= MIN_LEADS_RANKING);
   const kp = kpisDoPeriodo(data, range);
   const k = kp.overview;
 
@@ -43,20 +32,8 @@ export function buildInsights(data: DashboardData, range?: DateRange): string[] 
     );
   }
 
-  if (creatives.length >= 2) {
-    const byCpl = [...creatives].sort((a, b) => a.cplPainel - b.cplPainel);
-    const best = byCpl[0];
-    const worst = byCpl[byCpl.length - 1];
-    const ratio = best.cplPainel > 0 ? worst.cplPainel / best.cplPainel : 0;
-    out.push(
-      // rotuloCriativo: dois anúncios podem ter o mesmo nome — o nome sozinho
-      // manda escalar (ou pausar) o errado.
-      `Melhor criativo por CPL: "${rotuloCriativo(best, perf)}" a ${formatCurrency(best.cplPainel)}` +
-        (ratio > 1.2
-          ? ` — ${ratio.toFixed(1)}× mais barato que o pior ("${rotuloCriativo(worst, perf)}", ${formatCurrency(worst.cplPainel)}). Vale escalar o vencedor e pausar o pior.`
-          : "."),
-    );
-  }
+  // Criativo para escalar ou pausar não sai daqui (Fase 4): era a 3ª régua de
+  // "escalar". O sinal do criativo mora em `lib/sinal-do-criativo.ts` (a Mídia).
 
   // Duas visões, dois nomes (dicionario.ts): a taxa é da COORTE (dos leads do
   // período, quantos agendaram); as reuniões agendadas são do PERÍODO. O custo

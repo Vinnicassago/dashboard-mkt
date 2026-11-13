@@ -5,11 +5,12 @@ import { brandDef, isAwareness } from "../brands";
 import { buildCustomKey, hojeEmBrasilia } from "../range";
 import { semanaAnteriorFechada } from "../semana";
 import { dataQualityChecks, type DataWarning } from "../metrics";
-import { estadoDaFonte } from "../sincronizacao";
+import { coberturaDeAnuncios, estadoDaFonte } from "../sincronizacao";
 import { estadoDoRoboAgora } from "../robo/estado";
 import { leituraDoRoboParada } from "../robo/situacao";
 import { formatarEspera } from "../format";
 import { carregarBussola } from "../bussola-server";
+import { midiaParaIA, montarMidiaDaTela } from "../midia";
 import { isAiConfigured } from "./config";
 import { buildBriefing } from "./briefing";
 import { analyzeBriefing } from "./analyst";
@@ -17,9 +18,11 @@ import type { ResumoSemanal } from "../types";
 
 /**
  * O resumo da semana (H7): a IA lê a semana FECHADA mais recente (segunda a
- * domingo anteriores) — a camada de métricas, a régua e o que o Início mostra
+ * domingo anteriores) — a camada de métricas, a régua, o que o Início mostra
  * (cartões, leads chegando, o atendimento como está NA HORA da geração, o
- * último post) — e escreve a leitura. Uma linha por geração; o Início mostra a
+ * último post) e a Mídia da semana como a tela a escreve (`pago.midia`: o
+ * resumo, a verba, os criativos no ar com sinal e a situação do robô) — e
+ * escreve a leitura. Uma linha por geração; o Início mostra a
  * última e guarda as 12 anteriores.
  *
  * Quem chama: o cron de segunda 08:00 (`/api/resumo-semanal`) ou o botão
@@ -68,12 +71,33 @@ export async function gerarResumoSemanal(
     // O MESMO caminho da home: os kpis e os blocos que o Início mostra. A semana
     // fechada nunca abre o painel da live, mesmo que coincida com uma janela da régua.
     const b = await carregarBussola(brand.slug, buildCustomKey(from, to), { semModoLive: true });
+    // A Mídia da semana, montada pela MESMA função da página (só aqui: o Início não
+    // calcula a Mídia — o custo é do cron semanal). A semana fechada é um período
+    // livre: o bloco da live sai recortado nela.
+    const cobertura = await coberturaDeAnuncios(brand.slug);
+    const midia = montarMidiaDaTela({
+      data: b.data,
+      range: b.range,
+      rangeKey: b.rangeKey,
+      naoComecou: b.naoComecou,
+      kpis: b.kpis,
+      opcoesKpis: { cobertura },
+      eventos: b.eventos,
+      robo: b.robo,
+      cobertura,
+      ultimoSyncAds: ads.ultimoOk,
+      cfgLive: b.cfgDaLive,
+      marca: brand.slug,
+      hoje: b.hoje,
+      agora: b.agora,
+    });
     briefing = buildBriefing(b.data, b.range ?? { from, to }, {
       nowIso,
       drafts,
       warnings: [...avisosDeSync, ...dataQualityChecks(b.data)],
       kpis: b.kpis,
       inicio: b.inicio ?? undefined,
+      midia: midiaParaIA(midia),
     });
   }
 

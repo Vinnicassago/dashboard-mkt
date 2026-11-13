@@ -40,6 +40,12 @@ export type MetricaId =
   | "reunioes_realizadas"
   | "vendas"
   | "onde_trava"
+  // ---- mídia (Fase 4 de nov/26) ----
+  | "no_ar"
+  | "sinal_do_criativo"
+  | "qualidade_do_robo"
+  | "sem_whatsapp"
+  | "fora_das_linhas"
   // ---- conta do Instagram (Conteúdo, Fase 6) ----
   | "seguidores"
   | "cliques_link_bio"
@@ -282,6 +288,55 @@ export const DICIONARIO: Record<MetricaId, Definicao> = {
     inclui: "quem desistiu depois de agendar (trava em “a reunião não aconteceu”)",
     exclui:
       "testes, cópias de duplicado e inscritos da live (a Fila da live) e, com o robô no período, os de antes de 29/10 que não estão na Fila",
+  },
+  // ---- mídia (Fase 4 de nov/26) ----
+  no_ar: {
+    id: "no_ar",
+    nome: "No ar",
+    definicao: "Anúncio com impressão ou gasto nos 3 dias até o último sync de anúncios que deu certo.",
+    formula: "impressões ou gasto > 0 entre ref − 2 e ref; ref = min(fim do período, dia do último sync ok)",
+    fonte: "Meta Ads (sync diário) + registro de sincronizações",
+    inclui: "anúncio que parou ontem (aparece no ar por até 2 dias)",
+    exclui: "o status e o orçamento do Meta (o painel não os lê)",
+  },
+  sinal_do_criativo: {
+    id: "sinal_do_criativo",
+    nome: "Sinal",
+    definicao:
+      "O que fazer com o criativo no ar: escalar, candidato a escalar, manter, trocar a arte, pausar ou cedo para julgar. É sugestão: nada muda no Meta.",
+    formula: "REGUA_DO_SINAL (lib/sinal-do-criativo.ts)",
+    fonte: "Painel (leads, reuniões, robô) + Meta (gasto, fadiga)",
+    inclui: "a resposta ao robô como critério principal quando há 10 pessoas com 24 h",
+    exclui: "criativos da live (bloco próprio) e os fora do ar",
+  },
+  qualidade_do_robo: {
+    id: "qualidade_do_robo",
+    nome: "Resposta ao robô",
+    definicao:
+      "Leads do período deste criativo que passaram pelo robô, sem teste e sem cópia de duplicado. Responderam sobre a 1ª mensagem; aceitaram sobre quem respondeu.",
+    formula: "fatosDoTrecho por lead, somados por criativo ou conjunto",
+    fonte: "Robô (pelo sync)",
+    inclui: "quem ainda está nas primeiras 24 h (conta na tela, não no sinal)",
+    exclui: "antes de 29/10, sem telefone, inscritos da live, recém-chegados",
+  },
+  sem_whatsapp: {
+    id: "sem_whatsapp",
+    nome: "Sem WhatsApp",
+    definicao: "Das pessoas do criativo no robô, as que estão na etapa 'Telefone sem WhatsApp' neste episódio.",
+    formula: "etapa do robô no episódio = sem_whatsapp ÷ pessoas no robô (a mesma regra do Funil)",
+    fonte: "Robô (pelo sync)",
+    inclui: "a etapa atual do episódio (a mesma leitura do Funil)",
+    exclui: "sem telefone utilizável (fica fora do robô)",
+  },
+  fora_das_linhas: {
+    id: "fora_das_linhas",
+    nome: "Fora das linhas",
+    definicao:
+      "Leads de conversão do período sem conjunto identificado: anúncio fora das linhas desta marca, origem desconhecida, sem UTM, nome ambíguo, macro sem resolver ou anúncio sem gasto no período.",
+    formula: "leads de conversão − leads de conversão nos conjuntos de conversão (a mesma passada)",
+    fonte: "Painel (atribuição lead → anúncio)",
+    inclui: "lead com id de anúncio que não está nas linhas desta marca",
+    exclui: "leads orgânicos",
   },
   // ---- conta do Instagram (Conteúdo). Não são KPI do funil, mas o ⓘ e o
   // briefing leem do MESMO dicionário — um fato, um lugar. ----

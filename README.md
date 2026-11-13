@@ -39,7 +39,7 @@ src/
     (dashboard)/            # grupo de rotas com o layout (sidebar + header)
       page.tsx              # Início — cartões, leads chegando, atendimento, rodapé (ou o painel da live)
       funil/                # o funil do processo (robô → reunião → venda), onde trava, perdas, coortes
-      midia/                # verba por campanha › conjunto, criativos, ritmo
+      midia/                # o que fazer com a verba: para onde vai, criativos no ar com sinal e resposta ao robô; detalhes recolhidos
       fila/                 # fila de contato única (painel + robô + especialista)
       leads/                # leads, ficha, revisão, excluídos, histórico
       conteudo/             # Instagram: conta, posts, registros manuais e produção

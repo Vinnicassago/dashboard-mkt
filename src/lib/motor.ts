@@ -1,8 +1,13 @@
 /**
  * Motor de ações v2 (H5 do relatório) — o que fazer esta semana. Puro.
  *
- * DORMENTE desde a Fase 2 (nov/26): o Início não o chama e a IA não o lê; volta
- * com a Mídia (Fase 4). As regras e os testes continuam valendo.
+ * DORMENTE desde a Fase 2 (nov/26): o Início não o chama e a IA não o lê. Continua
+ * dormente: a Mídia (Fase 4) mostra o sinal no cartão do criativo, não a lista de
+ * ações; M3, M4 (criativo), M6, M8 e M9 leem o MESMO `criativosComSinal` (o do
+ * cartão), montado uma vez por rodada; quem religar o motor passa `ultimoSyncAds` e
+ * `cfgLive` (sem `cfgLive` a live não é separada: o criativo da live receberia
+ * sinal, em conflito com a régua congelada de `criativos-live.ts`). As regras e os
+ * testes continuam valendo.
  *
  * Cada regra tem id, dono, gatilho, amostra mínima, impacto e confiança, e vira
  * UMA frase com número e um link para onde se age. A ordem é severidade ×
@@ -44,23 +49,26 @@ import {
 } from "./robo/situacao";
 import { custoExibivel, kpisDoPeriodo, periodoDaRegua, reguaDoPeriodo, type KpisDoPeriodo } from "./kpis";
 import { metaVigente, taxasObservadas } from "./metas";
-import {
-  creativePerformance,
-  dailySeries,
-  filterLeads,
-  fimDoPeriodo,
-  inRange,
-  lpKpis,
-  rotuloCriativo,
-  type CreativePerf,
-  type DateRange,
-} from "./metrics";
+import { dailySeries, inRange, lpKpis, type DateRange } from "./metrics";
 import { diaDoLead } from "./horario-util";
 // M2 e M4 leem os conjuntos da MESMA função da página /midia (por id, S20):
-// a ação cita a linha que o link abre, com o número que ela mostra.
-import { chaveDoConjuntoPorAnuncio, conjuntosPorId, rotuloConjunto, type LinhaMidia } from "./midia";
+// a ação cita a linha com o número que ela mostra, e o link vai à âncora onde a
+// linha MORA (`ancoraDoConjunto`/`ancoraDoCriativo`: no ar em Detalhes ou nos
+// cartões, parada em Pausados, a live no bloco dela). M3, M4 (criativo), M6, M8 e
+// M9 leem os criativos com o sinal do cartão (`criativosComSinal`).
+import {
+  ancoraDoConjunto,
+  ancoraDoCriativo,
+  chaveDoConjuntoPorAnuncio,
+  conjuntosPorId,
+  criativosComSinal,
+  rotuloConjunto,
+  type LinhaCriativo,
+  type LinhaMidia,
+} from "./midia";
+import { AMOSTRA_DE_PESSOAS, REGUA_DO_SINAL } from "./sinal-do-criativo";
+import type { CampanhaDaLive } from "./live";
 import type { Intervalo } from "./cobertura";
-import { atribuidor } from "./atribuicao";
 import { MIN_REUNIOES } from "./trust";
 import { diasDoPeriodo, janelaAnterior, segundaDaSemana } from "./semana";
 import {
@@ -78,7 +86,7 @@ import type { AcaoEstado, DashboardData, LeadEvent } from "./types";
 
 export type RegraId =
   | "C1" | "C2" | "C3" | "C4" | "C5"
-  | "M1" | "M2" | "M3" | "M4" | "M5" | "M6" | "M7"
+  | "M1" | "M2" | "M3" | "M4" | "M5" | "M6" | "M7" | "M8" | "M9"
   | "L1" | "L2"
   | "D1" | "D2"
   | "B1";
@@ -151,6 +159,17 @@ export interface EntradaMotor {
    * com classe saem da Fila de sempre, e a C1 os conta daqui.
    */
   filaLive?: ItemDaFilaLive[];
+  /**
+   * `estadoDaFonte("ads", marca).ultimoOk` (ISO) — o dia de referência do "no ar"
+   * do sinal (`refDaVeiculacao`). Ausente: o último dia com linha.
+   */
+  ultimoSyncAds?: string | null;
+  /**
+   * A régua da live (`campanhaDaLive`). Sem ela a live NÃO é separada: o criativo da
+   * live receberia sinal (e uma M8), em conflito com a régua congelada de
+   * `criativos-live.ts`. Quem religar o motor passa as duas.
+   */
+  cfgLive?: CampanhaDaLive;
   /** ISO. */
   agora: string;
   /** AAAA-MM-DD (Brasília). */
@@ -166,15 +185,17 @@ export const AMOSTRA_MIN = {
   C5: 10,
   M1: 5,
   M2: MIN_REUNIOES,
-  M4: 10,
+  // A amostra de PESSOAS da régua do sinal (uma constante só, K9): a M4 por criativo
+  // usa o MESMO corte da trava de contato inválido do cartão.
+  M4: AMOSTRA_DE_PESSOAS,
   L1: 100,
   L2: 10,
 } as const;
 
 /** M1: CPL acima disto da média de 4 semanas dispara mesmo sem alvo. */
 export const CPL_ACIMA_DA_MEDIA = 1.2;
-/** M4: contato inválido acima disto é problema de formulário/segmentação. */
-export const CONTATO_INVALIDO_MAX = 0.25;
+/** M4: contato inválido acima disto é problema de formulário/segmentação — o MESMO corte da trava do candidato. */
+export const CONTATO_INVALIDO_MAX = REGUA_DO_SINAL.contatoInvalidoMax;
 /** M5: verba de descoberta acima disto do total pede uma meta de descoberta. */
 export const DESCOBERTA_MAX = 0.3;
 /** L1: visita → lead abaixo disto da média de 4 semanas. */
@@ -215,6 +236,13 @@ interface Contexto extends EntradaMotor {
   /** Taxa lead → agendada de referência: a meta, senão a observada (com amostra). */
   taxaAgendada: number | null;
   registroEmLote: boolean;
+  /**
+   * Os criativos de CONVERSÃO com o sinal do cartão da Mídia (`criativosComSinal`,
+   * montado UMA vez por rodada, como a Fila). M3, M4 (criativo), M6, M8 e M9 leem daqui.
+   */
+  criativos: LinhaCriativo[];
+  /** O dia de referência do "no ar" da MESMA montagem (`refDaVeiculacao`): os conjuntos de M2/M4 se leem com ele. */
+  refDoNoAr: string;
 }
 
 /** Taxa lead → agendada que serve de régua para "quantas reuniões isso vale". */
@@ -581,20 +609,45 @@ function regraM1(c: Contexto): Acao | null {
 }
 
 /**
- * Os criativos do período julgados como /midia#criativos os julga: as janelas
- * da saúde terminam no fim do período que já aconteceu (`fimDoPeriodo` =
- * min(fim, hoje); HOJE quando não há `range` — senão o anúncio pausado seria
- * julgado pelos seus próprios últimos 14 dias e o M3 mandaria renovar a arte do
- * que a tabela mostra "Parado") e com a mesma cobertura do sync. M3, M4 e M6
- * leem daqui.
+ * Os criativos com o sinal julgados como o cartão de /midia#criativos os julga
+ * (`criativosComSinal`: o "no ar" ancorado no último sync, a média dos criativos,
+ * a resposta ao robô; as janelas da fadiga terminam em `fimDoPeriodo`). Só quem
+ * está NO AR tem sinal — o anúncio pausado nunca recebe ação de criativo. Uma
+ * montagem por rodada (`Contexto.criativos`).
  */
-function criativosDoPeriodo(c: Contexto): CreativePerf[] {
-  return creativePerformance(c.data, c.range, { fim: fimDoPeriodo(c.range, c.hoje), cobertura: c.cobertura });
+function criativosComSinalDaRodada(e: EntradaMotor): { criativos: LinhaCriativo[]; ref: string } {
+  const { bloco, ref } = criativosComSinal({
+    data: e.data,
+    range: e.range,
+    kpis: e.kpis,
+    eventos: e.eventos,
+    robo: e.robo,
+    cobertura: e.cobertura ?? [],
+    ultimoSyncAds: e.ultimoSyncAds ?? null,
+    cfgLive: e.cfgLive,
+    hoje: e.hoje,
+    agora: e.agora,
+  });
+  return { criativos: bloco.conversao, ref };
 }
 
-/** As linhas de CONJUNTO (não as de campanha) que /midia#conjuntos mostra, nos dois baldes. */
+/** O ⓘ do sinal vira o começo do detalhe da ação: termina com ponto, sem dobrar. */
+const comPonto = (s: string) => {
+  const t = s.trim();
+  return /[.!?]$/.test(t) ? t : `${t}.`;
+};
+
+/**
+ * As linhas de CONJUNTO (não as de campanha) que /midia mostra, nos dois baldes, com a
+ * veiculação da MESMA régua da página (o `ref` da rodada e a cobertura): é ela que diz
+ * se a linha mora em `#conjuntos` (no ar) ou em `#pausados` (`ancoraDoConjunto`).
+ */
 function linhasDeConjunto(c: Contexto): LinhaMidia[] {
-  const bloco = conjuntosPorId(c.data, c.range, { custoPorReuniaoExibivel: custoExibivel(c.kpis.custoPorReuniao) });
+  const bloco = conjuntosPorId(c.data, c.range, {
+    custoPorReuniaoExibivel: custoExibivel(c.kpis.custoPorReuniao),
+    ref: c.refDoNoAr,
+    cobertura: c.cobertura ?? [],
+  });
   return [...bloco.conversao, ...bloco.descoberta].flatMap((campanha) => campanha.conjuntos ?? []);
 }
 
@@ -622,7 +675,7 @@ function regraM2(c: Contexto): Acao | null {
       (pior
         ? `O conjunto mais caro é “${rotuloConjunto(pior)}” (${formatCurrency(pior.custoPorAgendada!)} por reunião, ${formatInt(pior.agendadas)} reuniões): pause-o ou reduza a verba dele.`
         : `Nenhum conjunto tem ${MIN_REUNIOES} reuniões sozinho — compare pelo CPL do painel antes de pausar.`),
-    href: "/midia#conjuntos",
+    href: `/midia${pior ? ancoraDoConjunto(pior) : "#conjuntos"}`,
     impacto:
       aMais >= 1
         ? { valor: Math.round(aMais), unidade: "reais_semana", texto: `≈ ${formatCurrency0(aMais)} por semana acima do alvo` }
@@ -635,29 +688,92 @@ function regraM2(c: Contexto): Acao | null {
   };
 }
 
+/** Os criativos com um sinal, por gasto (o maior primeiro). */
+const comSinal = (c: Contexto, s: NonNullable<LinhaCriativo["sinal"]>["sinal"]) =>
+  c.criativos.filter((l) => l.sinal?.sinal === s).sort((a, b) => b.spend - a.spend);
+
+/**
+ * M3 — trocar a arte: o selo "Trocar arte" do cartão (fadiga, ou barato e não
+ * responde ao robô). Até 2, por gasto. O ramo "caro" de antes é a M8.
+ */
 function regrasM3(c: Contexto): Acao[] {
-  const criativos = criativosDoPeriodo(c);
-  const fadigados = criativos.filter((x) => x.fatigue.level === "fadigado" && x.spend > 0).sort((a, b) => b.spend - a.spend);
   const conf = confiancaDeMidia(c);
-  return fadigados.slice(0, 2).map((x) => {
-    const rotulo = rotuloCriativo(x, criativos);
-    const caro = x.leadsPainel >= 5 && custoExibivel(c.kpis.cpl) && x.cplPainel >= c.kpis.cpl.valor * 1.5;
-    const cpl = x.leadsPainel > 0 ? `CPL ${formatCurrency(x.cplPainel)} em ${formatInt(x.leadsPainel)} leads` : "nenhum lead do painel no período";
-    return {
-      id: `M3:${x.adId}`,
-      regra: "M3",
-      dono: "MKT",
-      severidade: caro ? "alta" : "media",
-      titulo: caro ? `Pause “${rotulo}”: fadigado e ${formatCurrency(x.cplPainel)} por lead` : `Renove a arte de “${rotulo}” (fadigando)`,
-      detalhe: `${x.fatigue.reason}. ${cpl}. ${caro ? "Pause no Ads Manager e suba uma variação." : "Suba uma variação nova no mesmo conjunto antes que o custo dispare."}`,
-      href: "/midia#criativos",
-      semImpacto: "estimativa indisponível (fadiga antecipa custo, não o mede)",
-      confianca: conf.confianca,
-      confiancaMotivo: conf.motivo,
-      amostra: { n: x.impressions, minimo: 500 },
-      prioridade: 0,
-    } satisfies Acao;
-  });
+  return comSinal(c, "trocar-arte")
+    .slice(0, 2)
+    .map((l) => {
+      const s = l.sinal!;
+      return {
+        id: `M3:${l.chave}`,
+        regra: "M3",
+        dono: "MKT",
+        severidade: "media",
+        titulo: `Renove a arte de “${l.nome}”: ${s.motivo}`,
+        detalhe: s.dica,
+        href: `/midia${ancoraDoCriativo(l, c.criativos, { cartao: true })}`,
+        semImpacto: "estimativa indisponível",
+        confianca: conf.confianca,
+        confiancaMotivo: conf.motivo,
+        amostra: { ...s.amostra },
+        prioridade: 0,
+      } satisfies Acao;
+    });
+}
+
+/**
+ * M8 — pausar: o selo "Pausar" do cartão (sem reunião, e nenhum lead ou CPL de 2×
+ * a média com gasto que torna isso improvável por acaso; ou caro e não responde ao
+ * robô). Até 2, por gasto. Só quem está no ar tem sinal: o pausado nunca gera M8.
+ */
+function regrasM8(c: Contexto): Acao[] {
+  const conf = confiancaDeMidia(c);
+  return comSinal(c, "pausar")
+    .slice(0, 2)
+    .map((l) => {
+      const s = l.sinal!;
+      return {
+        id: `M8:${l.chave}`,
+        regra: "M8",
+        dono: "MKT",
+        severidade: "alta",
+        titulo: `Pause “${l.nome}”: ${s.motivo}`,
+        detalhe: `${comPonto(s.dica)} Pause no Ads Manager e suba uma variação.`,
+        href: `/midia${ancoraDoCriativo(l, c.criativos, { cartao: true })}`,
+        semImpacto: "estimativa indisponível",
+        confianca: conf.confianca,
+        confiancaMotivo: conf.motivo,
+        amostra: { ...s.amostra },
+        prioridade: 0,
+      } satisfies Acao;
+    });
+}
+
+/**
+ * M9 — candidato a escalar: o selo "Candidato a escalar" do cartão (sinal de topo
+ * de funil, ainda sem 3 reuniões). Só 1: o de menor CPL relativo à média.
+ */
+function regraM9(c: Contexto): Acao | null {
+  const candidato = c.criativos
+    .filter((l) => l.sinal?.sinal === "candidato")
+    .sort(
+      (a, b) =>
+        (a.sinal!.razao ?? Infinity) - (b.sinal!.razao ?? Infinity) || b.spend - a.spend || a.chave.localeCompare(b.chave),
+    )[0];
+  if (!candidato) return null;
+  const s = candidato.sinal!;
+  return {
+    id: `M9:${candidato.chave}`,
+    regra: "M9",
+    dono: "MKT",
+    severidade: "baixa",
+    titulo: `Candidato a escalar: “${candidato.nome}” (${s.ressalva ?? s.motivo})`,
+    detalhe: `${comPonto(s.motivo)} Suba 10–20% e observe 48–72 h; decide com ${MIN_REUNIOES} reuniões.`,
+    href: `/midia${ancoraDoCriativo(candidato, c.criativos, { cartao: true })}`,
+    semImpacto: "estimativa indisponível",
+    confianca: "media",
+    confiancaMotivo: s.ressalva ?? undefined,
+    amostra: { ...s.amostra },
+    prioridade: 0,
+  };
 }
 
 function regrasM4(c: Contexto): Acao[] {
@@ -675,41 +791,35 @@ function regrasM4(c: Contexto): Acao[] {
       severidade: "alta",
       titulo: `Conjunto “${rotuloConjunto(l)}”: ${pct(l.pctContatoInvalido)} de contatos inválidos — revisar formulário e segmentação`,
       detalhe: `${formatInt(l.contatoInvalido)} de ${formatInt(l.leadsPainel)} leads do período com telefone ou e-mail inválido. Lead que não existe custa como lead e nunca vira reunião.`,
-      href: "/midia#conjuntos",
+      href: `/midia${ancoraDoConjunto(l)}`,
       semImpacto: "estimativa indisponível",
       confianca: "alta",
       amostra: { n: l.leadsPainel, minimo: AMOSTRA_MIN.M4 },
       prioridade: 0,
     });
   }
-  // Por ANÚNCIO, só onde o conjunto dele não disparou (senão é a mesma ação duas vezes).
-  const atribuir = atribuidor(c.data.creatives);
+  // Por CRIATIVO (K9): a linha do criativo (`chaveDoCriativoDoLead`), com os MESMOS
+  // números e o MESMO corte da trava de contato inválido do cartão — um criativo
+  // nunca é Candidato no cartão e M4 aqui ao mesmo tempo. Pula o criativo cujos
+  // conjuntos TODOS já dispararam (senão é a mesma ação duas vezes).
   const chaveDoConjunto = chaveDoConjuntoPorAnuncio(c.data.adDaily);
-  const porAnuncio = new Map<string, { n: number; invalidos: number }>();
-  for (const l of filterLeads(c.data.leads, c.range)) {
-    const adId = atribuir(l).adId;
-    if (!adId) continue;
-    const inv = l.status === "contato_invalido" ? 1 : 0;
-    const a = porAnuncio.get(adId) ?? { n: 0, invalidos: 0 };
-    porAnuncio.set(adId, { n: a.n + 1, invalidos: a.invalidos + inv });
-  }
-  const criativos = criativosDoPeriodo(c);
-  for (const [adId, v] of porAnuncio) {
-    if (v.n < AMOSTRA_MIN.M4 || v.invalidos / v.n <= CONTATO_INVALIDO_MAX) continue;
-    if (conjuntosQueDispararam.has(chaveDoConjunto.get(adId) ?? "")) continue;
-    const cr = criativos.find((x) => x.adId === adId);
-    const nome = cr ? rotuloCriativo(cr, criativos) : adId;
+  for (const l of c.criativos) {
+    if (l.leadsPainel < AMOSTRA_MIN.M4 || l.pctContatoInvalido == null || l.pctContatoInvalido <= CONTATO_INVALIDO_MAX) continue;
+    const conjuntos = (l.anunciosDetalhe ?? [])
+      .map((a) => (a.adId ? chaveDoConjunto.get(a.adId) : undefined))
+      .filter((k): k is string => Boolean(k));
+    if (conjuntos.length > 0 && conjuntos.every((k) => conjuntosQueDispararam.has(k))) continue;
     out.push({
-      id: `M4:ad:${adId}`,
+      id: `M4:cr:${l.chave}`,
       regra: "M4",
       dono: "MKT",
       severidade: "alta",
-      titulo: `Criativo “${nome}”: ${pct(v.invalidos / v.n)} de contatos inválidos — revisar formulário e segmentação`,
-      detalhe: `${formatInt(v.invalidos)} de ${formatInt(v.n)} leads do período com telefone ou e-mail inválido.`,
-      href: "/midia#criativos",
+      titulo: `Criativo “${l.nome}”: ${pct(l.pctContatoInvalido)} de contatos inválidos — revisar formulário e segmentação`,
+      detalhe: `${formatInt(l.contatoInvalido)} de ${formatInt(l.leadsPainel)} leads do período com telefone ou e-mail inválido.`,
+      href: `/midia${ancoraDoCriativo(l, c.criativos)}`,
       semImpacto: "estimativa indisponível",
       confianca: "alta",
-      amostra: { n: v.n, minimo: AMOSTRA_MIN.M4 },
+      amostra: { n: l.leadsPainel, minimo: AMOSTRA_MIN.M4 },
       prioridade: 0,
     });
   }
@@ -739,30 +849,29 @@ function regraM5(c: Contexto): Acao | null {
   };
 }
 
-/** Além do relatório: o vencedor com amostra, para escalar (regra v1 que continua valendo). */
+/**
+ * M6 — escalar: o selo "Escalar" do cartão (3+ reuniões pelo id do anúncio a custo
+ * por reunião até o da conta, sem fadiga, no ar). O de menor gasto ÷ agendadas.
+ */
 function regraM6(c: Contexto): Acao | null {
-  if (!custoExibivel(c.kpis.custoPorReuniao)) return null;
-  const criativos = criativosDoPeriodo(c);
-  // Só se escala o que está no ar: fadigando não, e parado (pausado) ou sem
-  // dados (sync sem cobertura) também não — "aumente o orçamento" de um anúncio
-  // que a tabela mostra "Parado" seria a ação errada.
-  const vencedor = criativos
-    .filter((x) => x.meetings >= MIN_REUNIOES && x.spend > 0 && !["fadigado", "parado", "sem-dados"].includes(x.fatigue.level))
-    .sort((a, b) => a.cpr - b.cpr)[0];
+  const vencedor = c.criativos
+    .filter((l) => l.sinal?.sinal === "escalar" && l.agendadas > 0)
+    .sort((a, b) => a.spend / a.agendadas - b.spend / b.agendadas || a.chave.localeCompare(b.chave))[0];
   if (!vencedor) return null;
+  const s = vencedor.sinal!;
   const conf = confiancaDeMidia(c);
   return {
-    id: `M6:${vencedor.adId}`,
+    id: `M6:${vencedor.chave}`,
     regra: "M6",
     dono: "MKT",
     severidade: "baixa",
-    titulo: `Escale “${rotuloCriativo(vencedor, criativos)}”: ${formatCurrency(vencedor.cpr)} por reunião`,
-    detalhe: `${formatInt(vencedor.meetings)} reuniões e ${formatInt(vencedor.leadsPainel)} leads no período. Aumente o orçamento 10–20% e observe 48–72 h.`,
-    href: "/midia#criativos",
+    titulo: `Escale “${vencedor.nome}”: ${s.motivo}`,
+    detalhe: `${formatInt(vencedor.agendadas)} reuniões e ${formatInt(vencedor.leadsPainel)} leads no período. Aumente o orçamento 10–20% e observe 48–72 h.`,
+    href: `/midia${ancoraDoCriativo(vencedor, c.criativos, { cartao: true })}`,
     semImpacto: "estimativa indisponível",
     confianca: conf.confianca,
     confiancaMotivo: conf.motivo,
-    amostra: { n: vencedor.meetings, minimo: MIN_REUNIOES },
+    amostra: { ...s.amostra },
     prioridade: 0,
   };
 }
@@ -989,7 +1098,9 @@ export function motorDeAcoes(e: EntradaMotor): Acao[] {
   const observadas = taxasObservadas(e.data, e.hoje, e.agora);
   // A MESMA entrada que /fila passa (o robô de `estadoDoRoboAgora`): o número da ação é o da página.
   const fila = montarFila({ nowIso: e.agora, leads: e.data.leads, eventos: e.eventos, robo: e.robo });
-  const base = { ...e, semanas, observadas, fila };
+  // O MESMO sinal do cartão da Mídia, montado UMA vez por rodada (K29).
+  const { criativos, ref: refDoNoAr } = criativosComSinalDaRodada(e);
+  const base = { ...e, semanas, observadas, fila, criativos, refDoNoAr };
   const c5 = regraC5(base);
   const c: Contexto = {
     ...base,
@@ -1011,6 +1122,8 @@ export function motorDeAcoes(e: EntradaMotor): Acao[] {
     regraM5(c),
     regraM6(c),
     regraM7(c),
+    ...regrasM8(c),
+    regraM9(c),
     regraL1(c),
     regraL2(c),
     regraD1(c),

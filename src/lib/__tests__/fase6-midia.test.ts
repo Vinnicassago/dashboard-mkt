@@ -1,39 +1,59 @@
 /**
  * Fase 6.3 — Mídia (relatório §7.3; S13, S20, B9, B12, B13, B17). Fixture
  * sintética (nenhum dado real). Datas em UTC; Brasília = UTC−3.
+ *
+ * Fase 4 (nov/26): saíram os rankings, a faixa de saúde, o Gancho, a Retenção e o
+ * "sem resultado" da fadiga; a coluna Saúde (conversão) virou Sinal — a MESMA régua do
+ * cartão e do motor (`criativosComSinal`); quem não está no ar não tem sinal.
  */
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
-import { adsetPerformance, computeFatigue, creativePerformance, REGRA_FADIGA } from "../metrics";
+import { describe, expect, it, vi } from "vitest";
+import { adsetPerformance, computeFatigue, creativePerformance } from "../metrics";
 import { custoExibivel, fatoDoCustoPorReuniao, kpisDoPeriodo, mostrar, reguaDoPeriodo } from "../kpis";
 import {
   COLUNAS_CONJUNTOS_CONVERSAO,
+  COLUNAS_CONJUNTOS_DESCOBERTA,
   COLUNAS_CRIATIVOS_CONVERSAO,
   COLUNAS_CRIATIVOS_DESCOBERTA,
   TODAS_AS_COLUNAS,
   conjuntosPorId,
-  cplAlvoDaMidia,
   criativosAgregados,
-  faixaDeSaude,
-  notaDeNaoAtribuidos,
-  rankingsDeCriativos,
+  criativosComSinal,
+  foraDasLinhasDeConversao,
+  midiaParaIA,
+  montarMidiaDaTela,
   REGRA_ATRIBUICAO_REUNIAO,
   resumoDaMidia,
   rotuloConjunto,
   tendenciaSemanalMidia,
-  textoRegraSaude,
+  textoDaReguaDaFadiga,
+  textoDosForaDasLinhas,
   tituloDoCabecalho,
 } from "../midia";
+import type { EntradaDosSinais } from "../midia-tela";
+import { textoDaReguaDoSinal } from "../sinal-do-criativo";
 import { motorDeAcoes } from "../motor";
 import { buildBriefing } from "../ai/briefing";
 import { dica } from "../dicionario";
 import { formatCurrency } from "../format";
+import { LIVE_PADRAO } from "../live";
 import { MIN_REUNIOES } from "../trust";
 import { CreativesTable } from "@/components/tables/creatives-table";
 import { ConjuntosTable } from "@/components/midia/conjuntos-table";
 import { buildSeedData } from "../data/seed";
 import type { AdDaily, Creative, DashboardData, Lead, Meta } from "../types";
+
+// O ⓘ só existe aberto no navegador: aqui ele deixa o texto e o rótulo no HTML, para o
+// teste ver QUAL explicação mora em cada célula (K40) e em cada cabeçalho.
+vi.mock("@/components/ui/info", async () => {
+  const { createElement: el } = await import("react");
+  return {
+    Info: function Info({ texto, rotulo }: { texto?: string; rotulo?: string }) {
+      return el("button", { type: "button", "aria-label": rotulo, "data-texto": texto });
+    },
+  };
+});
 
 // ---------------------------------------------------------------- fixtures
 
@@ -122,6 +142,13 @@ function dias(fim: string, n: number, adId: string, extra: Partial<AdDaily> = {}
 
 const kpisDe = (data: DashboardData, range = PERIODO as { from: string; to: string } | undefined) =>
   kpisDoPeriodo(data, range, { hoje: HOJE, agora: AGORA, cobertura: COBERTURA });
+
+/** Os criativos COM o sinal (a montagem única da tela, do motor e da IA), sem sync registrado: o "no ar" ancora no último dia com linha. */
+const sinaisDe = (data: DashboardData, periodo: { from: string; to: string } | "campanha" = PERIODO, o: Partial<EntradaDosSinais> = {}) => {
+  // "campanha" = sem ?range= (range undefined): um parâmetro `undefined` cairia no padrão.
+  const range = periodo === "campanha" ? undefined : periodo;
+  return criativosComSinal({ data, range, kpis: kpisDe(data, range), eventos: [], cobertura: COBERTURA, ultimoSyncAds: null, hoje: HOJE, agora: AGORA, ...o });
+};
 
 /** Uma campanha de conversão com dois conjuntos e um criativo em cada, e leads do painel. */
 function cenario(): DashboardData {
@@ -282,17 +309,22 @@ describe("campanhas → conjuntos por id", () => {
 // ---------------------------------------------------------------- colunas (rótulos)
 
 describe("rótulos das colunas", () => {
-  it("nenhuma coluna chamada só “Leads”, e toda coluna do Pixel diz “Pixel” no nome", () => {
+  it("nenhuma coluna chamada só “Leads”, toda coluna do Pixel diz “Pixel” e toda do robô diz “(robô)”", () => {
     for (const colunas of TODAS_AS_COLUNAS) {
       for (const c of colunas) {
         expect(c.header).not.toBe("Leads");
         if (c.fonte === "pixel") expect(c.header).toMatch(/Pixel/);
         if (/^Leads/.test(c.header)) expect(c.fonte).toBe("painel");
+        if (c.fonte === "robo") expect(c.header).toMatch(/\(robô\)$/);
+        // Gancho e Retenção saíram (F4-D14): a janela era a do sync, não a do período.
+        expect(c.key).not.toMatch(/^(hookRate|holdRate|thruPlayRate)$/);
+        expect(c.header).not.toMatch(/Gancho|Retenção/);
       }
     }
     const conv = COLUNAS_CONJUNTOS_CONVERSAO.map((c) => c.header);
     expect(conv).toEqual([
       "Campanha › conjunto",
+      "Veiculação",
       "Gasto",
       "Leads (painel)",
       "Conversões Meta (Pixel)",
@@ -300,10 +332,28 @@ describe("rótulos das colunas", () => {
       "Agendadas",
       "Custo por agendada",
       "% contato inválido",
+      "Responderam (robô)",
+      "Aceitaram (robô)",
+      "Sem WhatsApp (robô)",
     ]);
-    // B13: as secundárias dos criativos vão para a linha expandida.
-    expect(COLUNAS_CRIATIVOS_CONVERSAO.filter((c) => !c.secundaria).map((c) => c.key)).toEqual(["nome", "spend", "leadsPainel", "cplPainel", "agendadas", "custoPorAgendada", "saude"]);
+    expect(COLUNAS_CONJUNTOS_CONVERSAO.filter((c) => c.fonte === "robo").map((c) => [c.key, c.dica])).toEqual([
+      ["roboResponderam", "responderam"],
+      ["roboAceitaram", "convite_aceito"],
+      ["roboSemWhatsapp", "sem_whatsapp"],
+    ]);
+    // B13: as secundárias dos criativos vão para a linha expandida. A Saúde (conversão) virou Sinal.
+    const principais = COLUNAS_CRIATIVOS_CONVERSAO.filter((c) => !c.secundaria).map((c) => c.key);
+    for (const k of ["nome", "spend", "leadsPainel", "cplPainel", "agendadas", "custoPorAgendada", "sinal", "roboResponderam", "roboAceitaram", "roboSemWhatsapp"]) {
+      expect(principais, k).toContain(k);
+    }
+    expect(principais).not.toContain("saude");
+    expect(COLUNAS_CRIATIVOS_CONVERSAO.map((c) => c.key)).toContain("veiculacao");
+    expect(COLUNAS_CRIATIVOS_CONVERSAO.find((c) => c.key === "sinal")).toMatchObject({ header: "Sinal", fonte: "misto", dica: "sinal_do_criativo" });
     expect(COLUNAS_CRIATIVOS_CONVERSAO.filter((c) => c.secundaria).map((c) => c.key)).toContain("ctr");
+    // A descoberta: Saúde (fadiga) e Veiculação; nunca Sinal.
+    expect(COLUNAS_CRIATIVOS_DESCOBERTA.map((c) => c.key)).toEqual(expect.arrayContaining(["saude", "veiculacao"]));
+    expect(COLUNAS_CRIATIVOS_DESCOBERTA.map((c) => c.key)).not.toContain("sinal");
+    expect(COLUNAS_CONJUNTOS_DESCOBERTA.map((c) => c.key)).toContain("veiculacao");
   });
 });
 
@@ -379,20 +429,42 @@ describe("computeFatigue — regra explícita no período", () => {
     expect(computeFatigue(rows, { fim: "2026-08-01" }).level).toBe("novo");
     // Linha sem impressão antes da janela (gasto zero, pausado desde sempre) também não.
     expect(computeFatigue(janela("2026-08-15", 3, "x", { impressions: 0 }), { fim: "2026-10-08" }).level).toBe("novo");
-    // "Sem resultado" vem antes: gastou no período e não trouxe lead, parado ou não.
-    expect(computeFatigue(rows, { fim: "2026-10-08", semResultado: { gastoPeriodo: 120, leadsPainel: 0, cplAlvo: 50 } }).level).toBe("sem-resultado");
   });
 
-  it("sem resultado = gasto ≥ 2 × CPL alvo com 0 leads do painel (só com alvo)", () => {
-    const rows = janela("2026-10-08", 3, "x", { spend: 40 }); // R$ 120, sem janela para fadiga
-    expect(computeFatigue(rows, { fim: "2026-10-08", semResultado: { gastoPeriodo: 120, leadsPainel: 0, cplAlvo: 50 } })).toMatchObject({
-      level: "sem-resultado",
-      reason: "R$ 120,00 gastos no período sem nenhum lead do painel (≥ 2 × o CPL alvo de R$ 50,00)",
-    });
-    expect(computeFatigue(rows, { fim: "2026-10-08", semResultado: { gastoPeriodo: 99, leadsPainel: 0, cplAlvo: 50 } }).level).toBe("novo");
-    expect(computeFatigue(rows, { fim: "2026-10-08", semResultado: { gastoPeriodo: 120, leadsPainel: 1, cplAlvo: 50 } }).level).toBe("novo");
-    expect(computeFatigue(rows, { fim: "2026-10-08", semResultado: { gastoPeriodo: 120, leadsPainel: 0, cplAlvo: null } }).level).toBe("novo");
-    expect(REGRA_FADIGA.multiploSemResultado).toBe(2);
+  it("anúncio que parou no período com gasto e 0 lead não recebe sinal e não é vermelho (F4-D3)", () => {
+    // O cenário + C (cr-x): R$ 240 em 25–27/09, nenhum lead, e nada depois — com o sync cobrindo.
+    const data = cenario();
+    data.creatives.push(criativo("100009", "Parado sem lead", { creativeId: "cr-x" }));
+    data.adDaily.push(...dias("2026-09-27", 3, "100009", { spend: 80 }));
+    const { bloco } = sinaisDe(data);
+    const c = bloco.conversao.find((l) => l.chave === "cr-x")!;
+    expect(c.spend).toBe(240);
+    expect(c.leadsPainel).toBe(0);
+    expect(c.veiculacao.estado).toBe("parou");
+    expect(c.veiculacao.rotulo).toBe("Último gasto em 27/09");
+    expect(c.sinal).toBeNull();
+    // A fadiga não tem mais "sem resultado" (nem a opção antiga).
+    expect(c.saude.level).not.toBe("sem-resultado");
+    expect(computeFatigue(janela("2026-09-27", 3, "x", { spend: 80 }), { fim: "2026-10-08", cobertura: COBERTURA, semResultado: { gastoPeriodo: 240, leadsPainel: 0, cplAlvo: 50 } } as never).level).not.toBe("sem-resultado");
+  });
+
+  it("o Pausar/sem-resultado do sinal: 0 lead com gasto que rendia 3+ leads na média — só no ar", () => {
+    // A média dos criativos (no ar e fora): (R$ 840 + R$ 420 + o gasto de C) ÷ 16 leads.
+    const comC = (gasto: number, ate = "2026-10-08") => {
+      const data = cenario();
+      data.creatives.push(criativo("100009", "Sem lead", { creativeId: "cr-x" }));
+      data.adDaily.push(...dias(ate, 3, "100009", { spend: gasto / 3 }));
+      return sinaisDe(data).bloco.conversao.find((l) => l.chave === "cr-x")!;
+    };
+    // R$ 300 (média R$ 97,50 → λ 3,1, chance de 0 lead < 5%): Pausar, sem resultado.
+    const pausa = comC(300);
+    expect(pausa.veiculacao.estado).toBe("no-ar");
+    expect(pausa.sinal).toMatchObject({ sinal: "pausar", causa: "sem-resultado", tom: "fora" });
+    expect(pausa.sinal!.motivo).toMatch(/^R\$\s300 sem lead; a média renderia 3,1$/);
+    // R$ 200 (média R$ 91,25 → λ 2,2): cedo para julgar.
+    expect(comC(200).sinal).toMatchObject({ sinal: "cedo", causa: "amostra" });
+    // O mesmo gasto, parado: nenhum sinal.
+    expect(comC(300, "2026-09-30").sinal).toBeNull();
   });
 });
 
@@ -406,8 +478,7 @@ describe("criativos agregados por creativeId", () => {
     data.adDaily.push(...dias("2026-10-08", 5, "100003", { adset: "Lookalike", adsetId: "801", spend: 10, impressions: 500, clicks: 5 }));
     data.leads.push(lead("2026-10-04", { utmContent: "Anúncio A" })); // ambíguo: "Anúncio A" existe em 2 anúncios
     const kp = kpisDe(data);
-    const alvo = cplAlvoDaMidia(data, kp, HOJE);
-    const bloco = criativosAgregados(data, PERIODO, { fim: PERIODO.to, cplAlvo: alvo.alvo, custoPorReuniaoExibivel: custoExibivel(kp.custoPorReuniao) });
+    const bloco = criativosAgregados(data, PERIODO, { fim: PERIODO.to, custoPorReuniaoExibivel: custoExibivel(kp.custoPorReuniao) });
     expect(bloco.descoberta).toHaveLength(0);
     expect(bloco.conversao.map((c) => c.chave)).toEqual(["cr-1", "cr-2"]);
     const cr1 = bloco.conversao[0];
@@ -425,44 +496,26 @@ describe("criativos agregados por creativeId", () => {
     expect(cr2.anuncios).toBe(1);
     expect(cr2.agendadas).toBe(0);
     expect(cr2.custoPorAgendada).toBeNull();
-    // A regra em palavras cita o alvo e a origem dele.
-    expect(alvo.origem).toBe("periodo");
-    expect(textoRegraSaude(alvo)).toMatch(/CPL do período, sem meta cadastrada/);
-    expect(textoRegraSaude(alvo)).toMatch(/≤ 75%/);
+    // A régua da fadiga em palavras: sem o "sem resultado" e sem CPL alvo (F4-D3).
+    expect(textoDaReguaDaFadiga()).toMatch(/≤ 75%/);
+    expect(textoDaReguaDaFadiga()).not.toMatch(/Sem resultado|CPL alvo/);
   });
 
-  it("sem resultado só para conversão; descoberta é julgada sem leads", () => {
+  it("descoberta nunca recebe sinal (é julgada sem leads); a conversão sem média é 'Cedo', nunca vermelha", () => {
     const data = base({
       metas: [meta("cpl", 30)],
       creatives: [criativo("200001", "Sem lead", { creativeId: "cr-x" }), criativo("300001", "Reel", { creativeId: "cr-d", format: "video" })],
       adDaily: [
-        ...dias("2026-10-08", 3, "200001", { spend: 25, leads: 0 }), // R$ 75 ≥ 2 × 30, 0 leads do painel
+        ...dias("2026-10-08", 3, "200001", { spend: 25, leads: 0 }), // R$ 75, 0 leads do painel
         ...dias("2026-10-08", 3, "300001", { objective: "OUTCOME_ENGAGEMENT", adset: "Descoberta", adsetId: "850", spend: 100, leads: 0 }),
       ],
     });
-    const kp = kpisDe(data);
-    const alvo = cplAlvoDaMidia(data, kp, HOJE);
-    expect(alvo).toEqual({ alvo: 30, origem: "meta" });
-    const bloco = criativosAgregados(data, PERIODO, { fim: PERIODO.to, cplAlvo: alvo.alvo });
-    expect(bloco.conversao[0].saude.level).toBe("sem-resultado");
+    const { bloco } = sinaisDe(data);
+    expect(bloco.descoberta[0].sinal).toBeNull();
     expect(bloco.descoberta[0].saude.level).toBe("novo"); // gastou R$ 300 sem lead e NÃO é "sem resultado"
-  });
-
-  it("rankings só com volume mínimo (≥ 10 leads ou ≥ R$ 100), com o n visível", () => {
-    const data = cenario();
-    const bloco = criativosAgregados(data, PERIODO, { fim: PERIODO.to, cplAlvo: null });
-    const r = rankingsDeCriativos(bloco.conversao);
-    expect(r.melhorCpl?.chave).toBe("cr-1");
-    expect(r.maiorCtr?.chave).toBe("cr-1");
-    expect(r.descartados).toBe(0);
-    // Um criativo com 1 lead a R$ 10 não vence só por ter CPL menor.
-    data.creatives.push(criativo("100009", "Barato", { creativeId: "cr-9" }));
-    data.adDaily.push(ad("2026-10-07", "100009", { spend: 10, impressions: 50, clicks: 25 }));
-    data.leads.push(lead("2026-10-07", { adId: "100009" }));
-    const r2 = rankingsDeCriativos(criativosAgregados(data, PERIODO, { fim: PERIODO.to, cplAlvo: null }).conversao);
-    expect(r2.melhorCpl?.chave).toBe("cr-1");
-    expect(r2.maiorCtr?.chave).toBe("cr-1");
-    expect(r2.descartados).toBe(1);
+    // Um criativo de conversão só: sem média para comparar (nunca "Pausar" sem base).
+    expect(bloco.conversao[0].sinal).toMatchObject({ sinal: "cedo", causa: "sem-base", motivo: "um criativo só: sem média para comparar" });
+    expect(bloco.conversao[0].saude.level).not.toBe("sem-resultado");
   });
 });
 
@@ -497,19 +550,20 @@ describe("a página inteira sobre o dataset de exemplo", () => {
         if (c.custoPorAgendada != null) expect(c.agendadas).toBeGreaterThanOrEqual(MIN_REUNIOES);
         if (c.leadsPainel === 0) expect(c.cplPainel).toBeNull();
       }
-      const alvo = cplAlvoDaMidia(data, kp, hoje);
-      const cri = criativosAgregados(data, range, { fim: range?.to, cplAlvo: alvo.alvo, custoPorReuniaoExibivel: exibivel });
+      const cri = criativosAgregados(data, range, { fim: range?.to, custoPorReuniaoExibivel: exibivel });
       const todos = [...cri.conversao, ...cri.descoberta];
       expect(todos.length).toBeGreaterThan(0);
       expect(todos.reduce((s, c) => s + c.leadsPainel, 0)).toBeLessThanOrEqual(kp.leads.valor);
       for (const c of todos) {
         expect(c.saude.reason.length).toBeGreaterThan(0);
-        if (c.bucket === "descoberta") expect(c.saude.level).not.toBe("sem-resultado");
+        expect(c.saude.level).not.toBe("sem-resultado");
       }
-      const r = rankingsDeCriativos(cri.conversao);
-      if (r.melhorCpl) expect(r.melhorCpl.leadsPainel >= 10 || r.melhorCpl.spend >= 100).toBe(true);
+      // Com o sinal (a montagem da tela): só conversão, só no ar, fora a live.
+      const { bloco } = criativosComSinal({ data, range, kpis: kp, eventos: [], cobertura, ultimoSyncAds: null, cfgLive: LIVE_PADRAO, hoje, agora: `${hoje}T18:00:00.000Z` });
+      for (const c of bloco.descoberta) expect(c.sinal).toBeNull();
+      for (const c of bloco.conversao) expect(c.sinal != null, c.nome).toBe(c.veiculacao.estado === "no-ar" && !c.daLive);
       expect(tendenciaSemanalMidia(data, { fim: range?.to ?? hoje, hoje, kpis: { cobertura } })).toHaveLength(12);
-      expect(textoRegraSaude(alvo)).toMatch(/Fadigando/);
+      expect(textoDaReguaDaFadiga()).toMatch(/Fadigando/);
     }
   });
 });
@@ -525,7 +579,7 @@ const agendou = { status: "agendado" as const, bookedAt: "2026-10-05T12:00:00.00
 /** Conjuntos (por id) e criativos da mesma tela, para comparar o mesmo fato. */
 function asDuasTabelas(data: DashboardData) {
   const conjuntos = conjuntosPorId(data, PERIODO, { custoPorReuniaoExibivel: true }).conversao.flatMap((c) => c.conjuntos ?? []);
-  const criativos = criativosAgregados(data, PERIODO, { fim: PERIODO.to, cplAlvo: null, custoPorReuniaoExibivel: true }).conversao;
+  const criativos = criativosAgregados(data, PERIODO, { fim: PERIODO.to, custoPorReuniaoExibivel: true }).conversao;
   return { conjuntos, criativos };
 }
 
@@ -564,8 +618,13 @@ describe("uma regra só para atribuir REUNIÃO: só com id (conjuntos, criativos
   it("M6 só escala com 3 reuniões POR ID — a reunião por nome não completa a amostra que a tabela não mostra", () => {
     const data = cenario();
     const m6 = rodarMotor(data).find((a) => a.regra === "M6");
-    expect(m6).toMatchObject({ id: "M6:100001" });
+    // O id é a chave do CRIATIVO (`creativeId ?? adId`), não mais o anúncio.
+    expect(m6).toMatchObject({ id: "M6:cr-1" });
     expect(m6!.detalhe).toMatch(/^3 reuniões/);
+    // A ação tem o MESMO nome e o MESMO motivo do sinal da linha (o cartão da Mídia).
+    const linha = sinaisDe(data).bloco.conversao.find((l) => l.chave === "cr-1")!;
+    expect(linha.sinal).toMatchObject({ sinal: "escalar", causa: "reunioes" });
+    expect(m6!.titulo).toBe(`Escale “${linha.nome}”: ${linha.sinal!.motivo}`);
 
     // Uma das três reuniões chega só com o nome (único) do anúncio A.
     const porNome = cenario();
@@ -639,37 +698,56 @@ describe("motor M2/M4 leem as linhas de /midia#conjuntos (por id, S20)", () => {
   });
 });
 
-describe("a regra da Saúde no ⓘ do cabeçalho; o selo com o motivo", () => {
+describe("a régua do Sinal (conversão) e da Saúde (descoberta) no cabeçalho; o motivo no ⓘ da célula (K40)", () => {
   /** O que o React escreve num atributo. */
   const attr = (t: string) => t.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/'/g, "&#x27;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const cabecalhos = (html: string) => html.match(/<th\b[^>]*>[\s\S]*?<\/th>/g) ?? [];
+  const REGRAS = { sinal: textoDaReguaDoSinal(), fadiga: textoDaReguaDaFadiga() };
 
-  it("tituloDoCabecalho: Saúde = a régua; coluna com verbete = o dicionário; as demais, nada", () => {
-    const regra = textoRegraSaude({ alvo: 30, origem: "meta" });
+  it("tituloDoCabecalho: Sinal = a régua do sinal; Saúde (descoberta) = a da fadiga; verbete = o dicionário; as demais, nada", () => {
     const col = (key: string) => COLUNAS_CRIATIVOS_CONVERSAO.find((c) => c.key === key)!;
-    expect(tituloDoCabecalho(col("saude"), regra)).toBe(regra);
-    expect(tituloDoCabecalho(COLUNAS_CRIATIVOS_DESCOBERTA.find((c) => c.key === "saude")!, regra)).toBe(regra);
-    expect(tituloDoCabecalho(col("leadsPainel"), regra)).toBe(dica("leads"));
-    expect(tituloDoCabecalho(col("nome"), regra)).toBeUndefined();
+    expect(tituloDoCabecalho(col("sinal"), REGRAS)).toBe(REGRAS.sinal);
+    expect(tituloDoCabecalho(COLUNAS_CRIATIVOS_DESCOBERTA.find((c) => c.key === "saude")!, REGRAS)).toBe(REGRAS.fadiga);
+    expect(tituloDoCabecalho(col("leadsPainel"), REGRAS)).toBe(dica("leads"));
+    expect(tituloDoCabecalho(col("nome"), REGRAS)).toBeUndefined();
+    // A régua da fadiga não tem mais o "sem resultado".
+    expect(REGRAS.fadiga).not.toMatch(/Sem resultado/);
   });
 
-  it("a tabela de criativos põe a régua no <th> “Saúde” (uma vez) e o motivo no selo", () => {
-    const data = cenario();
-    const bloco = criativosAgregados(data, PERIODO, { fim: PERIODO.to, cplAlvo: 30 });
-    const regra = textoRegraSaude({ alvo: 30, origem: "meta" });
-    const html = renderToStaticMarkup(createElement(CreativesTable, { linhas: bloco.conversao, bucket: "conversao", regraSaude: regra }));
-    const saude = cabecalhos(html).find((th) => th.includes("Saúde"));
-    expect(saude).toContain(`title="${attr(regra)}"`);
-    // A régua aparece SÓ no cabeçalho (nenhum span por fora do selo a engolir).
-    expect(html.split(attr(regra)).length - 1).toBe(1);
-    // O selo de cada linha carrega o motivo dela.
-    for (const c of bloco.conversao) expect(html).toContain(`title="${attr(c.saude.reason)}"`);
+  it("a tabela de criativos põe a régua do sinal no <th> “Sinal” (uma vez) e o motivo no ⓘ de cada célula", () => {
+    const { bloco } = sinaisDe(cenario());
+    const html = renderToStaticMarkup(createElement(CreativesTable, { linhas: bloco.conversao, bucket: "conversao", colunasDoRobo: false, regras: REGRAS }));
+    const sinal = cabecalhos(html).find((th) => th.includes("Sinal"));
+    expect(sinal).toContain(`title="${attr(REGRAS.sinal)}"`);
+    // A régua aparece SÓ no cabeçalho.
+    expect(html.split(attr(REGRAS.sinal)).length - 1).toBe(1);
+    expect(cabecalhos(html).some((th) => th.includes("Saúde"))).toBe(false);
+    // Cada linha no ar tem o ⓘ com o motivo e a regra do sinal dela (o `title` não abre no toque).
+    for (const c of bloco.conversao) {
+      expect(c.sinal, c.nome).not.toBeNull();
+      expect(html).toContain(`aria-label="${attr(`Sobre o sinal de ${c.nome}`)}"`);
+      expect(html).toContain(`data-texto="${attr(c.sinal!.dica)}"`);
+      expect(html).toContain(c.sinal!.rotulo);
+    }
     // Cabeçalho com verbete do dicionário também ganha o ⓘ.
     expect(cabecalhos(html).find((th) => th.includes("Leads (painel)"))).toContain(`title="${attr(dica("leads"))}"`);
   });
 
+  it("a tabela de criativos de descoberta põe a régua da fadiga no <th> “Saúde”, sem 'Sem resultado'", () => {
+    const data = base({
+      creatives: [criativo("300001", "Reel", { creativeId: "cr-d", format: "video" })],
+      adDaily: dias("2026-10-08", 14, "300001", { objective: "OUTCOME_ENGAGEMENT", adset: "Descoberta", adsetId: "850" }),
+    });
+    const { bloco } = sinaisDe(data);
+    const html = renderToStaticMarkup(createElement(CreativesTable, { linhas: bloco.descoberta, bucket: "descoberta", colunasDoRobo: false, regras: REGRAS }));
+    const saude = cabecalhos(html).find((th) => th.includes("Saúde"));
+    expect(saude).toContain(`title="${attr(REGRAS.fadiga)}"`);
+    expect(html).not.toContain("Sem resultado");
+    expect(cabecalhos(html).some((th) => th.includes("Sinal"))).toBe(false);
+  });
+
   it("a tabela de conjuntos põe o verbete do dicionário no <th>, não na célula", () => {
-    const html = renderToStaticMarkup(createElement(ConjuntosTable, { linhas: conjuntosPorId(cenario(), PERIODO).conversao, bucket: "conversao" }));
+    const html = renderToStaticMarkup(createElement(ConjuntosTable, { linhas: conjuntosPorId(cenario(), PERIODO).conversao, bucket: "conversao", colunasDoRobo: false }));
     const leads = cabecalhos(html).find((th) => th.includes("Leads (painel)"));
     expect(leads).toContain(`title="${attr(dica("leads"))}"`);
     expect(html.split(`title="${attr(dica("leads"))}"`).length - 1).toBe(1);
@@ -678,41 +756,43 @@ describe("a regra da Saúde no ⓘ do cabeçalho; o selo com o motivo", () => {
 
 describe("CPL da regra de fadiga = CPL Meta (Pixel) 7 d, com o rótulo", () => {
   it("a dica diz que o CPL da janela é do Pixel, e nunca imprime “CPL 7 d” sem o rótulo", () => {
-    const regra = textoRegraSaude({ alvo: 30, origem: "meta" });
+    const regra = textoDaReguaDaFadiga();
     expect(regra).toContain("CPL Meta (Pixel) 7 d ≥ 120% do anterior");
     expect(regra).toMatch(/gasto ÷ conversões do Pixel na janela — não é o CPL \(painel\)/);
     expect(regra.replace(/CPL Meta \(Pixel\) 7 d/g, "")).not.toMatch(/CPL 7 d/);
-    // "Sem resultado" continua com leads do PAINEL, e diz isso.
-    expect(regra).toMatch(/0 leads do painel/);
+    // O "sem resultado" saiu da fadiga (é o Pausar do sinal, só no ar) e o CPL alvo junto.
+    expect(regra).not.toMatch(/Sem resultado|CPL alvo/);
   });
 });
 
-describe("criativos homônimos: o rótulo diz QUAL (faixa, rankings e coluna Nome)", () => {
+describe("criativos homônimos: o rótulo diz QUAL (o sinal, o motor e a coluna Nome)", () => {
   /** CTR 2% → 1% com frequência 2,5: fadigando. */
   const fadigando = (adId: string, extra: Partial<AdDaily>) => [
     ...dias("2026-10-01", 7, adId, { clicks: 20, ...extra }),
     ...dias("2026-10-08", 7, adId, { clicks: 10, reach: 400, ...extra }),
   ];
 
-  it("dois “Carrossel -” com criativos diferentes saem com o conjunto no nome, na faixa e no ranking", () => {
+  it("dois “Carrossel -” com criativos diferentes saem com o conjunto no nome — na linha, no ⓘ do sinal e na ação do motor", () => {
     const data = base({
       creatives: [criativo("100011", "Carrossel -", { creativeId: "880001" }), criativo("100012", "Carrossel -", { creativeId: "880002" })],
       adDaily: [...fadigando("100011", {}), ...fadigando("100012", { adset: "Lookalike", adsetId: "801" })],
       leads: [lead("2026-10-03", { adId: "100011" }), lead("2026-10-03", { adId: "100011" }), lead("2026-10-03", { adId: "100012" })],
     });
-    const bloco = criativosAgregados(data, PERIODO, { fim: PERIODO.to, cplAlvo: null });
+    const bloco = criativosAgregados(data, PERIODO, { fim: PERIODO.to });
     const nomes = bloco.conversao.map((c) => c.nome).sort();
     expect(nomes).toEqual(["Carrossel - · Interesses 25-45", "Carrossel - · Lookalike"]);
-    const faixa = faixaDeSaude(bloco);
-    expect(faixa.fadigando?.rotulo).toBe("2 criativos fadigando:");
-    expect(faixa.fadigando?.texto).toContain("Carrossel - · Interesses 25-45");
-    expect(faixa.fadigando?.texto).toContain("Carrossel - · Lookalike");
-    expect(faixa.fadigando?.texto).not.toContain("Carrossel -, Carrossel -");
-    const r = rankingsDeCriativos(bloco.conversao);
-    expect(r.melhorCpl?.nome).toBe("Carrossel - · Interesses 25-45");
-    expect(r.maiorCtr?.nome).toMatch(/^Carrossel - · /);
+    // Os dois fadigando: Trocar arte, e cada ação do motor cita o rótulo desambiguado.
+    const comSinal = sinaisDe(data).bloco.conversao;
+    for (const c of comSinal) expect(c.sinal, c.nome).toMatchObject({ sinal: "trocar-arte", causa: "fadiga" });
+    const m3 = rodarMotor(data).filter((a) => a.regra === "M3");
+    expect(m3.map((a) => a.id).sort()).toEqual(["M3:880001", "M3:880002"]);
+    for (const a of m3) {
+      const linha = comSinal.find((c) => `M3:${c.chave}` === a.id)!;
+      expect(a.titulo).toBe(`Renove a arte de “${linha.nome}”: ${linha.sinal!.motivo}`);
+    }
+    expect(m3.map((a) => a.titulo).join(" ")).not.toContain("“Carrossel -”");
     // A coluna Nome imprime o mesmo rótulo.
-    const html = renderToStaticMarkup(createElement(CreativesTable, { linhas: bloco.conversao, bucket: "conversao", regraSaude: "regra" }));
+    const html = renderToStaticMarkup(createElement(CreativesTable, { linhas: comSinal, bucket: "conversao", colunasDoRobo: false, regras: { sinal: "regra", fadiga: "regra" } }));
     expect(html).toContain(">Carrossel - · Interesses 25-45<");
     expect(html).toContain(">Carrossel - · Lookalike<");
   });
@@ -734,7 +814,7 @@ describe("criativos homônimos: o rótulo diz QUAL (faixa, rankings e coluna Nom
         ...dias("2026-10-08", 3, "100015", { spend: 10 }),
       ],
     });
-    const nomes = criativosAgregados(data, PERIODO, { fim: PERIODO.to, cplAlvo: null }).conversao.map((c) => c.nome);
+    const nomes = criativosAgregados(data, PERIODO, { fim: PERIODO.to }).conversao.map((c) => c.nome);
     expect(nomes).toEqual([
       "Carrossel - · Interesses 25-45, Lookalike · 0001",
       "Carrossel - · Interesses 25-45, Lookalike · 0002",
@@ -744,7 +824,7 @@ describe("criativos homônimos: o rótulo diz QUAL (faixa, rankings e coluna Nom
 });
 
 describe("saúde na vista padrão (sem ?range=): as janelas terminam no fim do período, e pausado é “Parado”", () => {
-  it("com fim = hoje, o anúncio pausado há dois meses sai Parado (e fora da faixa), não julgado pelos últimos dias dele", () => {
+  it("com fim = hoje, o anúncio pausado há dois meses sai Parado (e sem sinal), não julgado pelos últimos dias dele", () => {
     const data = cenario();
     // O anúncio B parou em agosto — e os últimos 14 dias DELE parecem fadiga.
     data.adDaily = [
@@ -758,25 +838,33 @@ describe("saúde na vista padrão (sem ?range=): as janelas terminam no fim do p
     expect(computeFatigue(doAnuncio).level).toBe("fadigado");
     // Sem `fim`, criativosAgregados usa o último dia da CONTA (não o do anúncio);
     // sem cobertura do sync, a janela vazia é "Sem dados" — nunca "Fadigando".
-    const semFim = criativosAgregados(data, undefined, { cplAlvo: null });
+    const semFim = criativosAgregados(data, undefined, {});
     expect(semFim.conversao.find((c) => c.chave === "cr-2")!.saude.level).toBe("sem-dados");
-    expect(faixaDeSaude(semFim).fadigando).toBeNull();
+    expect(semFim.conversao.find((c) => c.chave === "cr-2")!.saude.level).not.toBe("fadigado");
 
     // Com o fim do período (hoje, na vista padrão) e o sync cobrindo: parado, com o motivo e a data.
-    const comFim = criativosAgregados(data, undefined, { fim: HOJE, cobertura: COBERTURA, cplAlvo: null });
+    const comFim = criativosAgregados(data, undefined, { fim: HOJE, cobertura: COBERTURA, ref: HOJE });
     const b = comFim.conversao.find((c) => c.chave === "cr-2")!;
     expect(b.saude.level).toBe("parado");
     expect(b.saude.reason).toBe("sem veiculação nos últimos 7 dias (02/10–08/10); última impressão em 14/08");
-    expect(faixaDeSaude(comFim).fadigando).toBeNull();
+    // Na Mídia (F4-D29) quem não está no ar mostra a veiculação, não a fadiga — e não tem sinal.
+    expect(b.veiculacao).toEqual({ estado: "parou", ultimoDia: "2026-08-14", rotulo: "Último gasto em 14/08" });
     // O ativo continua julgado pela regra (frequência 2,5 com CTR estável = atenção).
     const a = comFim.conversao.find((c) => c.chave === "cr-1")!;
     expect(a.saude.level).toBe("atencao");
     expect(a.saude.reason).toMatch(/com CTR estável/);
-    // O selo diz "Parado (sem veiculação)", não "Novo (amostra insuficiente)".
-    const html = renderToStaticMarkup(createElement(CreativesTable, { linhas: comFim.conversao, bucket: "conversao", regraSaude: "regra" }));
-    expect(html).toContain("Parado");
-    expect(html).toContain("(sem veiculação)");
-    expect(textoRegraSaude({ alvo: null, origem: null })).toMatch(/Parado = nenhuma impressão nos últimos 7 dias do período/);
+    expect(a.veiculacao.estado).toBe("no-ar");
+    // Com o sinal (a tela): o pausado sem sinal (e sem selo de status), o ativo com.
+    const { bloco } = sinaisDe(data, "campanha");
+    const pausado = bloco.conversao.find((c) => c.chave === "cr-2")!;
+    const ativo = bloco.conversao.find((c) => c.chave === "cr-1")!;
+    expect(pausado.sinal).toBeNull();
+    expect(ativo.sinal).not.toBeNull();
+    const html = renderToStaticMarkup(
+      createElement(CreativesTable, { linhas: [ativo], bucket: "conversao", colunasDoRobo: false, regras: { sinal: textoDaReguaDoSinal(), fadiga: textoDaReguaDaFadiga() } }),
+    );
+    expect(html).toContain(ativo.sinal!.rotulo);
+    expect(textoDaReguaDaFadiga()).toMatch(/Parado = nenhuma impressão nos últimos 7 dias do período/);
   });
 });
 
@@ -797,7 +885,7 @@ describe("sem ?range=: motor e briefing julgam a saúde com o MESMO fim (hoje) e
   it("creativePerformance com fim = hoje dá o selo da tabela, e o M3 não manda renovar a arte do pausado", () => {
     const data = comPausado();
     // A página (vista padrão, range undefined): fim = hoje, com a cobertura do sync.
-    const pagina = criativosAgregados(data, undefined, { fim: HOJE, cobertura: COBERTURA, cplAlvo: null });
+    const pagina = criativosAgregados(data, undefined, { fim: HOJE, cobertura: COBERTURA });
     const cr2 = pagina.conversao.find((c) => c.chave === "cr-2")!;
     expect(cr2.saude.level).toBe("parado");
     // O que o motor e o briefing leem: o MESMO nível e o mesmo motivo.
@@ -809,7 +897,7 @@ describe("sem ?range=: motor e briefing julgam a saúde com o MESMO fim (hoje) e
 
     // O motor em ?range=all (range undefined): era "Renove a arte de “Anúncio B” (fadigando)".
     const acoes = motorDeAcoes({ data, range: undefined, kpis: kpisDe(data, undefined), eventos: [], agora: AGORA, hoje: HOJE, cobertura: COBERTURA });
-    expect(acoes.filter((a) => a.regra === "M3").map((a) => a.id)).not.toContain("M3:100002");
+    expect(acoes.filter((a) => a.regra === "M3").map((a) => a.id)).not.toContain("M3:cr-2");
     expect(acoes.some((a) => /Anúncio B/.test(a.titulo) && /fadig/i.test(a.titulo))).toBe(false);
   });
 
@@ -824,21 +912,27 @@ describe("sem ?range=: motor e briefing julgam a saúde com o MESMO fim (hoje) e
     // Sem o dia de hoje, as janelas terminam no último dia com dado (01/10): "fadigado".
     expect(creativePerformance(data, undefined).find((c) => c.adId === "100001")!.fatigue.level).toBe("fadigado");
     // A página (fim = hoje): "Sem dados" — e o motor, que agora passa hoje, concorda.
-    const pagina = criativosAgregados(data, undefined, { fim: HOJE, cobertura: syncParou, cplAlvo: null });
+    const pagina = criativosAgregados(data, undefined, { fim: HOJE, cobertura: syncParou });
     expect(pagina.conversao.find((c) => c.chave === "cr-1")!.saude.level).toBe("sem-dados");
     const acoes = motorDeAcoes({ data, range: undefined, kpis: kpisDe(data, undefined), eventos: [], agora: AGORA, hoje: HOJE, cobertura: syncParou });
-    expect(acoes.find((a) => a.id === "M3:100001")).toBeUndefined();
+    expect(acoes.find((a) => a.id === "M3:cr-1")).toBeUndefined();
     // Com um período que termina em 01/10, os dois leem "fadigando" — e o M3 aparece.
     const ate01 = { from: "2026-09-18", to: "2026-10-01" };
-    expect(criativosAgregados(data, ate01, { fim: ate01.to, cobertura: syncParou, cplAlvo: null }).conversao.find((c) => c.chave === "cr-1")!.saude.level).toBe("fadigado");
+    expect(criativosAgregados(data, ate01, { fim: ate01.to, cobertura: syncParou }).conversao.find((c) => c.chave === "cr-1")!.saude.level).toBe("fadigado");
     const noPeriodo = motorDeAcoes({ data, range: ate01, kpis: kpisDe(data, ate01), eventos: [], agora: AGORA, hoje: HOJE, cobertura: syncParou });
-    expect(noPeriodo.find((a) => a.id === "M3:100001")).toBeDefined();
+    expect(noPeriodo.find((a) => a.id === "M3:cr-1")).toBeDefined();
   });
 
   it("M6 não manda escalar o anúncio que a tabela mostra Parado (o vencedor tem de estar no ar)", () => {
     const data = comPausado();
     // B (pausado em agosto) trouxe 3 reuniões por id a R$ 700 — mais barato que A (R$ 840 / 3).
     for (let i = 0; i < 3; i++) data.leads.push(lead("2026-08-10", { adId: "100002", adsetId: "801", campaignId: "900", status: "agendado", bookedAt: "2026-08-12T12:00:00.000Z", meetingFor: "2026-08-15T12:00:00.000Z" }));
+    // Fase 4: Escalar pede custo por reunião ATÉ o da conta (F4-D24). As reuniões baratas
+    // de B puxariam o custo da conta para baixo do de A (R$ 1.540 ÷ 6 < R$ 280); um 3º
+    // criativo no ar, sem reunião (R$ 1.000), põe a conta acima de A (R$ 2.540 ÷ 6) e
+    // mantém o caso: B mais barato que A, mas parado.
+    data.creatives.push(criativo("100003", "Anúncio C", { creativeId: "cr-3" }));
+    data.adDaily.push(...dias("2026-10-08", 10, "100003", { adset: "Lookalike", adsetId: "801", spend: 100 }));
     const perf = creativePerformance(data, undefined, { fim: HOJE, cobertura: COBERTURA });
     const b = perf.find((c) => c.adId === "100002")!;
     expect(b.meetings).toBe(3);
@@ -846,25 +940,56 @@ describe("sem ?range=: motor e briefing julgam a saúde com o MESMO fim (hoje) e
     expect(b.cpr).toBeLessThan(perf.find((c) => c.adId === "100001")!.cpr);
     const kp = kpisDe(data, undefined);
     expect(custoExibivel(kp.custoPorReuniao)).toBe(true);
+    expect(kp.custoPorReuniao.valor).toBeGreaterThan(280);
+    // O pausado não tem sinal; o ativo é o Escalar.
+    const { bloco } = sinaisDe(data, "campanha");
+    expect(bloco.conversao.find((c) => c.chave === "cr-2")!.sinal).toBeNull();
+    expect(bloco.conversao.find((c) => c.chave === "cr-1")!.sinal).toMatchObject({ sinal: "escalar" });
     const m6 = motorDeAcoes({ data, range: undefined, kpis: kp, eventos: [], agora: AGORA, hoje: HOJE, cobertura: COBERTURA }).find((a) => a.regra === "M6");
     // O vencedor no ar é A; B só venceria por estar pausado com o custo antigo.
-    expect(m6?.id).toBe("M6:100001");
+    expect(m6?.id).toBe("M6:cr-1");
   });
 
-  it("o briefing da IA não lista como fadigado o anúncio que a tela mostra parado", () => {
+  it("o briefing da IA lê os criativos como a tela os escreve (`pago.midia`) — nunca um parado no ar", () => {
+    /** A Mídia da tela, para a IA (`midiaParaIA(montarMidiaDaTela(…))`). */
+    const midiaDaTela = (data: DashboardData, range: { from: string; to: string } | undefined) =>
+      midiaParaIA(
+        montarMidiaDaTela({
+          data,
+          range,
+          rangeKey: range ? `${range.from}..${range.to}` : "all",
+          naoComecou: false,
+          kpis: kpisDe(data, range),
+          opcoesKpis: { cobertura: COBERTURA },
+          eventos: [],
+          cobertura: COBERTURA,
+          ultimoSyncAds: null,
+          cfgLive: LIVE_PADRAO,
+          marca: "consorcio",
+          hoje: HOJE,
+          agora: AGORA,
+        }),
+      );
+    const noArDe = (data: DashboardData, range: { from: string; to: string } | undefined) => {
+      const midia = midiaDaTela(data, range);
+      const b = buildBriefing(data, range, { nowIso: AGORA, warnings: [], kpis: kpisDe(data, range), midia });
+      if (!("pago" in b) || !b.pago || !("midia" in b.pago)) throw new Error("briefing de conversão sem pago.midia");
+      expect("criativos" in b.pago).toBe(false);
+      return b.pago.midia!.criativos?.noAr ?? [];
+    };
     const data = comPausado();
-    const b = buildBriefing(data, undefined, { nowIso: AGORA, warnings: [] });
-    const fadigados = "pago" in b && b.pago && "criativos" in b.pago ? (b.pago.criativos?.fadigados ?? null) : null;
-    expect(fadigados).not.toBeNull();
-    expect(fadigados!.map((f) => f.nome)).not.toContain("Anúncio B");
+    const noAr = noArDe(data, undefined);
+    expect(noAr.map((c) => c.criativo)).toContain("Anúncio A");
+    expect(noAr.map((c) => c.criativo)).not.toContain("Anúncio B");
+    for (const c of noAr) expect(typeof c.sinal).toBe("string");
 
-    // Conta inteira com dado só até 01/10: o briefing usa HOJE (08/10), como a
-    // página — não o último dia com dado, que acusaria fadiga no anúncio A.
+    // Conta inteira com dado só até 01/10: a tela julga a fadiga até HOJE (08/10) — sem
+    // "Trocar arte" para A; num período que termina em 01/10, A fadiga e o sinal diz isso.
     const ate01 = cenario();
     ate01.adDaily = [...dias("2026-09-24", 7, "100001", { clicks: 20 }), ...dias("2026-10-01", 7, "100001", { clicks: 10, reach: 400 })];
-    const nomes = (r: ReturnType<typeof buildBriefing>) => ("pago" in r && r.pago && "criativos" in r.pago ? (r.pago.criativos?.fadigados ?? []).map((f) => f.nome) : []);
-    expect(nomes(buildBriefing(ate01, undefined, { nowIso: AGORA, warnings: [] }))).not.toContain("Anúncio A");
-    expect(nomes(buildBriefing(ate01, { from: "2026-09-18", to: "2026-10-01" }, { nowIso: AGORA, warnings: [] }))).toContain("Anúncio A");
+    const sinalDeA = (range: { from: string; to: string } | undefined) => noArDe(ate01, range).find((c) => c.criativo === "Anúncio A")?.sinal;
+    expect(sinalDeA(undefined)).not.toBe("Trocar arte");
+    expect(sinalDeA({ from: "2026-09-18", to: "2026-10-01" })).toBe("Trocar arte");
   });
 });
 
@@ -903,7 +1028,7 @@ describe("Parado só com o sync confirmando a falta de veiculação; sem cobertu
     expect(zerada.reason).toMatch(/^sem veiculação em 04\/10/);
   });
 
-  it("na tabela: sync parado há 7+ dias deixa os criativos em “Sem dados”, não “Parado (sem veiculação)”", () => {
+  it("na coluna Veiculação: 'Último gasto em' só com o sync cobrindo os dias depois; sem cobertura, 'Sem leitura' (ADR-06)", () => {
     const data = cenario();
     // Os dois anúncios veicularam até 30/09 (14 dias) e o sync parou ali.
     data.adDaily = [
@@ -911,25 +1036,85 @@ describe("Parado só com o sync confirmando a falta de veiculação; sem cobertu
       ...dias("2026-09-30", 14, "100002", { adset: "Lookalike", adsetId: "801", spend: 30, impressions: 1500, clicks: 20 }),
     ];
     const syncParou = [{ from: "2026-08-01", to: "2026-09-30" }];
-    const bloco = criativosAgregados(data, undefined, { fim: HOJE, cobertura: syncParou, cplAlvo: null });
+    // O "no ar" ancorado em hoje (08/10): nenhum dos dois veiculou de 06/10 a 08/10.
+    const bloco = criativosAgregados(data, undefined, { fim: HOJE, cobertura: syncParou, ref: HOJE });
     expect(bloco.conversao).toHaveLength(2);
-    for (const c of bloco.conversao) expect(c.saude.level).toBe("sem-dados");
-    const html = renderToStaticMarkup(createElement(CreativesTable, { linhas: bloco.conversao, bucket: "conversao", regraSaude: "regra" }));
-    expect(html).toContain("Sem dados");
-    expect(html).toContain("(sincronização sem cobertura)");
-    expect(html).not.toContain("(sem veiculação)");
-    // Com a cobertura em dia, os mesmos criativos são "Parado".
-    const emDia = criativosAgregados(data, undefined, { fim: HOJE, cobertura: COBERTURA, cplAlvo: null });
-    for (const c of emDia.conversao) expect(c.saude.level).toBe("parado");
-    // A dica explica os dois.
-    const regra = textoRegraSaude({ alvo: null, origem: null });
+    for (const c of bloco.conversao) {
+      expect(c.saude.level).toBe("sem-dados");
+      expect(c.veiculacao).toEqual({ estado: "sem-leitura", ultimoDia: "2026-09-30", rotulo: "Sem leitura depois de 30/09" });
+      expect(c.veiculacao.rotulo).not.toMatch(/Último gasto/);
+    }
+    // Com a cobertura em dia, os mesmos criativos "pararam" (o sync confirmou os dias depois).
+    const emDia = criativosAgregados(data, undefined, { fim: HOJE, cobertura: COBERTURA, ref: HOJE });
+    for (const c of emDia.conversao) {
+      expect(c.saude.level).toBe("parado");
+      expect(c.veiculacao).toEqual({ estado: "parou", ultimoDia: "2026-09-30", rotulo: "Último gasto em 30/09" });
+    }
+    // Nos dois casos: fora do ar não tem sinal.
+    for (const c of [...bloco.conversao, ...emDia.conversao]) expect(c.sinal ?? null).toBeNull();
+    // A régua da fadiga (a Saúde da descoberta) explica os dois.
+    const regra = textoDaReguaDaFadiga();
     expect(regra).toMatch(/Parado = .*sincronização bem-sucedida confirmou/);
     expect(regra).toMatch(/Sem dados = .*nenhum dia coberto por sincronização bem-sucedida/);
   });
+
+  it("na TELA (F4-D29): a coluna Veiculação imprime o rótulo — 'Sem leitura' sem cobertura, 'Último gasto' com ela — e a Saúde da descoberta fora do ar é '—', nunca 'Parado' nem 'Sem dados'", () => {
+    const REGRAS = { sinal: textoDaReguaDoSinal(), fadiga: textoDaReguaDaFadiga() };
+    /** O corpo da tabela (o cabeçalho leva a régua da fadiga, que cita "Parado" e "Sem dados"). */
+    const corpo = (html: string) => html.slice(html.indexOf("<tbody"));
+    const conv = cenario();
+    conv.adDaily = [
+      ...dias("2026-09-30", 14, "100001", { spend: 60, impressions: 2000, clicks: 50 }),
+      ...dias("2026-09-30", 14, "100002", { adset: "Lookalike", adsetId: "801", spend: 30, impressions: 1500, clicks: 20 }),
+    ];
+    const desc = base({
+      creatives: [criativo("300001", "Reel", { creativeId: "cr-d", format: "video" })],
+      adDaily: dias("2026-09-30", 14, "300001", { objective: "OUTCOME_ENGAGEMENT", adset: "Descoberta", adsetId: "850" }),
+    });
+    const casos = [
+      { cobertura: [{ from: "2026-08-01", to: "2026-09-30" }], rotulo: "Sem leitura depois de 30/09", outro: "Último gasto em" },
+      { cobertura: COBERTURA, rotulo: "Último gasto em 30/09", outro: "Sem leitura" },
+    ];
+    for (const { cobertura, rotulo, outro } of casos) {
+      const cri = criativosAgregados(conv, undefined, { fim: HOJE, cobertura, ref: HOJE });
+      const htmlCri = corpo(renderToStaticMarkup(createElement(CreativesTable, { linhas: cri.conversao, bucket: "conversao", colunasDoRobo: false, regras: REGRAS })));
+      expect(htmlCri).toContain(rotulo);
+      expect(htmlCri).not.toContain(outro);
+      const conj = conjuntosPorId(conv, undefined, { ref: HOJE, cobertura });
+      const htmlConj = corpo(renderToStaticMarkup(createElement(ConjuntosTable, { linhas: conj.conversao, bucket: "conversao", colunasDoRobo: false })));
+      expect(htmlConj).toContain(rotulo);
+      expect(htmlConj).not.toContain(outro);
+      // A descoberta: a Veiculação diz o estado UMA vez; a Saúde de quem não está no ar é "—".
+      const blocoD = criativosAgregados(desc, undefined, { fim: HOJE, cobertura, ref: HOJE });
+      expect(blocoD.descoberta).toHaveLength(1);
+      const htmlD = corpo(renderToStaticMarkup(createElement(CreativesTable, { linhas: blocoD.descoberta, bucket: "descoberta", colunasDoRobo: false, regras: REGRAS })));
+      expect(htmlD.split(rotulo).length - 1, rotulo).toBe(1);
+      expect(htmlD).toContain("—");
+      for (const t of ["Parado", "Sem dados", "(sem veiculação)", "(sincronização sem cobertura)", "Saudável", "Fadigando"]) expect(htmlD, t).not.toContain(t);
+    }
+  });
 });
 
-describe("reuniões que chegam só com o nome: fora das linhas de conjunto, COM nota", () => {
-  it("a nota conta as reuniões só por nome, e linhas + nota fecham com as reuniões de conversão da conta", () => {
+describe("reuniões que chegam só com o nome: fora das linhas de conjunto, COM o porquê no ⓘ (K33) e o alerta (K41)", () => {
+  /** A Mídia da tela sobre os dados do teste, no PERIODO. */
+  const midiaDe = (data: DashboardData) =>
+    montarMidiaDaTela({
+      data,
+      range: PERIODO,
+      rangeKey: `${PERIODO.from}..${PERIODO.to}`,
+      naoComecou: false,
+      kpis: kpisDe(data),
+      opcoesKpis: { cobertura: COBERTURA },
+      eventos: [],
+      cobertura: COBERTURA,
+      ultimoSyncAds: null,
+      cfgLive: LIVE_PADRAO,
+      marca: "consorcio",
+      hoje: HOJE,
+      agora: AGORA,
+    });
+
+  it("o ⓘ dos conjuntos conta as reuniões só por nome, e linhas + elas fecham com as reuniões de conversão da conta", () => {
     const data = cenario();
     for (let i = 0; i < 3; i++) data.leads.push(lead("2026-10-03", { utmContent: "Anúncio B", ...agendou }));
     const bloco = conjuntosPorId(data, PERIODO, { custoPorReuniaoExibivel: true });
@@ -939,17 +1124,21 @@ describe("reuniões que chegam só com o nome: fora das linhas de conjunto, COM 
     // A diferença para o resumo é explicada, sem sobra.
     expect(linhas.reduce((s, c) => s + c.agendadas, 0) + bloco.naoAtribuidos.reunioesSoPorNome).toBe(kpisDe(data).reunioesConversao.valor);
 
-    const nota = notaDeNaoAtribuidos(bloco.naoAtribuidos)!;
-    expect(nota.reunioes).toBe(
-      "3 reuniões do período chegaram só com o nome do anúncio, sem id: contam nas reuniões da conta, mas não em “Agendadas” de nenhum conjunto (reunião só entra com id).",
-    );
-    expect(nota.leads).toBeNull(); // os leads por nome único ENTRAM na linha
-    expect(nota.linkUtm).toBe(true);
-    // A regra também está na descrição do bloco de conjuntos.
+    const m = midiaDe(data);
+    expect(m.detalhes.conjuntos.dica).toContain("3 reuniões do período chegaram só com o nome do anúncio, sem id.");
+    expect(m.detalhes.conjuntos.dica).toContain("Contam nas reuniões da conta, mas em nenhum conjunto.");
+    // Os leads por nome único ENTRAM na linha: nada "fora das linhas".
+    expect(m.detalhes.conjuntos.dica).not.toContain("Fora das linhas:");
+    // O atalho do link com {{ad.id}} não some (K41).
+    const alerta = m.alertas.find((a) => a.id === "midia-reunioes-so-por-nome");
+    expect(alerta?.cta).toEqual({ label: "Gerar o link certo", href: "/configuracoes/ferramentas#utm" });
+    // A regra também está no ⓘ dos conjuntos (agora em duas frases, K36).
     expect(REGRA_ATRIBUICAO_REUNIAO).toMatch(/Reunião entra na linha só com o id do anúncio ou do conjunto/);
+    expect(m.detalhes.conjuntos.dica).toContain("Reunião entra na linha só com o id do anúncio ou do conjunto (o link padrão traz {{ad.id}}).");
+    expect(m.detalhes.conjuntos.dica).toContain("Lead entra também pelo nome único do anúncio.");
   });
 
-  it("singular; reunião com o adsetId da UTM padrão entra na linha (não na nota); sem nada a dizer a nota some", () => {
+  it("singular; reunião com o adsetId da UTM padrão entra na linha; sem nada a dizer, nenhuma frase", () => {
     const data = cenario();
     data.leads.push(lead("2026-10-03", { utmContent: "Anúncio B", ...agendou }));
     // Só o adsetId da UTM padrão: entra na linha do conjunto.
@@ -957,15 +1146,37 @@ describe("reuniões que chegam só com o nome: fora das linhas de conjunto, COM 
     const bloco = conjuntosPorId(data, PERIODO, { custoPorReuniaoExibivel: true });
     expect(bloco.conversao.flatMap((c) => c.conjuntos ?? []).find((c) => c.adsetId === "801")!.agendadas).toBe(1);
     expect(bloco.naoAtribuidos.reunioesSoPorNome).toBe(1);
-    expect(notaDeNaoAtribuidos(bloco.naoAtribuidos)!.reunioes).toMatch(/^1 reunião do período chegou só com o nome do anúncio, sem id: conta nas reuniões da conta/);
+    const dica1 = midiaDe(data).detalhes.conjuntos.dica;
+    expect(dica1).toContain("1 reunião do período chegou só com o nome do anúncio, sem id.");
+    expect(dica1).toContain("Conta nas reuniões da conta, mas em nenhum conjunto.");
 
-    expect(notaDeNaoAtribuidos(conjuntosPorId(cenario(), PERIODO).naoAtribuidos)).toBeNull();
-    // A parte dos leads continua dizendo o que dizia.
-    const ambiguo = { ...conjuntosPorId(cenario(), PERIODO).naoAtribuidos, ambigua: 1 };
-    expect(notaDeNaoAtribuidos(ambiguo)).toEqual({
-      leads: "Fora das linhas: 1 com nome ambíguo. Esses leads contam no total, mas não no custo por conjunto.",
-      reunioes: null,
-      linkUtm: true,
-    });
+    const limpo = midiaDe(cenario());
+    expect(limpo.detalhes.conjuntos.dica).not.toMatch(/só com o nome do anúncio/);
+    expect(limpo.alertas.map((a) => a.id)).not.toContain("midia-reunioes-so-por-nome");
+  });
+
+  it("o 'fora das linhas' é UM texto, só de leads de CONVERSÃO, com o motivo — no ⓘ da verba e no dos conjuntos", () => {
+    const data = cenario();
+    // Um ambíguo ("Anúncio A" em dois anúncios), um de anúncio que não está nas linhas da marca e um orgânico.
+    data.creatives.push(criativo("100003", "Anúncio A"));
+    data.adDaily.push(ad("2026-10-05", "100003", { adset: "Lookalike", adsetId: "801", spend: 5 }));
+    data.leads.push(lead("2026-10-04", { utmContent: "Anúncio A" }));
+    data.leads.push(lead("2026-10-04", { adId: "999999", utmContent: "999999" }));
+    data.leads.push(lead("2026-10-04", { utmSource: undefined, utmMedium: undefined }));
+    const kp = kpisDe(data);
+    const fora = foraDasLinhasDeConversao(data, PERIODO, kp, conjuntosPorId(data, PERIODO, { custoPorReuniaoExibivel: custoExibivel(kp.custoPorReuniao) }));
+    expect(fora.porMotivo.ambigua).toBe(1);
+    expect(fora.porMotivo["anuncio-de-fora"]).toBe(1);
+    expect(fora.organicos).toBe(1);
+    const texto = textoDosForaDasLinhas(fora);
+    expect(texto.startsWith(`Fora das linhas: 2 de ${kp.leadsConversao.valor} leads de conversão.`)).toBe(true);
+    expect(texto).toContain("1 de anúncio fora das linhas desta marca.");
+    expect(texto).toContain("1 com nome ambíguo.");
+    // O orgânico não é de conversão: fica fora do texto (e tem outro nome no ⓘ dos conjuntos).
+    expect(texto).not.toMatch(/orgânic/);
+    const m = midiaDe(data);
+    expect(m.verba!.dica).toContain(texto);
+    expect(m.detalhes.conjuntos.dica).toContain(texto);
+    expect(m.detalhes.conjuntos.dica).toMatch(/\b1 leads? sem anúncio pago \(orgânicos? ou diretos?\) fica/);
   });
 });

@@ -40,6 +40,9 @@ describe("6.6 — âncoras e vistas", () => {
     expect(linkDeConfiguracoes("/configuracoes#marcas")).toBe("/configuracoes/marcas#marcas");
     expect(linkDeConfiguracoes("/configuracoes#integracoes")).toBe("/configuracoes/integracoes#integracoes");
     expect(linkDeConfiguracoes("/configuracoes#perigo")).toBe("/configuracoes/perigo#perigo");
+    // A conferência com o Gerenciador (Fase 4) mora em Integrações; a query do período fica.
+    expect(linkDeConfiguracoes("/configuracoes#conferir-gasto")).toBe("/configuracoes/integracoes#conferir-gasto");
+    expect(linkDeConfiguracoes("/configuracoes?range=7d#conferir-gasto")).toBe("/configuracoes/integracoes?range=7d#conferir-gasto");
     // Já na vista certa: fica como está.
     expect(linkDeConfiguracoes("/configuracoes/ferramentas#utm")).toBe("/configuracoes/ferramentas#utm");
     expect(linkDeConfiguracoes("/configuracoes/integracoes")).toBe("/configuracoes/integracoes");

@@ -22,7 +22,10 @@ import { primeiroNome, type RoboAgora } from "../robo/situacao";
 import { assessTrust, type Trava } from "../trust";
 import { EXPEDIENTE_PADRAO } from "../turno";
 import { buildBriefing } from "../ai/briefing";
+import { midiaParaIA, montarMidiaDaTela } from "../midia";
 import type { AdDaily, DashboardData, Lead, LpDaily, Meta } from "../types";
+import { producaoSemana } from "@/test/fixtures-midia";
+import { entradaMidiaDa } from "@/test/entrada-midia";
 
 const brt = (dia: string, hhmm: string) => new Date(`${dia}T${hhmm}:00-03:00`).toISOString();
 
@@ -401,6 +404,35 @@ describe("C12: o briefing lê o Início (sem placar, sem o motor, sem pessoas)",
     }
     // ("nome" existe, mas é do dicionário e do anúncio — os nomes de pessoa já foram procurados acima.)
     expect(/"(phone|email|telefone|primeiroNome|leadName)"/.test(json)).toBe(false);
+  });
+
+  it("LGPD com a Mídia (Fase 4): `pago.midia` vem como a tela a escreve — criativos com sinal e a situação do robô, sem pessoa", () => {
+    const semana = producaoSemana();
+    const midia = midiaParaIA(montarMidiaDaTela(entradaMidiaDa(semana)));
+    const comMidia = buildBriefing(data, SEMANA, { nowIso: AGORA, warnings: [], kpis, inicio, midia });
+    if (!("pago" in comMidia) || !comMidia.pago || !("midia" in comMidia.pago)) throw new Error("briefing de conversão sem pago.midia");
+    const m = comMidia.pago.midia!;
+    // O que a IA lê: os textos da tela (o resumo, a verba e os cartões com sinal e motivo).
+    expect(m.criativos).not.toBeNull();
+    expect(m.criativos!.noAr.length).toBeGreaterThan(0);
+    expect(typeof m.criativos!.noAr[0].sinal).toBe("string");
+    expect(m.robo.situacao).toBe("ok");
+    // `pago.criativos` (por anúncio) saiu.
+    expect("criativos" in comMidia.pago).toBe(false);
+    const json = JSON.stringify(comMidia);
+    for (const l of [...data.leads, ...semana.data.leads]) {
+      expect(json.includes(l.name), l.name).toBe(false);
+      const p = primeiroNome(l.name);
+      if (p && p.length >= 4) expect(json.includes(p), p).toBe(false);
+      if (l.email) expect(json.includes(l.email), l.email).toBe(false);
+      if (l.phone) {
+        expect(json.includes(l.phone), l.phone).toBe(false);
+        expect(json.includes(l.phone.slice(-8)), l.phone).toBe(false);
+      }
+    }
+    // Nenhum id de lead (os da semana de produção são "lead-midia-NN").
+    for (const l of semana.data.leads) expect(json.includes(l.id), l.id).toBe(false);
+    expect(/"(phone|email|telefone|primeiroNome|leadName|leadId)"/.test(json)).toBe(false);
   });
 
   it("o `pago` sai dos kpis recebidos: o mesmo objeto do cartão (com a confiança dele)", () => {

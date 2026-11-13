@@ -12,7 +12,7 @@
  *     o painel da live (`montarPainelLive`, congelado) no lugar dos blocos.
  *
  * As ações do motor (`motor.ts`) saíram da tela: o motor e `acoes_estado` ficam
- * dormentes até a Mídia (Fase 4) — sem tela, sem IA, sem escritor.
+ * dormentes (a Mídia mostra o sinal no cartão) — sem tela, sem IA, sem escritor.
  *
  * Os alertas do período também nascem aqui (puros): os do modo normal e os do
  * modo live. Quem carrega o que vem de fora (store, syncs, robô, turno) é

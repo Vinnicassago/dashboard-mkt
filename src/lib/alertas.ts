@@ -6,7 +6,9 @@
  * eram calculados e jogados fora), o rodapé de pendências e o cabeçalho. Agora
  * todo aviso vira um `Alerta` e aparece no mesmo painel, em qualquer tela: os
  * GLOBAIS (sync falhando, campanha sem marca, rastreio aberto) vêm do layout; os
- * do PERÍODO (confiança dos números, atribuição) vêm da página que os calculou.
+ * do PERÍODO (confiança dos números, atribuição) vêm da página que os calculou —
+ * na Mídia, `alertasDaMidia` (`lib/midia.ts`), com os dois só dela
+ * (`midia-fora-das-linhas` e `midia-reunioes-so-por-nome`).
  */
 
 import type { Trava } from "./trust";
@@ -98,6 +100,46 @@ export function alertasDeAtribuicao(data: DashboardData, range?: DateRange): Ale
     });
   }
   return out;
+}
+
+/**
+ * Mais de 25% dos leads de CONVERSÃO do período sem conjunto identificado (Fase 4,
+ * F4-D10): a comparação verba × leads da Mídia fica torta. O `n` é contado por
+ * CONJUNTO (`foraDasLinhasDeConversao`, `lib/midia.ts`), então o detalhe não fala em
+ * criativo (K10). Só a Mídia registra (`alertasDaMidia`); o Início não muda o ⚠.
+ */
+export function alertaForaDasLinhas(n: number, de: number): Alerta[] {
+  if (de <= 0 || n / de <= 0.25) return [];
+  return [
+    {
+      id: "midia-fora-das-linhas",
+      nivel: "aviso",
+      titulo: `${n} de ${de} ${de === 1 ? "lead" : "leads"} de conversão sem conjunto identificado`,
+      detalhe:
+        "Contam no CPL, mas sem conjunto identificado: a comparação de verba × leads fica torta. O mais comum: anúncio de outra marca ou não classificado, anúncio ainda não sincronizado, ou link sem o id do anúncio.",
+      cta: { label: "Ver marcas e atribuição", href: "/configuracoes/marcas" },
+    },
+  ];
+}
+
+/**
+ * Reuniões do período que chegaram só com o NOME do anúncio (K41): contam nas
+ * reuniões da conta, mas em nenhum conjunto nem criativo (reunião só entra na linha
+ * com o id). É o atalho do link com {{ad.id}} quando não há macro nem ambíguo. Só a
+ * Mídia registra.
+ */
+export function alertaReunioesSoPorNome(r: number): Alerta[] {
+  if (r <= 0) return [];
+  return [
+    {
+      id: "midia-reunioes-so-por-nome",
+      nivel: "aviso",
+      titulo: `${r} ${r === 1 ? "reunião chegou" : "reuniões chegaram"} só com o nome do anúncio`,
+      detalhe:
+        "Contam nas reuniões da conta, mas em nenhum conjunto nem criativo: reunião só entra na linha com o id. Use o link com {{ad.id}}.",
+      cta: { label: "Gerar o link certo", href: "/configuracoes/ferramentas#utm" },
+    },
+  ];
 }
 
 /**

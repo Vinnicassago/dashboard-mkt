@@ -18,9 +18,7 @@ import {
   aggregatePostPerformance,
   awarenessKpis,
   campaignPacing,
-  creativePerformance,
   ctaDistribution,
-  fimDoPeriodo,
   formatPerformance,
   igAccountTotals,
   inRange,
@@ -31,12 +29,12 @@ import {
   previousRange,
   type DataWarning,
   type DateRange,
-  rotuloCriativo,
 } from "../metrics";
 import { MIN_REUNIOES } from "../trust";
 import { hojeEmBrasilia } from "../range";
 import { custoExibivel, kpisDoPeriodo, reguaDoPeriodo, type KpisDoPeriodo } from "../kpis";
 import type { Inicio } from "../inicio";
+import type { MidiaParaIA } from "../midia-tela";
 import { DONO_LABEL } from "../dono";
 import type { ResumoDaTrava } from "../onde-trava";
 import { META_DEF } from "../metas";
@@ -87,6 +85,13 @@ export interface BriefingOptions {
    * curto, as frases do atendimento e o último post.
    */
   inicio?: Inicio;
+  /**
+   * A Mídia da semana como a tela a escreve (`midiaParaIA(montarMidiaDaTela(…))`):
+   * o resumo, a verba, os criativos no ar com sinal, motivo e ressalva, e a
+   * situação do robô — sem pessoa. Calculada só no resumo semanal (o Início não
+   * paga por ela). Ausente: `pago.midia` = null.
+   */
+  midia?: MidiaParaIA;
 }
 
 /**
@@ -313,8 +318,8 @@ export function buildBriefing(
 
     metas,
     // O que o painel já detectou sozinho: as regras de conteúdo — a IA prioriza
-    // ou discorda, não redescobre. As ações do motor saíram (não têm tela até a
-    // Mídia da Fase 4: a IA não recebe o que nenhuma tela mostra).
+    // ou discorda, não redescobre. As ações do motor não vão (dormente). A Mídia
+    // vai como a tela a escreve (`pago.midia`).
     alertasJaDetectados: buildRecommendations(data, range, opts.nowIso).map((r) => ({
       severidade: r.severity,
       titulo: r.title,
@@ -398,15 +403,10 @@ export function buildBriefing(
   const kpPrev = prevRange ? kpisDoPeriodo(data, prevRange) : undefined;
   const obj = objectiveBreakdown(data, range);
   const pacing = campaignPacing(data, opts.nowIso);
-  // As janelas da saúde terminam no fim do período (hoje sem `range`), como na
-  // tabela de /midia e no motor: a IA não chama de "fadigando" o anúncio que a
-  // tela mostra parado.
-  const criativos = creativePerformance(data, range, { fim: fimDoPeriodo(range, hojeEmBrasilia(new Date(opts.nowIso))) });
   // Com menos de MIN_REUNIOES o custo por reunião está em quarentena na tela: a
   // IA recebe null e o motivo, nunca o valor — senão argumenta com um número que
-  // o painel esconde. A régua vale também por criativo.
+  // o painel esconde.
   const cprConfiavel = custoExibivel(kp.custoPorReuniao);
-  const comCpr = cprConfiavel ? criativos.filter((c) => c.meetings >= MIN_REUNIOES) : [];
 
   return {
     ...base,
@@ -449,23 +449,10 @@ export function buildBriefing(
         situacao: pacing.status,
         diasRestantes: pacing.daysLeft ?? null,
       },
-      criativos: {
-        melhorPorCpr: comCpr.length
-          ? (() => {
-              const c = comCpr.reduce((m, x) => (x.cpr < m.cpr ? x : m));
-              return { nome: rotuloCriativo(c, criativos), cpr: r2(c.cpr), reunioes: c.meetings, gasto: money(c.spend) };
-            })()
-          : null,
-        piorPorCpr: comCpr.length > 1
-          ? (() => {
-              const c = comCpr.reduce((m, x) => (x.cpr > m.cpr ? x : m));
-              return { nome: rotuloCriativo(c, criativos), cpr: r2(c.cpr), reunioes: c.meetings, gasto: money(c.spend) };
-            })()
-          : null,
-        fadigados: criativos
-          .filter((c) => c.fatigue.level === "fadigado")
-          .map((c) => ({ nome: rotuloCriativo(c, criativos), motivo: c.fatigue.reason, gasto: money(c.spend) })),
-      },
+      // A Mídia como a tela a escreve (Fase 4): os criativos no ar com o sinal do
+      // cartão (nome, selo, motivo, ressalva) — a IA não julga o que a tela não
+      // julga, nem chama de "fadigando" o que o cartão chama de "Pausar". Sem pessoa.
+      midia: opts.midia ?? null,
     },
     // A régua (Fase 4): cada número do funil contra a meta que vale no período.
     // Sem status quando o número não se sustenta — a IA não julga o que a tela não julga.
@@ -488,6 +475,11 @@ export function buildBriefing(
       DICIONARIO.custo_por_reuniao,
       DICIONARIO.agendaram,
       DICIONARIO.taxa_lead_agendada,
+      DICIONARIO.no_ar,
+      DICIONARIO.sinal_do_criativo,
+      DICIONARIO.qualidade_do_robo,
+      DICIONARIO.sem_whatsapp,
+      DICIONARIO.fora_das_linhas,
     ].map((d) => ({ nome: d.nome, definicao: d.definicao, exclui: d.exclui })),
   };
 }

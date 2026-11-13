@@ -9,7 +9,9 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { House } from "lucide-react";
-import { describe, expect, it } from "vitest";
+import { createElement, type ReactNode } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it, vi } from "vitest";
 import {
   NAV,
   comPeriodoDaTela,
@@ -21,10 +23,31 @@ import {
   vistasForBrand,
 } from "@/components/layout/nav-items";
 import { estadoDoSeletor, type AtalhoDoSeletor } from "@/components/layout/periodo-do-seletor";
+import { RecommendationsCard } from "@/components/kpi/recommendations";
 import { atalhoDaLive, chavesDaLive } from "../atalho-live";
 import { brandDef } from "../brands";
+import { montarInicio } from "../inicio";
 import { LIVE_PADRAO, type CampanhaDaLive } from "../live";
-import { PERIODO_PADRAO_DO_INICIO, buildCustomKey, comPeriodo } from "../range";
+import {
+  PERIODO_PADRAO_DA_MIDIA,
+  PERIODO_PADRAO_DO_INICIO,
+  PERIODO_PADRAO_POR_ROTA,
+  buildCustomKey,
+  comPeriodo,
+  periodoPadraoDaRota,
+} from "../range";
+import type { Recommendation } from "../recommendations";
+import { ROBO, entradaDoRobo } from "@/test/fixtures-robo";
+
+// O link do Next fora do roteador: um <a> com o href (o que importa aqui).
+vi.mock("next/link", async () => {
+  const { createElement: el } = await import("react");
+  return {
+    default: function Link({ href, children, ...resto }: { href: string; children?: ReactNode }) {
+      return el("a", { href, ...resto }, children);
+    },
+  };
+});
 
 const ler = (rel: string) => readFileSync(path.join(process.cwd(), rel), "utf8");
 
@@ -58,6 +81,11 @@ describe("navegação — o Início", () => {
     expect(PERIODO_PADRAO_DO_INICIO).toBe("7d");
     expect(inicio().periodoPadrao).toBe(PERIODO_PADRAO_DO_INICIO);
     expect(periodoPadraoDe("/")).toBe(PERIODO_PADRAO_DO_INICIO);
+    // A Mídia também olha a semana (Fase 4: "o que faço com a verba esta semana?").
+    expect(PERIODO_PADRAO_DA_MIDIA).toBe("7d");
+    expect(periodoPadraoDe("/midia")).toBe(PERIODO_PADRAO_DA_MIDIA);
+    expect(NAV.find((n) => n.href === "/midia")!.periodoPadrao).toBe(PERIODO_PADRAO_DA_MIDIA);
+    expect(NAV.find((n) => n.href === "/midia")!.pergunta).toBe("O que faço com a verba esta semana?");
     // O resto olha a campanha inteira; /live (redirect) não é página da navegação.
     expect(periodoPadraoDe("/funil")).toBe("all");
     expect(periodoPadraoDe("/conteudo/posts")).toBe("all");
@@ -65,6 +93,27 @@ describe("navegação — o Início", () => {
     // O carregador lê a mesma constante (o nome que page.tsx importa fica).
     expect(ler("src/lib/bussola-server.ts")).toMatch(/export const PERIODO_PADRAO_DA_BUSSOLA = PERIODO_PADRAO_DO_INICIO;/);
     expect(ler("src/components/layout/nav-items.ts")).not.toMatch(/periodoPadrao:\s*"/);
+  });
+
+  it("UMA fonte do comportamento (K38): o campo do NAV, `periodoPadraoDe` e `periodoPadraoDaRota` concordam", () => {
+    expect(PERIODO_PADRAO_POR_ROTA).toEqual({ "/": PERIODO_PADRAO_DO_INICIO, "/midia": PERIODO_PADRAO_DA_MIDIA });
+    for (const item of NAV) {
+      expect(item.periodoPadrao ?? "all", item.href).toBe(periodoPadraoDaRota(item.href));
+      expect(periodoPadraoDe(item.href), item.href).toBe(periodoPadraoDaRota(item.href));
+      for (const v of item.vistas ?? []) expect(periodoPadraoDe(v.href), v.href).toBe(periodoPadraoDaRota(v.href));
+    }
+  });
+
+  it("periodoPadraoDaRota: pelo CAMINHO do href — '/' só exato, as outras por prefixo com fronteira", () => {
+    expect(periodoPadraoDaRota("/midia/x?y=1#z")).toBe("7d");
+    expect(periodoPadraoDaRota("/midia")).toBe("7d");
+    expect(periodoPadraoDaRota("/midia#conjuntos")).toBe("7d");
+    expect(periodoPadraoDaRota("/")).toBe("7d");
+    expect(periodoPadraoDaRota("/#topo")).toBe("7d");
+    expect(periodoPadraoDaRota("/?x=1")).toBe("7d");
+    expect(periodoPadraoDaRota("/funil")).toBe("all");
+    expect(periodoPadraoDaRota("/midiax")).toBe("all");
+    expect(periodoPadraoDaRota("/leads/LEAD-1")).toBe("all");
   });
 
   it("item ativo só pela rota dele: /live não acende o Início", () => {
@@ -288,8 +337,9 @@ describe("o período viaja nos links — Campanha vai explícita para o Início"
     expect(naTela).toBe("all");
     const hrefFor = (h: string) => comPeriodoDaTela(h, naTela);
     expect(hrefDoItem(inicio(), hrefFor, null)).toBe("/?range=all");
-    // Os destinos cujo padrão também é a campanha seguem sem o parâmetro.
-    for (const h of ["/funil", "/midia", "/fila", "/leads", "/conteudo/posts", "/configuracoes"]) expect(comPeriodoDaTela(h, "all")).toBe(h);
+    // Os destinos cujo padrão também é a campanha seguem sem o parâmetro (a Mídia não: abre na semana).
+    for (const h of ["/funil", "/fila", "/leads", "/conteudo/posts", "/configuracoes"]) expect(comPeriodoDaTela(h, "all")).toBe(h);
+    expect(comPeriodoDaTela("/midia", "all")).toBe("/midia?range=all");
     // O Início do comercial no modo live não muda.
     expect(hrefDoItem(inicio(), hrefFor, `/?range=${CHAVES.campanha}`)).toBe(`/?range=${CHAVES.campanha}`);
   });
@@ -302,10 +352,36 @@ describe("o período viaja nos links — Campanha vai explícita para o Início"
     // Link que já leva range de propósito sai intacto.
     expect(comPeriodoDaTela("/?range=7d", "all")).toBe("/?range=7d");
     expect(comPeriodoDaTela("/", null)).toBe("/");
-    // `comPeriodo` sem o padrão do destino é o de sempre (os links montados no servidor).
-    expect(comPeriodo("/", "all")).toBe("/");
+    // `comPeriodo` sem o 3º argumento: o padrão do destino sai da rota (F4-D1) — também
+    // nos links montados no servidor, "Campanha" vai explícita para o Início e a Mídia.
+    expect(comPeriodo("/", "all")).toBe("/?range=all");
+    expect(comPeriodo("/#topo", "all")).toBe("/?range=all#topo");
     expect(comPeriodo("/", "all", "7d")).toBe("/?range=all");
     expect(comPeriodo("/funil", "all", "all")).toBe("/funil");
+    expect(comPeriodo("/funil", "all")).toBe("/funil");
+  });
+
+  it("Campanha vai explícita para a Mídia (padrão 7 dias); da Mídia sem ?range=, os links levam 7d", () => {
+    expect(comPeriodoDaTela("/midia", "all")).toBe("/midia?range=all");
+    expect(comPeriodoDaTela("/midia#conjuntos", "all")).toBe("/midia?range=all#conjuntos");
+    expect(comPeriodoDaTela("/funil", periodoPadraoDe("/midia"))).toBe("/funil?range=7d");
+    expect(comPeriodo("/midia", "all")).toBe("/midia?range=all");
+    expect(comPeriodo("/midia", "7d")).toBe("/midia?range=7d");
+  });
+
+  it("o rodapé do Início em Campanha leva a Mídia em Campanha (`/midia?range=all`)", () => {
+    const e = entradaDoRobo(ROBO, null);
+    expect(e.rangeKey).toBe("all");
+    const hrefs = montarInicio(e).rodape.links.map((l) => l.href);
+    expect(hrefs).toContain("/midia?range=all");
+    expect(hrefs).not.toContain("/midia");
+  });
+
+  it("o 'abrir →' de vanity-objective em Conteúdo (sem ?range= = Campanha) leva `range=all` à Mídia", () => {
+    const rec = { id: "vanity-objective", severity: "media", title: "Mude o objetivo de 2 conjuntos de descoberta", detail: "x", dono: "MKT", href: "/midia#conjuntos" } as Recommendation;
+    const html = renderToStaticMarkup(createElement(RecommendationsCard, { recs: [rec], rangeKey: periodoPadraoDe("/conteudo") }));
+    expect(periodoPadraoDe("/conteudo")).toBe("all");
+    expect(html).toContain('href="/midia?range=all#conjuntos"');
   });
 
   it("o hook da barra lateral usa a regra do destino", () => {

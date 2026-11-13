@@ -196,6 +196,8 @@ describe("nenhuma tela lê o banco do robô (estático, o src inteiro — K23)",
   it("nenhum carregador de tela (`*-server.ts`) importa `robo/client` nem `robo/sync`", () => {
     const carregadores = todos.filter((a) => a.endsWith("-server.ts"));
     expect(carregadores.map(rel)).toContain("lib/funil-server.ts");
+    // A Mídia (Fase 4) lê o robô só por `robo/estado` (colunas `robo_*` do lead), nunca o banco dele.
+    expect(carregadores.map(rel)).toContain("lib/midia-server.ts");
     for (const a of carregadores) {
       const imps = importsDe(a);
       expect(imps.includes(CLIENTE), rel(a)).toBe(false);

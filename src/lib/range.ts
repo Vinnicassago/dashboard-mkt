@@ -18,6 +18,37 @@ export type RangeKey = (typeof RANGE_PRESETS)[number]["key"];
  */
 export const PERIODO_PADRAO_DO_INICIO: RangeKey = "7d";
 
+/** Sem `?range=`, a Mídia olha a semana: "o que faço com a verba ESTA semana?". */
+export const PERIODO_PADRAO_DA_MIDIA: RangeKey = "7d";
+
+/**
+ * O período que cada rota abre sem `?range=`. A FONTE do comportamento:
+ * `periodoPadraoDe` (nav-items) delega a `periodoPadraoDaRota`, e o 3º argumento
+ * padrão de `comPeriodo` também sai daqui — inclusive nos links montados no servidor.
+ */
+export const PERIODO_PADRAO_POR_ROTA: Readonly<Record<string, RangeKey>> = {
+  "/": PERIODO_PADRAO_DO_INICIO,
+  "/midia": PERIODO_PADRAO_DA_MIDIA,
+};
+
+/**
+ * O padrão do DESTINO de um link. A rota = `href.split(/[?#]/)[0] || "/"` (a MESMA
+ * conta de `comPeriodoDaTela`): "/#topo" e "/?x=1" são "/". "/" só exato; as outras
+ * rotas por prefixo com fronteira ("/midia/x" é "/midia"; "/midiax" não é). Sem
+ * entrada: "all" (a campanha inteira).
+ */
+export function periodoPadraoDaRota(href: string): RangeKey {
+  const rota = href.split(/[?#]/)[0] || "/";
+  for (const [prefixo, padrao] of Object.entries(PERIODO_PADRAO_POR_ROTA)) {
+    if (prefixo === "/") {
+      if (rota === "/") return padrao;
+      continue;
+    }
+    if (rota === prefixo || rota.startsWith(`${prefixo}/`)) return padrao;
+  }
+  return "all";
+}
+
 const PRESET_DAYS: Record<string, number> = { "7d": 7, "14d": 14, "30d": 30, "90d": 90 };
 
 /**
@@ -142,12 +173,17 @@ export function resolveRange(
  * período que ele já tiver: o link que leva `range=` de propósito (a B1 e a barra
  * do robô abrem Leads com `range=all`, 11.5) sai intacto, sem um 2º `range`.
  *
- * `padraoDoDestino`: o período que o DESTINO abre sem `?range=` (`periodoPadraoDe`).
- * "Campanha" (`all`) sai do link só quando é também o padrão do destino; para o
- * Início (padrão = a semana) ela vai explícita — senão Funil (Campanha) → Início
+ * `padraoDoDestino`: o período que o DESTINO abre sem `?range=` — o padrão do
+ * destino sai de `periodoPadraoDaRota` (pelo caminho do href). "Campanha" (`all`)
+ * sai do link só quando é também o padrão do destino; para o Início e a Mídia
+ * (padrão = a semana) ela vai explícita — senão Funil (Campanha) → Início ou Mídia
  * abria em 7 dias sem ninguém ter escolhido.
  */
-export function comPeriodo(href: string, rangeKey?: string | null, padraoDoDestino: string = "all"): string {
+export function comPeriodo(
+  href: string,
+  rangeKey?: string | null,
+  padraoDoDestino: string = periodoPadraoDaRota(href),
+): string {
   if (!rangeKey || (rangeKey === "all" && padraoDoDestino === "all")) return href;
   const [base, hash] = href.split("#");
   if (/[?&]range=/.test(base)) return href;

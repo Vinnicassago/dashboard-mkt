@@ -1,4 +1,5 @@
 import { Plug } from "lucide-react";
+import { ConferenciaGerenciador } from "@/components/config/conferencia-gerenciador";
 import { ReenviarCapi, RoboToggle, SyncPanel } from "@/components/config/integracoes-forms";
 import { StatusRow, estadoSimples } from "@/components/config/integracoes-status";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,7 +25,9 @@ import { avisoDeResgateConfigurado } from "@/lib/avisos";
 import { estadoDaFonte, type EstadoFonte } from "@/lib/sincronizacao";
 import { DEFAULT_BRAND } from "@/lib/types";
 import { VERSAO } from "@/lib/version";
-import { getState, listCapiEnvios, listLeadEvents, listLeads } from "@/lib/data/store";
+import { gastoDoPeriodoParaConferir } from "@/lib/conferencia-periodo";
+import { hojeEmBrasilia } from "@/lib/range";
+import { getData, getState, listCapiEnvios, listConferencias, listLeadEvents, listLeads } from "@/lib/data/store";
 import { STATE_KEYS } from "@/lib/data/backend";
 import { capiEmModoTeste } from "@/lib/meta/capi";
 import { estadoDaCapi, estadoDoCronCapi, resumoDosEnvios } from "@/lib/capi-politica";
@@ -120,6 +123,14 @@ export default async function IntegracoesPage({ searchParams }: { searchParams: 
     ultimaExecucao: await getState<string>(STATE_KEYS.capiUltimoReenvio),
     agora: agoraCapi.toISOString(),
   });
+
+  // Conferência com o Gerenciador (Fase 4: era um card da Mídia). O gasto TOTAL do
+  // período do link (`?range=`, sem ele a campanha inteira), recalculado no servidor.
+  const [dadosDaMarca, conferencias] = await Promise.all([
+    getData(ctx.brand.slug),
+    listConferencias({ brand: ctx.brand.slug, limit: 10 }),
+  ]);
+  const conferir = gastoDoPeriodoParaConferir(dadosDaMarca, ctx.rangeKey, hojeEmBrasilia());
 
   const ingestKey = Boolean(process.env.TRACK_INGEST_KEY?.trim());
   const ia = isAiConfigured();
@@ -261,6 +272,27 @@ export default async function IntegracoesPage({ searchParams }: { searchParams: 
               projeto no Supabase) está no README e no arquivo <code className="font-mono">.env.example</code>.
             </p>
           ) : null}
+        </CardContent>
+      </Card>
+
+      {/* Fora do condicional de papel: quem não tem data:write vê o card, sem o campo
+          (a permissão é conferida de novo na action). */}
+      <Card id="conferir-gasto" className="scroll-mt-24">
+        <CardHeader>
+          <CardTitle>Conferir com o Gerenciador</CardTitle>
+          <CardDescription>
+            Digite o gasto total do Gerenciador (conversão e descoberta) no mesmo período; até 5% de diferença é normal.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ConferenciaGerenciador
+            gastoPainel={conferir.gasto}
+            periodo={conferir.rotulo}
+            ultimoSync={estadoAds.ultimoOk}
+            rangeKey={conferir.rangeKey}
+            historico={conferencias}
+            podeEditar={ctx.papeis.dados}
+          />
         </CardContent>
       </Card>
 

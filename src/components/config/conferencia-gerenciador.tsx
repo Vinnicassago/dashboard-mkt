@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { registrarConferencia } from "@/app/(dashboard)/midia/conferencia-actions";
+import { registrarConferencia } from "@/app/(dashboard)/configuracoes/conferencia-actions";
 import { conferenciaBate, lerValorEmReais, textoDaDiferenca } from "@/lib/conferencia";
 import { formatCurrency0, formatDateTime } from "@/lib/format";
 import type { ConferenciaGasto } from "@/lib/types";

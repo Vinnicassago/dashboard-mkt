@@ -186,18 +186,23 @@ export function chavesDe(v: unknown, out = new Set<string>()): Set<string> {
 /**
  * A LGPD do payload: nenhuma função cruza; o JSON da árvore inteira não tem
  * telefone (cru ou só dígitos) nem e-mail de NENHUM lead da base — com `semNomes`,
- * nem o nome —; nenhum client recebe chave proibida (`proibidas`, padrão
+ * nem o nome; com `semIds`, nem o ID do lead pelo VALOR (ids de 6+ caracteres, a régua
+ * do JSON da IA em `fase2-alertas-ia`: o Início leva o id no link da ficha, a Mídia é
+ * só agregado) —; nenhum client recebe chave proibida (`proibidas`, padrão
  * `CHAVES_PROIBIDAS`).
  */
 export function conferirLgpd(
   f: Fronteira,
   leads: readonly Lead[],
-  opts: { semNomes?: boolean; proibidas?: readonly string[] } = {},
+  opts: { semNomes?: boolean; semIds?: boolean; proibidas?: readonly string[] } = {},
 ) {
   expect(f.funcoes, "função passada de server para client").toEqual([]);
   const payload = JSON.stringify(f.arvore).toLowerCase();
   for (const c of contatosDe(leads)) expect(payload.includes(c.toLowerCase()), `contato no payload: ${c}`).toBe(false);
   if (opts.semNomes) for (const n of nomesDe(leads)) expect(payload.includes(n), `nome no payload: ${n}`).toBe(false);
+  if (opts.semIds) {
+    for (const l of leads) if (l.id.length >= 6) expect(payload.includes(l.id.toLowerCase()), `id de lead no payload: ${l.id}`).toBe(false);
+  }
   const proibidas = opts.proibidas ?? CHAVES_PROIBIDAS;
   for (const c of f.clients) {
     const chaves = chavesDe(c.props);

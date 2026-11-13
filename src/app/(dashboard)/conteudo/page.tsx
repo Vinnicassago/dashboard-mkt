@@ -165,8 +165,8 @@ export default async function ConteudoPage({
 
   // As ações de conteúdo (cadência, formato, CTA, grade) moram AQUI desde a
   // Fase 5: o Início de conversão não lista ações (o motor v2, do funil pago,
-  // está dormente até a Mídia). A marca de seguidores já as mostra no Início
-  // dela — um fato, um lugar.
+  // está dormente: a Mídia mostra o sinal no cartão). A marca de seguidores já as
+  // mostra no Início dela — um fato, um lugar.
   const acoesDeConteudo =
     brand.type === "awareness" ? [] : buildRecommendations(data, range, new Date().toISOString());
 

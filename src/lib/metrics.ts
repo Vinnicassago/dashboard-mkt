@@ -874,15 +874,14 @@ export function pontosDoTotalDeSeguidores(series: FollowerPoint[]): FollowerPoin
 // ---- fadiga de criativo --------------------------------------------
 
 /**
- * `sem-resultado` (B17): gastou e não trouxe lead — não é fadiga, é criativo que
- * nunca funcionou. `parado`: tinha veiculação antes e um sync que deu certo
+ * `parado`: tinha veiculação antes e um sync que deu certo
  * confirmou dias da janela recente sem impressão — anúncio pausado, não
  * "amostra insuficiente". `sem-dados`: a mesma janela vazia, mas NENHUM sync
  * bem-sucedido a cobriu — pode ter havido veiculação que o painel não viu
  * (ADR-06: dia sem linha e sem cobertura é "sem dados", nunca "sem
  * veiculação"). O motor lê só `fadigado`; os outros níveis são da tela.
  */
-export type FatigueLevel = "novo" | "parado" | "sem-dados" | "saudavel" | "atencao" | "fadigado" | "sem-resultado";
+export type FatigueLevel = "novo" | "parado" | "sem-dados" | "saudavel" | "atencao" | "fadigado";
 
 /**
  * Uma das duas janelas de 7 dias que a regra compara. O CPL daqui é o **CPL
@@ -928,8 +927,6 @@ export const REGRA_FADIGA = {
   frequenciaAlta: 2,
   /** …OU CPL Meta (Pixel) 7 d ≥ 120% do anterior (conversões do Pixel, não leads do painel). */
   altaCpl: 1.2,
-  /** Sem resultado (só conversão): gasto do período ≥ 2 × CPL alvo com 0 leads do painel. */
-  multiploSemResultado: 2,
 } as const;
 
 export interface OpcoesFadiga {
@@ -945,12 +942,6 @@ export interface OpcoesFadiga {
    * `dailySeries`).
    */
   cobertura?: Intervalo[];
-  /**
-   * Liga a regra "sem resultado" (só para criativos de conversão): gasto do
-   * período, leads do PAINEL do período e o CPL alvo (meta vigente ou, sem meta,
-   * o CPL do período da conta). `cplAlvo` nulo desliga a regra.
-   */
-  semResultado?: { gastoPeriodo: number; leadsPainel: number; cplAlvo: number | null };
 }
 
 const formatFreq = (n: number) => n.toFixed(1).replace(".", ",");
@@ -995,31 +986,16 @@ function janelaFadiga(rows: AdDaily[], from: string, to: string): JanelaFadiga {
  *                (`opts.cobertura`): anúncio pausado — nunca "Novo".
  *   Sem dados  = a mesma janela vazia sem NENHUM dia confirmado: o sync pode
  *                ter parado, então não se afirma "sem veiculação" (ADR-06).
- *   Sem resultado (só conversão, via `opts.semResultado`) = gasto do período
- *                ≥ 2 × CPL alvo E 0 leads do painel.
+ *
+ * Gastar sem trazer lead não é fadiga (F4-D3): é o Pausar do sinal do criativo
+ * (`lib/sinal-do-criativo.ts`), que só existe para quem está no ar.
  *
  * As janelas terminam em `opts.fim` (o fim do período da tela); sem ele, na
  * última data das linhas. Puro. `reason` diz qual condição disparou.
  */
 export function computeFatigue(rows: AdDaily[], opts: OpcoesFadiga = {}): Fatigue {
-  const { janelaDias, impressoesMinimas, quedaCtr, frequenciaAlta, altaCpl, multiploSemResultado } = REGRA_FADIGA;
+  const { janelaDias, impressoesMinimas, quedaCtr, frequenciaAlta, altaCpl } = REGRA_FADIGA;
   const formatDia = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
-
-  // 1. Sem resultado: gastou o que dois leads custariam e não trouxe nenhum.
-  const sr = opts.semResultado;
-  if (
-    sr &&
-    sr.cplAlvo != null &&
-    sr.cplAlvo > 0 &&
-    sr.leadsPainel === 0 &&
-    sr.gastoPeriodo >= sr.cplAlvo * multiploSemResultado
-  ) {
-    return {
-      level: "sem-resultado",
-      frequency: 0,
-      reason: `${formatReais(sr.gastoPeriodo)} gastos no período sem nenhum lead do painel (≥ ${multiploSemResultado} × o CPL alvo de ${formatReais(sr.cplAlvo)})`,
-    };
-  }
 
   const fim = opts.fim ?? [...rows].map((r) => r.date).sort().at(-1);
   if (!fim) return { level: "novo", frequency: 0, reason: "amostra insuficiente: sem linhas de anúncio" };
@@ -1032,7 +1008,7 @@ export function computeFatigue(rows: AdDaily[], opts: OpcoesFadiga = {}): Fatigu
   const anterior = janelaFadiga(rows, dia(-(2 * janelaDias - 1)), dia(-janelaDias));
   const janelas = { recente, anterior };
 
-  // 2. Janela recente vazia, com veiculação antes dela: pausado OU sync parado.
+  // 1. Janela recente vazia, com veiculação antes dela: pausado OU sync parado.
   //    Sem isto, um anúncio pausado há dois meses sairia "Novo (amostra
   //    insuficiente)" ao lado dos ativos — e a faixa de fadiga o listaria. Mas
   //    "sem veiculação" é afirmação que só um sync bem-sucedido sustenta
@@ -1069,7 +1045,7 @@ export function computeFatigue(rows: AdDaily[], opts: OpcoesFadiga = {}): Fatigu
     return { level: "parado", frequency: 0, reason: `sem veiculação ${trecho}; ${ultima}`, janelas };
   }
 
-  // 3. Piso absoluto: sem 1.000 impressões em cada janela não há leitura.
+  // 2. Piso absoluto: sem 1.000 impressões em cada janela não há leitura.
   if (recente.impressions < impressoesMinimas || anterior.impressions < impressoesMinimas) {
     return {
       level: "novo",
@@ -1079,7 +1055,7 @@ export function computeFatigue(rows: AdDaily[], opts: OpcoesFadiga = {}): Fatigu
     };
   }
 
-  // 4. A regra.
+  // 3. A regra.
   const ctrCaiu = anterior.ctr > 0 && recente.ctr <= anterior.ctr * quedaCtr;
   const freqAlta = recente.frequency >= frequenciaAlta;
   const cplSubiu =
@@ -1157,9 +1133,6 @@ export interface CreativePerf {
   cplPainel: number;
   cpr: number;
   fatigue: Fatigue;
-  hookRate?: number; // 3s plays / impressions (gancho: prende no 1º instante?)
-  thruPlayRate?: number; // thruplays / impressions
-  holdRate?: number; // thruPlays / 3s plays (retenção: segura quem começou a ver?)
 }
 
 /**
@@ -1283,9 +1256,6 @@ export function creativePerformance(
       cplPainel: div(k.spend, leadsPainel),
       cpr: div(k.spend, meetings),
       fatigue: computeFatigue(allByAd.get(creative.adId) ?? [], saude),
-      hookRate: creative.videoPlays ? div(creative.videoPlays, k.impressions) : undefined,
-      thruPlayRate: creative.thruPlays ? div(creative.thruPlays, k.impressions) : undefined,
-      holdRate: creative.videoPlays ? div(creative.thruPlays ?? 0, creative.videoPlays) : undefined,
     });
   }
   return result

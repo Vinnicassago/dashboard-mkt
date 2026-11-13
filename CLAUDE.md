@@ -84,15 +84,13 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   (`lib/perigo.ts`) no server e registra em `audit_log` (`lib/auditoria.ts`); troca de
   linhas de anúncio só com o substituto em mãos (`replaceAdData`, numa transação).
 - **KPIs:** somente em `src/lib/metrics.ts`, funções **puras** (sem I/O). Reutilize-as.
-  Criativo citado em ação, alerta ou IA passa por `rotuloCriativo()` — dois anúncios
+  Criativo citado em ação, alerta ou IA passa por `rotuloCriativo()` (por anúncio) ou `rotuloCriativoAgregado()` (por criativo: os cartões da Mídia — com a desambiguação numa linha própria —, o motor e a IA) — dois anúncios
   podem ter o mesmo nome ("Carrossel -"), e o nome sozinho manda pausar o errado.
 - **Um número por métrica** (Fase 3, ADR-03): tela lê leads, CPL, reuniões e custo por
   reunião SÓ de `kpisDoPeriodo` (`lib/kpis.ts`) — valor, amostra `n`, confiança e
   anterior, e `mostrar()`/`custoExibivel()` para exibir. O lint (`eslint.config.mjs`)
   proíbe `src/app` e `src/components` de importar `overviewKpis`, `objectiveBreakdown`,
-  `adKpis`, `filterLeads`, `countMeetings`… e `assessTrust`. Funil, Início, Mídia, motor
-  de ações, insights e briefing da IA leem o mesmo objeto; `fase3.test.ts` confere 3
-  períodos × 2 marcas, o Início e o Funil incluídos. O custo por reunião pronto para a tela é UM,
+  `adKpis`, `filterLeads`, `countMeetings`… e `assessTrust`. Funil, Início, Mídia, motor de ações, insights e briefing da IA leem o mesmo objeto; `fase3.test.ts` confere 3 períodos × 2 marcas, o Início e o Funil incluídos, e `fase4-midia-tela.test.ts` confere que o resumo da Mídia é o do Início (o investimento de conversão, o CPL e o fato do custo por reunião). O custo por reunião pronto para a tela é UM,
   `fatoDoCustoPorReuniao(k)` (`{exibivel, valor, n, fato}`): a razão só quando `exibivel`,
   senão o FATO "R$ X investidos em conversão · N reuniões de conversão" (decisão 4.2; reuniões
   em quarentena = "reuniões sem leitura confiável", sem contagem) — a Mídia mostra o fato
@@ -215,10 +213,8 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   (`temLpNoPeriodo`/`lpParouNoPeriodo`, em `metrics.ts`): histórico sem dado é rastreio que
   parou (alerta `lp-sem-dado`, `alertaLpSemDado`, no Início e no Funil; a linha Leads fica sem
   %), não "0%".
-- **Motor v2** (`lib/motor.ts`, puro) — DORMENTE até a Mídia (Fase 4): sem tela, sem IA, sem
-  escritor (`acoes-actions.ts` saiu), com todos os testes; o que segue vale quando ele voltar
-  a ter tela. Regras C1–C5, M1–M5, L1–L2, D1–D2 do relatório (+ M6 escalar vencedor, M7 ritmo
-  de verba e B1 robô parado; a G1 foi retirada em nov/26 — não reutilize o id), cada uma com
+- **Motor v2** (`lib/motor.ts`, puro) — DORMENTE: sem tela (a Mídia, Fase 4, mostra o sinal no cartão do criativo, não a lista de ações), sem IA, sem escritor (`acoes-actions.ts` saiu), com todos os testes; o que segue vale quando ele voltar
+  a ter tela. Regras C1–C5, M1–M5, L1–L2, D1–D2 do relatório (+ M6 escalar, M7 ritmo de verba, M8 pausar criativo, M9 candidato a escalar e B1 robô parado; a G1 foi retirada em nov/26 — não reutilize o id; M3, M4 (criativo), M6, M8 e M9 leem o MESMO `criativosComSinal` — o do cartão da Mídia —, montado uma vez por rodada, id `Mn:<chave do criativo>` (a M4 por criativo, `M4:cr:<chave>`), texto = rótulo e motivo do sinal; `CONTATO_INVALIDO_MAX` e `AMOSTRA_MIN.M4` são os da régua do sinal; o link vai à âncora onde a linha MORA — `ancoraDoConjunto`/`ancoraDoCriativo`: no ar → Detalhes ou o cartão, parada → `#pausados`, a live → `#criativos-live`; sem `cfgLive` a live não é separada), cada uma com
   id estável (`regra:alvo` — a C1 leva a `assinatura` de QUEM espera: pessoas novas fora do
   prazo = ação nova, de volta ao topo mesmo depois de um "Feito"), dono (`lib/dono.ts`),
   amostra mínima (`AMOSTRA_MIN`), impacto e confiança. Decide com os números de
@@ -240,8 +236,7 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   e grava em `resumos_semanais`. A IA lê o Início (`inicioParaIA`: cartões como a tela os
   escreve, leads por dia, atendimento, com `ondeTrava` (só contagens e a `situacao`) — foto do
   momento da geração, não da semana —, último
-  post; sem a lista de pessoas) e os kpis do carregador (`pago`, `regua`, `cprEmQuarentena`);
-  sem `bussola` nem ações do motor (`alertasJaDetectados` = só as de conteúdo). O cartão só
+  post; sem a lista de pessoas) e os kpis do carregador (`pago`, `regua`, `cprEmQuarentena`), mais a Mídia da semana como a tela a escreve (`pago.midia` = `midiaParaIA(montarMidiaDaTela(…))`: o resumo, a verba, os criativos no ar com sinal, motivo e ressalva, e a situação do robô — sem pessoa; `pago.criativos` por anúncio saiu); sem `bussola` nem ações do motor (`alertasJaDetectados` = só as de conteúdo). O cartão só
   aparece com resumo; sem ele, o botão "Gerar o resumo da semana" para `data:write` com IA, ou
   nada. Nunca gere no render — custa.
 - **Funil do processo** (`lib/funil-processo.ts`, puro, no Funil e no Início): a COORTE do
@@ -255,7 +250,7 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   realizadas (`isAttended`, sobre Agendaram = `showRate`) → Vendas (`isClient`). Taxa só com
   base ≥ `AMOSTRA_MINIMA` e nunca acima da base (sem taxa, e o ⓘ diz por quê); leitura parada
   = "≥ N" sem taxa no trecho do robô; robô desligado ou período todo antes dele = o funil do
-  painel, e o ⓘ diz isso. **Cascata** (`lib/cascata.ts`) é só o topo — impressões de
+  painel, e o ⓘ diz isso. A Mídia conta o trecho do robô POR LINHA (criativo, conjunto) com a MESMA classificação e os mesmos fatos (`trechoDoRoboPorLinha`, `fatosDoTrecho`; sem WhatsApp = a etapa do episódio, como na junta do Funil): Σ linhas + sem linha + teste/cópia (por fato) = os degraus do robô do Funil. **Cascata** (`lib/cascata.ts`) é só o topo — impressões de
   conversão → visitas na LP → Leads —, com **duas âncoras** (acima de Leads, sobre impressões;
   de Leads para baixo, Leads = 100%; com uma só, oito linhas imprimiam "0,0%"), **selo de
   fonte** em toda linha e junta tracejada onde o dado troca de sistema; **cliques NÃO é
@@ -344,14 +339,11 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   de tabela (cartões ≤ 25, títulos ≤ 10, funil ≤ 20, frases ≤ 30, rodapé + resumo ≤ 15 —
   `fase2-inicio-tela.test.ts` conta, com as datas que o gráfico desenha no navegador; o ⓘ
   fechado não). As barras do Início desenham no máximo 4 datas, sem o eixo Y e sem o
-  "pausado" escrito (`BarrasDiarias` `semEixoY`/`semRotuloNasFaixas`/`maxDatasNoEixo`). Demais
-  páginas ≤ 200 — o Funil é medido em `fase3-funil-tela.test.ts` (manchete ≤ 12, cada linha de
-  perda ≤ 12, nenhuma frase > 25) —, Fila em até 3 telas de rolagem. O `<summary>` de um bloco
+  "pausado" escrito (`BarrasDiarias` `semEixoY`/`semRotuloNasFaixas`/`maxDatasNoEixo`). Demais páginas ≤ 200 — o Funil é medido em `fase3-funil-tela.test.ts` (manchete ≤ 12, cada linha de perda ≤ 12, nenhuma frase > 25) e a Mídia em `fase4-midia-tela.test.ts` (resumo ≤ 20, cada título ≤ 15, até 5 cartões ≤ 125 — nome ≤ 8, desambiguação ≤ 4, selo, linha ≤ 10 — com os números em mini-tabelas, nenhuma frase > 25, também dentro dos ⓘ) —, Fila em até 3 telas de rolagem. O `<summary>` de um bloco
   recolhido é rótulo de navegação, não título de resposta (sem número). Todo `Info` leva
   `rotulo` próprio ("Sobre …").
 - **Navegação** (`components/layout/nav-items.ts`): 7 páginas nomeadas pela PERGUNTA
-  que respondem ou pelo DONO do trabalho — Início (`/`, ícone casa), Funil (`/funil`), Mídia
-  (`/midia`), Conteúdo, Fila de contato, Leads (`/leads`), Configurações
+  que respondem ou pelo DONO do trabalho — Início (`/`, ícone casa), Funil (`/funil`), Mídia (`/midia`, 7 dias), Conteúdo, Fila de contato, Leads (`/leads`), Configurações
   (`/configuracoes`) —, agrupadas na sidebar (Visão geral · Diagnóstico · Operação ·
   Configurações), não pela fonte do dado — eram 14, uma por sistema, e a mesma pessoa
   aparecia contada em três com números diferentes. A pergunta é o ⓘ ao lado do título do
@@ -362,9 +354,7 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   período, ver Live 01/12) e o item ativo sai só da rota (`itemAtivo`). Um fato mora num
   lugar só: se duas páginas precisam dele, uma mostra e a outra linka — e o número do link é
   o da página que ele abre. O período viaja em TODOS os links (`comPeriodo`, `lib/range.ts`;
-  sem `?range=` vale o `periodoPadrao` da página — `useComPeriodo`, `periodoPadraoDe`); "Campanha"
-  vai EXPLÍCITA (`range=all`) para destino cujo padrão é outro — o Início — via
-  `comPeriodoDaTela` (senão Funil → Início abria em 7 dias). Rota
+  sem `?range=` vale o `periodoPadrao` da página — `useComPeriodo`, `periodoPadraoDe`); "Campanha" vai EXPLÍCITA (`range=all`) para destino cujo padrão é outro — o Início e a Mídia (7 dias: `PERIODO_PADRAO_DO_INICIO`, `PERIODO_PADRAO_DA_MIDIA`) —: o padrão do destino sai de `periodoPadraoDaRota` (`PERIODO_PADRAO_POR_ROTA`, `lib/range.ts`, pelo caminho do href: `/#topo` é `/`), que é o 3º argumento padrão de `comPeriodo` e a fonte de `periodoPadraoDe` — também nos links montados no servidor (senão Funil → Início ou Mídia abria em 7 dias). Rota
   antiga (`/jornada`, `/dinheiro`, `/pessoas`, `/config`…) = redirect em `next.config.ts`,
   nunca 404; `/funil?vista=` antigo é ignorado (o Funil é só coorte) — exceção: `/live` redireciona na própria página (`destinoDaLive`), porque as
   datas da régua estão no store.
@@ -385,19 +375,7 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   `AMOSTRA_MINIMA`). Com 0 lead, só a manchete e os recolhidos. Sem Δ, sem meta, sem vista
   por período, sem descoberta (seguidores estão em Conteúdo), sem notas de medição (cliques e
   Pixel estão no ⓘ do card). Confiança do registro (lote/atraso, constantes do motor) =
-  alerta `registro-suspeito` no ⚠ e uma frase no ⓘ das perdas. **Mídia**: resumo primeiro (CPL e custo por reunião =
-  os do Início),
-  tendência semanal, conjuntos por `adsetId` em blocos conversão × descoberta com colunas
-  "Leads (painel)" e "Conversões Meta (Pixel)" (nunca "Leads" sozinho com Pixel), criativos
-  por `creativeId`, rankings só com volume mínimo e o n à vista, reunião atribuída só com
-  id do anúncio ou do conjunto — a MESMA regra em conjuntos, criativos e motor (M2/M4 leem
-  `conjuntosPorId`; nome ambíguo = "atribuição ambígua"); saúde do criativo =
-  `computeFatigue` no PERÍODO com a regra na dica (CTR 7d ≤ 75% do anterior E (freq ≥ 2 OU
-  CPL Meta (Pixel) 7d ≥ 120%), ≥ 1.000 impressões por janela; "sem resultado" = gasto ≥ 2 ×
-  CPL alvo e 0 leads; "parado" só com dia confirmado por sync, sem cobertura é "sem dados" —
-  ADR-06); a janela termina em `fimDoPeriodo` na tela, no motor e na IA;
-  gráfico diário em barras com dias sem dado e pausados marcados; o gasto nunca aparece
-  como orçamento. **Leads**: colunas da ficha (etapa máxima = `etapaMaxima`, função dos
+  alerta `registro-suspeito` no ⚠ e uma frase no ⓘ das perdas. **Mídia** (Fase 4, nov/26; `montarMidiaDaTela` + `carregarMidia`, `lib/midia-server.ts`; os tipos da tela, as colunas e os helpers do client em `lib/midia-tela.ts` — os clients nunca importam valor de `lib/midia.ts`): "o que faço com a verba esta semana?" — abre em 7 dias. De cima para baixo: o resumo em UMA linha que abre com o investimento de CONVERSÃO (o do cartão do Início; com orçamento, "(orçamento R$ X)" colado a ele), o CPL e o fato do custo por reunião = os do Início, sem status de meta (o total e a descoberta no ⓘ; zero com piso de cobertura = "Sem dados de gasto"; awareness = só o investido) e "Conferir com o Gerenciador →" (Configurações → Integrações `#conferir-gasto`, que compara o TOTAL); "Para onde vai a verba" (`paraOndeVaiAVerba`: só conversão, % do gasto de CONVERSÃO — `gastoDaVerba`: num conjunto misto, sem a linha de descoberta; Σ = o investimento de conversão — × % dos leads de conversão por conjunto NO AR + a live numa linha só + "Fora do ar" = 100%, maior resto, os leads da MESMA passada do "fora das linhas" — D + n = leads de conversão por construção; "Fora das linhas" = n de N, fora dos 100%; título = o destaque com |Δ| ≥ 10 pontos pelos inteiros exibidos, ou "Leads acompanham a verba"; acima de 25% fora das linhas, " ⚠" no fim do título e o alerta `midia-fora-das-linhas`); os criativos de conversão NO AR em até 5 cartões (miniatura, nome ≤ 8 palavras + a desambiguação numa linha própria, selo do sinal, números em mini-tabelas na largura do cartão — gasto, leads, CPL e o múltiplo da média, % da verba e dos leads, e a resposta ao robô —, a ressalva visível; "≥" com piso de gasto — no gasto, no CPL e no R$ do motivo, e nas tabelas de Detalhes e Pausados, `pisoDeGasto`); recolhidos: "Criativos da live 01/12", "Pausados no período" (as MESMAS tabelas, só as linhas de conversão fora do ar) e "Detalhes" (tendência semanal; tabelas de conjuntos — `#conjuntos` — e criativos — `#criativos-tabela` — de conversão NO AR — sem verba de conversão, nenhuma, e `#conjuntos` é a descoberta —, e a descoberta inteira; alcance e seguidores; investimento por dia — `RolarParaAncora abrirDetalhes` abre o `<details>` da âncora na chegada, no `hashchange` e no clique; toda âncora com `scroll-mt-24`). "No ar" = `veiculacaoNoFim` (`lib/veiculacao.ts`): impressão ou gasto nos 3 dias (`DIAS_DE_ATRASO_DA_META + 1`) até o dia do último sync de anúncios OK (≤ `fimDoPeriodo`; sem sync, o último dia com linha); senão "último gasto em dd/mm" se um dia depois dele foi coberto por sync (ADR-06), senão "sem leitura" — sem o status do Meta; quando o `ref` é anterior a hoje, os títulos dizem "no ar em dd/mm"; quem não está no ar não tem sinal (nunca "Sem resultado" em anúncio desligado). **Sinal** (`sinalDoCriativo`, `lib/sinal-do-criativo.ts`, puro, UMA régua `REGUA_DO_SINAL`, amostra de pessoas `AMOSTRA_DE_PESSOAS`; tela, motor e IA leem `linha.sinal`), o primeiro que casar: Escalar (3+ reuniões por id a custo ≤ o da conta, sem fadiga) · Pausar (sem reunião e nenhum lead ou CPL ≥ 2× a média, com gasto que torna isso improvável por acaso — Poisson < 5%: 0 lead com 3 esperados, 1 com 4,75…; os leads de nome ambíguo contam a favor; ou caro e não responde ao robô) · Trocar arte (fadiga, ou barato e não responde) · Cedo (sem média, ou gasto < 3 leads da média com menos de 10 leads) · Candidato a escalar (com 10 maduros no robô: responde — ≥ 50% — e CPL até a média; sem leitura do robô ou abaixo da amostra, a D9: CPL ≤ 0,7× a média com 10 leads, sem fadiga, rotulado "sinal de topo de funil, ainda sem reunião", com a trava de qualidade — contato inválido ≤ 25%, sem telefone + sem WhatsApp ≤ 25%, resposta ≥ 25% com 3+ maduros —, nunca com piso de gasto; selo vazado) · Manter. Média = Σ gasto ÷ Σ leads com criativo dos criativos de conversão do período, sem a live (aparece só como múltiplo; o valor no ⓘ). Os anúncios da live têm chave própria (`live|…`): o criativo misto vira duas linhas; o mesmo com o criativo que roda em conversão E em descoberta (`desc|…`, fora do sinal e da média). A resposta ao robô é COORTE, por linha (`trechoDoRoboPorLinha`, a classificação do Funil): responderam ÷ 1ª mensagem, aceitaram ÷ responderam, sem WhatsApp ÷ no robô, sem teste nem cópia; % só com base ≥ `AMOSTRA_MINIMA`, "≥ N" com a leitura parada, colunas somem sem gente dos criativos no robô; reunião na linha vence a leitura. CPL de linha só com 3+ leads ("— (n = 1)"), também no motivo do sinal. Saíram: rankings, faixa de saúde, Gancho e Retenção (janela do sync, não do período), o "sem resultado" da fadiga, meta e ritmo como status, `notaDeNaoAtribuidos` (o "fora das linhas" é UM texto, `textoDosForaDasLinhas`, nos ⓘ da verba e dos conjuntos). Ficam: conjunto por `adsetId`, criativo por `creativeId`, reunião atribuída só com id (conjuntos, criativos e motor), "Leads (painel)" × "Conversões Meta (Pixel)", quarentena por linha, a fadiga com a regra na dica e a janela em `fimDoPeriodo`, o gasto nunca como orçamento. **Leads**: colunas da ficha (etapa máxima = `etapaMaxima`, função dos
   marcos — ADR-01), "Atendimento" (`atendimentoAgora`: o grupo da Fila pela MESMA
   `etapaDoLead`, senão o robô, "Antes do robô" ou nada — o filtro "dono" lê dali; o de 5
   estados da live se chama "Status do atendimento", chave `?atendimento=`), filtro `robo`
@@ -448,7 +426,7 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   de terminar (a Meta atrasa). Período que ainda não começou = o 1º dia, vazio
   (`resolveRange`; `pageRange` diz `naoComecou`), nunca "tudo" em silêncio; dia depois de hoje
   é FUTURO e dia antes da 1ª linha de anúncio não existia — nem "sem dados" nem "sem
-  veiculação"; Mídia, motor e IA terminam em `fimDoPeriodo` = min(range.to, hoje). **Dia de
+  veiculação"; Mídia, motor e IA terminam em `fimDoPeriodo` = min(range.to, hoje); o "no ar" ancora em min(`fimDoPeriodo`, dia do último sync de anúncios OK) (`refDaVeiculacao`; sem sync, o último dia com linha) e, quando esse dia é anterior a hoje, a tela diz "no ar em dd/mm" (`noArTexto`). **Dia de
   lead e de evento = Brasília** (`diaDoLead`, `horario-util.ts`, nunca lança) — em UTC o lead
   das 22h de quinta caía na sexta. Seguem o dia da FONTE: `ad_daily`, a conta do Instagram e o
   período dos posts (`dayOf`); `lp_daily` é de Brasília desde 05/11/2026 (histórico em UTC).
@@ -465,7 +443,7 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   custo invertido até 120%; verba = ritmo ±10%/±25%) e SEMPRE com texto
   (`StatusMetaBadge`, prop `meta` do `KpiCard`). Sem status quando a meta não cobre o
   período inteiro, o período ainda não começou ou o número não se sustenta
-  (`reguaDoPeriodo`); os cartões do Início não levam status de meta. As metas saem da
+  (`reguaDoPeriodo`); os cartões do Início e o resumo da Mídia não levam status de meta. As metas saem da
   calculadora (`calcularMetas`, V·c·m·f·s·a·N, entradas gravadas com a meta); sem
   amostra (< 20 leads ou < 5 agendadas em 8 semanas) ficam "provisórias". Cor de status
   usa os tokens `--status-*` (nunca `--warning`, que colide com o âmbar da marca) —
@@ -480,7 +458,7 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   live, `alertasDaLive` (sem as travas de CPL/CPR, que a tela não mostra; com
   `live-sem-campanhas`, que era faixa no painel); no Funil, `alertasDoFunil` (só as travas que
   afetam verba ou CPL — sem as do custo por reunião nem a atribuição, que a tela não mostra —,
-  `lp-sem-dado` e `registro-suspeito`). Trava `config` (meta, orçamento em branco)
+  `lp-sem-dado` e `registro-suspeito`); na Mídia, `alertasDaMidia` (as travas de `kpisDoPeriodo`, a atribuição, `midia-fora-das-linhas` — mais de 25% dos leads de conversão sem conjunto — e `midia-reunioes-so-por-nome` — o link com `{{ad.id}}`; só a Mídia registra os dois). Trava `config` (meta, orçamento em branco)
   NÃO entra no ⚠ (`alertasDeConfianca`): mora em Configurações → Pendências (`assessTrust` não
   muda). Não crie faixa de aviso no meio da tela — o que desqualifica um número fica colado
   nele ("—", "≥", "≤") e a explicação vai para o painel.
@@ -558,7 +536,7 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   `utm_campaign`, se configurado). Custos seguem as travas: denominador zero é "—", reunião
   abaixo de `MIN_REUNIOES` é fato. Verba é da linha inteira até hoje; o resto é do período.
   Resumo do ClickUp = `resumoSemanalDaLive`.
-- **Criativos da live** (`lib/criativos-live.ts`, na Mídia): sinal é SUGESTÃO (nada é pausado no
+- **Criativos da live** (`lib/criativos-live.ts`, na Mídia) — recolhido em "Criativos da live 01/12", com o mesmo conteúdo; o recorte decide pela CHAVE do período: período livre (e os atalhos da live) recorta; 7/14/30/90 dias ou Campanha mostram a campanha da live até hoje (o mesmo seletor aceso nunca dá dois conteúdos); na verba, a live é UMA linha, fora do destaque: sinal é SUGESTÃO (nada é pausado no
   Meta): cedo demais até 5 dias E R$ 60; pausar acima de 2× a média dos julgáveis; o de carro só
   a partir de `carro.julgarDesde`, contra os de imóvel da mesma semana. Nomes das campanhas,
   conjuntos e anúncios = trechos editáveis (proposta `[LIVE] …`, `Carro`, `C9`, `C4A/C4B`).
@@ -567,8 +545,7 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   ou "vai pensar" — FATO da ficha (`resultado_reuniao`), não status novo; vendeu continua "Cliente"
   com valor. "Vendas" do painel da live = o digitado, senão os clientes da ficha (um número só nos textos).
   Os textos das tarefas (E3-13, E3-07, E4-05, E5-08, E5-05) saem de `relatoriosDaLive`.
-- **Conferência com o Gerenciador** (`lib/conferencia.ts`, tabela `conferencias_gasto`, 0022): o
-  servidor recalcula o gasto do período (o número do card de Investimento); até 5% é verde.
+- **Conferência com o Gerenciador** (`lib/conferencia.ts` + `lib/conferencia-periodo.ts`, tabela `conferencias_gasto`, 0022): mora em Configurações → Integrações (`#conferir-gasto`, com o período do link, visível para todos os papéis; o campo só com `data:write`); a Mídia só linka ("Conferir com o Gerenciador →"). O servidor recalcula o gasto TOTAL do período (`gastoDoPeriodoParaConferir`, o "Investimento total" do ⓘ do resumo da Mídia); até 5% é verde.
 
 ## Rodar / validar
 

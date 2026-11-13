@@ -1,18 +1,33 @@
 /**
- * Fase 5 — motor de ações v2 (dormente até a Mídia da Fase 4), a landing page no
+ * Fase 5 — motor de ações v2 (dormente), a landing page no
  * período (o gargalo saiu na Fase 3 de nov/26: a resposta do Funil é `ondeTrava`) e
- * semanas; o placar e a série semanal saíram com o Início (Fase 2, nov/26). Fixture
- * sintética (nenhum dado real). Datas em UTC; Brasília = UTC−3.
+ * semanas; o placar e a série semanal saíram com o Início (Fase 2, nov/26). Desde a
+ * Fase 4 (Mídia), M3, M4 (criativo), M6, M8 e M9 leem o MESMO `criativosComSinal` do
+ * cartão da Mídia, montado uma vez por rodada. Fixture sintética (nenhum dado real).
+ * Datas em UTC; Brasília = UTC−3.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { kpisDoPeriodo } from "../kpis";
 import { alertasDoInicio, montarBussola } from "../bussola";
-import { motorDeAcoes, resumoDasAcoes, semanaDaAcao, type Acao } from "../motor";
+import { AMOSTRA_MIN, CONTATO_INVALIDO_MAX, motorDeAcoes, resumoDasAcoes, semanaDaAcao, type Acao, type EntradaMotor } from "../motor";
+import { ancoraDoConjunto, ancoraDoCriativo, criativosComSinal, conjuntosPorId } from "../midia";
+import type { LinhaCriativo } from "../midia-tela";
+import { AMOSTRA_DE_PESSOAS, REGUA_DO_SINAL } from "../sinal-do-criativo";
 import { alertaLpSemDado } from "../alertas";
 import { lpParouNoPeriodo, temLpNoPeriodo } from "../metrics";
 import { diasDoPeriodo, janelaAnterior, segundaDaSemana, semanaAnteriorFechada, ultimasSemanas } from "../semana";
 import { buildBriefing } from "../ai/briefing";
+import type { RoboAgora } from "../robo/situacao";
 import type { AcaoEstado, AdDaily, Creative, DashboardData, Lead, LeadEvent, LpDaily, Meta } from "../types";
+import { IDS, comLive, pessoa, producaoSemana, type SemanaDaMidia } from "@/test/fixtures-midia";
+import { entradaDosSinaisDa, midiaDa } from "@/test/entrada-midia";
+
+// O motor monta os criativos com sinal UMA vez por rodada (K29): o espião conta as chamadas
+// sem mudar o que a função faz.
+vi.mock("../midia", async (orig) => {
+  const m = await orig<typeof import("../midia")>();
+  return { ...m, criativosComSinal: vi.fn(m.criativosComSinal) };
+});
 
 // ---------------------------------------------------------------- fixtures
 
@@ -110,6 +125,26 @@ const rodar = (data: DashboardData, opts: Partial<Parameters<typeof motorDeAcoes
   motorDeAcoes({ data, range, kpis: kpisDe(data, range), eventos: [], agora: AGORA, hoje: HOJE, ...opts });
 
 const regra = (acoes: Acao[], id: string) => acoes.find((a) => a.regra === id);
+
+/** A linha de criativo COM o sinal, montada como o motor a monta (a MESMA `criativosComSinal`, a do cartão da Mídia). */
+function linhaDoSinal(data: DashboardData, chave: string, o: Partial<EntradaMotor> = {}, range: { from: string; to: string } | undefined = SEMANA): LinhaCriativo {
+  const e: EntradaMotor = { data, range, kpis: kpisDe(data, range), eventos: [], agora: AGORA, hoje: HOJE, ...o };
+  const { bloco } = criativosComSinal({
+    data: e.data,
+    range: e.range,
+    kpis: e.kpis,
+    eventos: e.eventos,
+    robo: e.robo,
+    cobertura: e.cobertura ?? [],
+    ultimoSyncAds: e.ultimoSyncAds ?? null,
+    ...(e.cfgLive ? { cfgLive: e.cfgLive } : {}),
+    hoje: e.hoje,
+    agora: e.agora,
+  });
+  const linha = bloco.conversao.find((l) => l.chave === chave);
+  if (!linha) throw new Error(`sem a linha de criativo ${chave}`);
+  return linha;
+}
 
 // ---------------------------------------------------------------- semanas
 
@@ -325,7 +360,7 @@ describe("motor v2 — cada regra dispara pelo seu gatilho, com dono e amostra",
     expect(regra(rodar(duas), "M2")).toBeUndefined();
   });
 
-  it("M3: criativo fadigado (CTR caindo + CPL subindo) — renove ou pause", () => {
+  it("M3: Trocar arte por fadiga (CTR caindo + CPL subindo) — o MESMO sinal do cartão da Mídia", () => {
     // Regra da Fase 6.3 (S13/B17): duas janelas de 7 dias terminando no fim do
     // período — CTR 10% → 5% (≤ 75%) e CPL R$ 10 → R$ 25 (≥ 120%), ≥ 1.000
     // impressões em cada janela.
@@ -337,10 +372,17 @@ describe("motor v2 — cada regra dispara pelo seu gatilho, com dono e amostra",
     }
     const data = base({ adDaily: rows });
     const m3 = regra(rodar(data), "M3")!;
+    // Sem `creativeId` na fixture, a chave do criativo é o `adId`.
     expect(m3.id).toBe("M3:100001");
-    expect(m3.titulo).toMatch(/Renove a arte de “Anúncio A”/);
-    // O CPL da janela é o do Pixel (AdDaily.leads) e o motivo diz isso (Fase 6.3).
-    expect(m3.detalhe).toMatch(/CTR 5,0% vs 10,0% nos 7 d anteriores \(≤ 75%\) e CPL Meta \(Pixel\) 7 d R\$ 25,00 vs R\$ 10,00/);
+    const linha = linhaDoSinal(data, "100001");
+    expect(linha.sinal).toMatchObject({ sinal: "trocar-arte", causa: "fadiga" });
+    expect(m3.titulo).toBe(`Renove a arte de “Anúncio A”: ${linha.sinal!.motivo}`);
+    expect(m3.detalhe).toBe(linha.sinal!.dica);
+    expect(m3.amostra).toEqual(linha.sinal!.amostra);
+    expect(m3.amostra).toEqual({ n: 7000, minimo: 1000 });
+    expect(m3.href).toBe("/midia#criativos");
+    // O motivo cita a queda do CTR e o CPL do Pixel (nunca "CPL 7 d" cru).
+    expect(linha.sinal!.motivo).toBe("CTR 5,0% contra 10,0%; CPL Meta (Pixel) subiu");
   });
 
   it("M4: conjunto com mais de 25% de contatos inválidos em 10 leads ou mais", () => {
@@ -349,10 +391,14 @@ describe("motor v2 — cada regra dispara pelo seu gatilho, com dono e amostra",
       ...leadsEncerrados(8, "2026-10-05"),
     ];
     const data = base({ adDaily: [ad("2026-10-05", "100001", 100)], leads });
-    const m4 = regra(rodar(data), "M4")!;
+    const acoes = rodar(data);
+    const m4 = regra(acoes, "M4")!;
     // A linha é a de /midia#conjuntos: "campanha › conjunto" (por id, S20).
     expect(m4.titulo).toMatch(/Conjunto “Campanha › Conjunto A”: 33% de contatos inválidos — revisar formulário e segmentação/);
     expect(m4.amostra).toEqual({ n: 12, minimo: 10 });
+    // O criativo único roda só neste conjunto, que já disparou: a M4 por criativo não repete.
+    const linha = conjuntosPorId(data, SEMANA).conversao.flatMap((c) => c.conjuntos ?? [])[0];
+    expect(acoes.filter((a) => a.regra === "M4").map((a) => a.id)).toEqual([`M4:${linha.chave}`]);
   });
 
   it("M5: mais de 30% da verba em descoberta sem meta de seguidores ou alcance", () => {
@@ -365,11 +411,16 @@ describe("motor v2 — cada regra dispara pelo seu gatilho, com dono e amostra",
     expect(regra(rodar(comMeta), "M5")).toBeUndefined();
   });
 
-  it("M6 (além do relatório): escalar o vencedor só com 3 reuniões e sem fadiga; M7: verba fora do ritmo", () => {
+  it("M6 (além do relatório): Escalar = 3 reuniões por id a custo ≤ o da conta e sem fadiga — o sinal do cartão; M7: verba fora do ritmo", () => {
     const tres = Array.from({ length: 3 }, () => lead("2026-10-05", { status: "agendado", bookedAt: "2026-10-06T12:00:00.000Z", meetingFor: "2026-11-01T12:00:00.000Z" }));
     const data = base({ adDaily: [ad("2026-10-05", "100001", 2000)], leads: tres, metas: [meta("investimento_conversao", 1000)] });
     const acoes = rodar(data);
     expect(regra(acoes, "M6")).toMatchObject({ severidade: "baixa", id: "M6:100001" });
+    const linha = linhaDoSinal(data, "100001");
+    expect(linha.sinal).toMatchObject({ sinal: "escalar", causa: "reunioes" });
+    expect(regra(acoes, "M6")!.titulo).toBe(`Escale “Anúncio A”: ${linha.sinal!.motivo}`);
+    expect(regra(acoes, "M6")!.detalhe).toContain("Aumente o orçamento 10–20% e observe 48–72 h.");
+    expect(regra(acoes, "M6")!.amostra).toEqual({ n: 3, minimo: 3 });
     expect(regra(acoes, "M7")?.titulo).toMatch(/Verba de conversão acima do ritmo: R\$\s2\.000 contra R\$\s1\.000 previstos \(200%\)/);
   });
 
@@ -411,6 +462,211 @@ describe("motor v2 — cada regra dispara pelo seu gatilho, com dono e amostra",
       expect(regra(acoes, "G1")).toBeUndefined();
       expect(acoes.some((a) => a.href === "/configuracoes#metas")).toBe(false);
     }
+  });
+});
+
+// ---------------------------------------------------------------- Fase 4: o motor lê o sinal do cartão
+
+/**
+ * Dois criativos de conversão no MESMO conjunto, em 05/10: A (R$ 400, 20 leads) e B
+ * (`gastoB`, `leadsB`). A média dos criativos = (400 + gastoB) ÷ (20 + leadsB).
+ */
+let seqFone = 0;
+/** Os leads com telefone utilizável (sem ele, a trava "sem telefone ou WhatsApp" do candidato pega, K4). */
+const comFone = (leads: Lead[]) => leads.map((l) => ({ ...l, phone: `5511986${String(++seqFone).padStart(6, "0")}` }));
+
+function doisCriativos(gastoB: number, leadsB: number, extra: Partial<DashboardData> = {}): DashboardData {
+  return base({
+    adDaily: [ad("2026-10-05", "100001", 400), ad("2026-10-05", "100002", gastoB)],
+    creatives: [criativo("100001", "Anúncio A"), criativo("100002", "Anúncio B")],
+    leads: [...comFone(leadsEncerrados(20, "2026-10-05")), ...comFone(leadsEncerrados(leadsB, "2026-10-05", { utmContent: "Anúncio B|100002" }))],
+    ...extra,
+  });
+}
+
+describe("Fase 4: M8 (pausar) e M9 (candidato) — o MESMO sinal do cartão da Mídia", () => {
+  it("M8 sem resultado: 0 lead com gasto que rendia 3+ leads na média → Pause, com o motivo e a régua do sinal", () => {
+    const data = doisCriativos(300, 0);
+    const acoes = rodar(data);
+    const m8 = acoes.find((a) => a.id === "M8:100002");
+    expect(m8, "M8 do Anúncio B").toBeDefined();
+    const linha = linhaDoSinal(data, "100002");
+    expect(linha.sinal).toMatchObject({ sinal: "pausar", causa: "sem-resultado" });
+    expect(m8).toMatchObject({ regra: "M8", dono: "MKT", severidade: "alta", href: "/midia#criativos", semImpacto: "estimativa indisponível" });
+    expect(m8!.titulo).toBe(`Pause “Anúncio B”: ${linha.sinal!.motivo}`);
+    expect(m8!.detalhe.startsWith(linha.sinal!.dica.replace(/\.$/, ""))).toBe(true);
+    expect(m8!.detalhe.endsWith("Pause no Ads Manager e suba uma variação.")).toBe(true);
+    expect(m8!.amostra).toEqual(linha.sinal!.amostra);
+  });
+
+  it("M8 caro com 1 lead só acima de λ 4,75 (a chance de Poisson, K1); com 3+ leads, o CPL ≥ 2× a média", () => {
+    // λ = 200 ÷ (600 ÷ 21) = 7: pausa. λ = 100 ÷ (500 ÷ 21) = 4,2: não.
+    expect(rodar(doisCriativos(200, 1)).some((a) => a.id === "M8:100002")).toBe(true);
+    expect(linhaDoSinal(doisCriativos(200, 1), "100002").sinal).toMatchObject({ sinal: "pausar", causa: "caro" });
+    expect(rodar(doisCriativos(100, 1)).some((a) => a.regra === "M8")).toBe(false);
+    // 3 leads a R$ 200 contra a média de R$ 43,48.
+    const tres = doisCriativos(600, 3);
+    const m8 = rodar(tres).find((a) => a.id === "M8:100002")!;
+    expect(m8).toBeDefined();
+    expect(m8.titulo).toBe(`Pause “Anúncio B”: ${linhaDoSinal(tres, "100002").sinal!.motivo}`);
+    expect(m8.titulo).toMatch(/: CPL R\$\s200 · 4,6× a média$/);
+  });
+
+  it("um criativo que PAROU nunca gera M8 (fora do ar não recebe sinal)", () => {
+    // B gastou R$ 300 sem lead em 02/10 e parou; A segue até 08/10 (o "no ar" é 06–08/10, com o sync cobrindo).
+    const data = base({
+      adDaily: [ad("2026-10-02", "100002", 300), ad("2026-10-05", "100001", 200), ad("2026-10-08", "100001", 200)],
+      creatives: [criativo("100001", "Anúncio A"), criativo("100002", "Anúncio B")],
+      leads: leadsEncerrados(20, "2026-10-05"),
+    });
+    const linha = linhaDoSinal(data, "100002", { cobertura: COBERTURA });
+    expect(linha.veiculacao.estado).toBe("parou");
+    expect(linha.sinal).toBeNull();
+    expect(rodar(data, { cobertura: COBERTURA }).some((a) => a.regra === "M8")).toBe(false);
+  });
+
+  it("M9: o candidato da D9 — só 1 (a menor razão), com a ressalva literal, confiança média", () => {
+    const data = doisCriativos(300, 0);
+    const linha = linhaDoSinal(data, "100001");
+    expect(linha.sinal).toMatchObject({ sinal: "candidato", causa: "cpl-d9", ressalva: "sinal de topo de funil, ainda sem reunião" });
+    const m9 = rodar(data).filter((a) => a.regra === "M9");
+    expect(m9).toHaveLength(1);
+    expect(m9[0]).toMatchObject({
+      id: "M9:100001",
+      severidade: "baixa",
+      confianca: "media",
+      confiancaMotivo: "sinal de topo de funil, ainda sem reunião",
+      href: "/midia#criativos",
+      titulo: "Candidato a escalar: “Anúncio A” (sinal de topo de funil, ainda sem reunião)",
+    });
+    expect(m9[0].detalhe).toContain("Suba 10–20% e observe 48–72 h; decide com 3 reuniões.");
+    expect(m9[0].detalhe.startsWith(linha.sinal!.motivo)).toBe(true);
+    expect(m9[0].amostra).toEqual({ n: 20, minimo: 10 });
+  });
+
+  it("M4 por criativo (K9): `M4:cr:<chave>` com os números da linha; nunca M9 e M4:cr para a mesma chave", () => {
+    // A e B no MESMO conjunto: A com 4 de 12 contatos inválidos (33%); B com 30 leads limpos.
+    // O conjunto (4 de 42 = 10%) não dispara: a M4 aparece pelo criativo.
+    const invalidos = Array.from({ length: 4 }, () => lead("2026-10-05", { status: "contato_invalido", lostAt: "2026-10-05T18:00:00.000Z" }));
+    const data = base({
+      adDaily: [ad("2026-10-05", "100001", 300), ad("2026-10-05", "100002", 600)],
+      creatives: [criativo("100001", "Anúncio A"), criativo("100002", "Anúncio B")],
+      leads: [...invalidos, ...leadsEncerrados(8, "2026-10-05"), ...leadsEncerrados(30, "2026-10-05", { utmContent: "Anúncio B|100002" })],
+    });
+    const acoes = rodar(data);
+    const m4 = acoes.filter((a) => a.regra === "M4");
+    expect(m4.map((a) => a.id)).toEqual(["M4:cr:100001"]);
+    const linha = linhaDoSinal(data, "100001");
+    expect(linha.leadsPainel).toBe(12);
+    expect(linha.contatoInvalido).toBe(4);
+    expect(linha.pctContatoInvalido).toBeCloseTo(1 / 3, 6);
+    expect(m4[0].titulo).toBe("Criativo “Anúncio A”: 33% de contatos inválidos — revisar formulário e segmentação");
+    expect(m4[0]).toMatchObject({ href: "/midia#criativos-tabela", amostra: { n: 12, minimo: AMOSTRA_MIN.M4 } });
+    // A trava de contato do cartão é o MESMO corte: A não é candidato (nem M9).
+    expect(linha.sinal?.sinal).not.toBe("candidato");
+    const m9 = new Set(acoes.filter((a) => a.regra === "M9").map((a) => a.id.slice(3)));
+    for (const a of m4) expect(m9.has(a.id.replace(/^M4:cr:/, ""))).toBe(false);
+  });
+
+  it("uma régua só (K9): o corte e a amostra da M4 são os da trava do cartão", () => {
+    expect(CONTATO_INVALIDO_MAX).toBe(REGUA_DO_SINAL.contatoInvalidoMax);
+    expect(AMOSTRA_MIN.M4).toBe(AMOSTRA_DE_PESSOAS);
+  });
+
+  it("`criativosComSinal` é montado UMA vez por rodada (K29)", () => {
+    const data = doisCriativos(300, 0);
+    const espiao = vi.mocked(criativosComSinal);
+    espiao.mockClear();
+    rodar(data);
+    expect(espiao).toHaveBeenCalledTimes(1);
+    espiao.mockClear();
+    rodar(base());
+    expect(espiao.mock.calls.length).toBeLessThanOrEqual(1);
+  });
+});
+
+describe("Fase 4: M3 e M8 pela resposta ao robô; M9 pelo robô (nov/26)", () => {
+  const HOJE_R = "2026-11-10";
+  const AGORA_R = brt(HOJE_R, "15:00");
+  const SEMANA_R = { from: "2026-11-04", to: HOJE_R };
+  const LIDO_R = brt(HOJE_R, "14:55");
+  const ROBO_R: RoboAgora = { ligado: true, lidoAte: LIDO_R, confiavel: true, sync: { ultimoOk: LIDO_R, falha: null } };
+  let tel = 0;
+  /** Um lead de 05/11 do anúncio `adId` que o robô saudou (e que respondeu, ou não). */
+  const doRobo = (adId: string, nome: string, respondeu: boolean): Lead =>
+    lead(brt("2026-11-05", "10:00"), {
+      utmContent: `${nome}|${adId}`,
+      phone: `5511987${String(++tel).padStart(6, "0")}`,
+      status: "sem_interesse",
+      lostAt: brt("2026-11-06", "10:00"),
+      roboVistoEm: brt("2026-11-05", "10:03"),
+      roboRecebidoEm: brt("2026-11-05", "10:01"),
+      roboSaudacaoEm: brt("2026-11-05", "10:02"),
+      roboEtapa: respondeu ? "em_conversa" : "nao_respondeu",
+      ...(respondeu
+        ? { roboRespondeuEm: brt("2026-11-05", "10:20"), roboUltimaMsgClienteEm: brt("2026-11-05", "10:40"), roboUltimaInteracaoEm: brt("2026-11-05", "10:41") }
+        : {}),
+    });
+  /** A (sem telefone: fora do robô) e B (com o robô), os dois em 09/11. */
+  const semana = (a: { gasto: number; leads: Lead[] }, b: { gasto: number; leads: Lead[] }) =>
+    base({
+      adDaily: [ad("2026-11-09", "100001", a.gasto), ad("2026-11-09", "100002", b.gasto)],
+      creatives: [criativo("100001", "Anúncio A"), criativo("100002", "Anúncio B")],
+      leads: [...a.leads, ...b.leads],
+    });
+  const semFone = (n: number) => Array.from({ length: n }, () => lead(brt("2026-11-05", "11:00"), { status: "sem_interesse", lostAt: brt("2026-11-06", "10:00") }));
+  /** O sync cobriu o período (nenhum dia "sem dados": sem piso, o candidato pode existir). */
+  const COB_R = [{ from: "2026-10-01", to: HOJE_R }];
+  const kpisR = (data: DashboardData) => kpisDoPeriodo(data, SEMANA_R, { hoje: HOJE_R, agora: AGORA_R, cobertura: COB_R });
+  const motorR = (data: DashboardData) =>
+    motorDeAcoes({ data, range: SEMANA_R, kpis: kpisR(data), eventos: [], agora: AGORA_R, hoje: HOJE_R, robo: ROBO_R, cobertura: COB_R });
+  const sinalR = (data: DashboardData, chave: string) =>
+    criativosComSinal({
+      data,
+      range: SEMANA_R,
+      kpis: kpisR(data),
+      eventos: [],
+      robo: ROBO_R,
+      cobertura: COB_R,
+      ultimoSyncAds: null,
+      hoje: HOJE_R,
+      agora: AGORA_R,
+    }).bloco.conversao.find((l) => l.chave === chave)!.sinal!;
+
+  it("M8 caro + não responde: CPL acima da média e 0 de 12 maduros responderam → Pause (amostra = os maduros)", () => {
+    // Média = R$ 1.000 ÷ 32 = R$ 31,25; B: R$ 600 e 12 leads (CPL R$ 50, 1,6×), ninguém respondeu.
+    const data = semana({ gasto: 400, leads: semFone(20) }, { gasto: 600, leads: Array.from({ length: 12 }, () => doRobo("100002", "Anúncio B", false)) });
+    const s = sinalR(data, "100002");
+    expect(s).toMatchObject({ sinal: "pausar", causa: "qualidade", motivo: "caro e 0 de 12 responderam ao robô" });
+    const m8 = motorR(data).find((a) => a.id === "M8:100002")!;
+    expect(m8).toBeDefined();
+    expect(m8.titulo).toBe(`Pause “Anúncio B”: ${s.motivo}`);
+    expect(m8.amostra).toEqual({ n: 12, minimo: 10 });
+  });
+
+  it("M3 pela qualidade: barato e não responde → Renove a arte (não pause)", () => {
+    // Média = R$ 1.000 ÷ 32; B: R$ 300 e 12 leads (CPL R$ 25, 0,8×), ninguém respondeu.
+    const data = semana({ gasto: 700, leads: semFone(20) }, { gasto: 300, leads: Array.from({ length: 12 }, () => doRobo("100002", "Anúncio B", false)) });
+    const s = sinalR(data, "100002");
+    expect(s).toMatchObject({ sinal: "trocar-arte", causa: "qualidade", motivo: "barato, mas 0 de 12 responderam ao robô" });
+    const acoes = motorR(data);
+    const m3 = acoes.find((a) => a.id === "M3:100002")!;
+    expect(m3).toBeDefined();
+    expect(m3.titulo).toBe(`Renove a arte de “Anúncio B”: ${s.motivo}`);
+    expect(m3.amostra).toEqual({ n: 12, minimo: 10 });
+    expect(acoes.some((a) => a.id === "M8:100002")).toBe(false);
+  });
+
+  it("M9 pelo robô: metade ou mais responde e CPL até a média → 'responde ao robô, ainda sem reunião'", () => {
+    // Média = R$ 1.000 ÷ 32; A: R$ 300 e 12 leads (CPL R$ 25, 0,8×), 8 de 12 responderam.
+    const leadsA = Array.from({ length: 12 }, (_, i) => doRobo("100001", "Anúncio A", i < 8));
+    const data = semana({ gasto: 300, leads: leadsA }, { gasto: 700, leads: semFone(20).map((l) => ({ ...l, utmContent: "Anúncio B|100002" })) });
+    const s = sinalR(data, "100001");
+    expect(s).toMatchObject({ sinal: "candidato", causa: "cpl-robo", ressalva: "responde ao robô, ainda sem reunião" });
+    const m9 = motorR(data).filter((a) => a.regra === "M9");
+    expect(m9.map((a) => a.id)).toEqual(["M9:100001"]);
+    expect(m9[0].titulo).toBe("Candidato a escalar: “Anúncio A” (responde ao robô, ainda sem reunião)");
+    expect(m9[0].confiancaMotivo).toBe("responde ao robô, ainda sem reunião");
   });
 });
 
@@ -520,5 +776,72 @@ describe("o briefing da IA: o Início no lugar do placar, sem as ações do moto
     // A frase do atendimento é a da tela (o mesmo grupo da Fila): o lead das 09:00 espera o 1º contato.
     expect(briefing.inicio?.atendimento.frases).toEqual(inicio.atendimento.frases.map((f) => f.texto));
     expect(briefing.inicio?.atendimento.frases[0]).toMatch(/^Novos — ligar agora · 1/);
+  });
+});
+
+// ---------------------------------------------------------------- o link da ação vai aonde a linha MORA (corretor final)
+
+describe("Fase 4: o href das ações de mídia é a âncora onde a linha está na página (Detalhes, Pausados, a live, os cartões)", () => {
+  /** A entrada do motor sobre uma semana das fixtures da Mídia (a MESMA conta da página). */
+  const entradaDoMotor = (p: SemanaDaMidia): EntradaMotor => {
+    const e = entradaDosSinaisDa(p);
+    return { data: e.data, range: e.range, kpis: e.kpis, eventos: [...e.eventos], robo: e.robo, cobertura: e.cobertura, ultimoSyncAds: e.ultimoSyncAds, cfgLive: e.cfgLive, agora: e.agora, hoje: e.hoje };
+  };
+  /** `n` leads do anúncio `adId` no dia `dia`, os `invalidos` primeiros com "Contato inválido". */
+  const leadsDoAnuncio = (adId: string, dia: string, n: number, invalidos: number, nn0: number): Lead[] =>
+    Array.from({ length: n }, (_, i) =>
+      pessoa(nn0 + i, brt(dia, "10:00"), {
+        utmSource: "meta",
+        utmMedium: "paid_social",
+        adId,
+        utmContent: adId,
+        ...(i < invalidos ? { status: "contato_invalido" as const, lostAt: brt(dia, "18:00") } : {}),
+      }),
+    );
+
+  it("M4 de um conjunto que PAROU leva a /midia#pausados (é lá que a página o mostra), não a #conjuntos", () => {
+    const p = producaoSemana();
+    // O conjunto Delta (parou em 08/11): 10 leads de 07/11, 4 com contato inválido (40%).
+    p.data.leads = [...p.data.leads, ...leadsDoAnuncio(IDS.anuncio.post6, "2026-11-07", 10, 4, 81)];
+    const acoes = motorDeAcoes(entradaDoMotor(p));
+    const m4 = acoes.filter((a) => a.regra === "M4");
+    const delta = m4.find((a) => a.id.endsWith(`|${IDS.conjunto.delta}`))!;
+    expect(delta).toBeDefined();
+    expect(delta.href).toBe("/midia#pausados");
+    // A página põe a MESMA linha em Pausados (e não em Detalhes).
+    const m = midiaDa(p);
+    const chave = delta.id.replace(/^M4:/, "");
+    expect(m.pausados!.conjuntos.flatMap((c) => c.conjuntos ?? []).some((l) => l.chave === chave)).toBe(true);
+    expect(m.detalhes.conjuntos.conversao.flatMap((c) => c.conjuntos ?? []).some((l) => l.chave === chave)).toBe(false);
+    // O criativo do Delta (os conjuntos dele todos dispararam) não repete a ação.
+    expect(m4.some((a) => a.id === `M4:cr:${IDS.criativo.post6}`)).toBe(false);
+  });
+
+  it("M4 de um criativo da LIVE leva a /midia#criativos-live (a linha `live|…` não está em Detalhes)", () => {
+    const p = comLive();
+    // 10 leads a mais no C4A (a live): o criativo fica com 4 de 15 inválidos (27%); o conjunto, 4 de 18 (22%).
+    p.data.leads = [...p.data.leads, ...leadsDoAnuncio(IDS.anuncio.c4a, "2026-11-18", 10, 4, 91)];
+    const acoes = motorDeAcoes(entradaDoMotor(p));
+    const live = acoes.find((a) => a.id === `M4:cr:live|${IDS.criativo.c4a}`)!;
+    expect(live).toBeDefined();
+    expect(live.href).toBe("/midia#criativos-live");
+    expect(midiaDa(p).detalhes.criativos.conversao.some((l) => l.chave === `live|${IDS.criativo.c4a}`)).toBe(false);
+  });
+
+  it("ancoraDoConjunto e ancoraDoCriativo: no ar → Detalhes (ou o cartão, entre os 5), fora do ar → Pausados, a live → o bloco dela, descoberta → Detalhes", () => {
+    const v = (estado: "no-ar" | "parou" | "sem-leitura") => ({ estado, ultimoDia: "2026-11-08", rotulo: "" });
+    expect(ancoraDoConjunto({ bucket: "conversao", veiculacao: v("no-ar") })).toBe("#conjuntos");
+    expect(ancoraDoConjunto({ bucket: "conversao", veiculacao: v("parou") })).toBe("#pausados");
+    expect(ancoraDoConjunto({ bucket: "conversao", veiculacao: v("sem-leitura") })).toBe("#pausados");
+    expect(ancoraDoConjunto({ bucket: "descoberta", veiculacao: v("no-ar") })).toBe("#detalhes");
+    // Cinco "Pausar" na frente: o candidato fica fora dos cartões (só em "Ver todos").
+    const linha = (chave: string, sinal: "pausar" | "candidato", spend: number) =>
+      ({ chave, daLive: false, veiculacao: v("no-ar"), spend, sinal: { sinal } }) as unknown as LinhaCriativo;
+    const conversao = [...Array.from({ length: 5 }, (_, i) => linha(`p${i}`, "pausar", 100 + i)), linha("cand", "candidato", 500)];
+    expect(ancoraDoCriativo(conversao[5], conversao, { cartao: true })).toBe("#criativos-tabela");
+    expect(ancoraDoCriativo(conversao[0], conversao, { cartao: true })).toBe("#criativos");
+    expect(ancoraDoCriativo(conversao[0], conversao)).toBe("#criativos-tabela");
+    expect(ancoraDoCriativo({ chave: "x", daLive: false, veiculacao: v("parou") }, conversao, { cartao: true })).toBe("#pausados");
+    expect(ancoraDoCriativo({ chave: "live|x", daLive: true, veiculacao: v("no-ar") }, conversao, { cartao: true })).toBe("#criativos-live");
   });
 });

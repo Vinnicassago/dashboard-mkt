@@ -26,6 +26,11 @@
  * runtime — K29: `cascata` puxa `kpis`; aqui só os TIPOS deles). O objeto só tem
  * contagens e textos (LGPD: vai para o client e para a IA); os ids do trecho do
  * robô saem por `idsDoTrechoDoRobo`, que fica no servidor.
+ *
+ * A Mídia (Fase 4) conta o MESMO trecho POR LINHA (criativo, conjunto) com a MESMA
+ * classificação e os mesmos fatos (`trechoDoRoboPorLinha`, `fatosDoTrecho`): Σ linhas
+ * + sem linha + teste/cópia (por fato) = os degraus do robô daqui. Os tipos
+ * (`ContagemDoTrecho`, `TrechoPorLinha`) moram em `sinal-do-criativo.ts` (só tipo).
  */
 
 import type { Fonte } from "./cascata";
@@ -42,6 +47,7 @@ import { everBooked, filterLeads, isAttended, isBooked, isClient, type DateRange
 import { chaveTelefoneValida } from "./phone";
 import { classeDoLead } from "./qualificacao";
 import {
+  RESGATE_SEM_RESPOSTA_H,
   ROBO_INICIO,
   ROBO_SEM_MSG_MIN,
   encerramentoDoRobo,
@@ -55,6 +61,7 @@ import {
   type RoboAgora,
   type SituacaoRobo,
 } from "./robo/situacao";
+import type { ContagemDoTrecho, TrechoPorLinha } from "./sinal-do-criativo";
 import { MIN_REUNIOES } from "./trust";
 import type { DashboardData, Lead, LeadEvent, LeadStatus } from "./types";
 
@@ -370,6 +377,102 @@ export function idsDoTrechoDoRobo(e: EntradaDoProcesso): ReadonlySet<string> {
   return out;
 }
 
+// ---------------------------------------------------------------- o trecho por linha (Mídia, Fase 4)
+
+/**
+ * Os fatos do trecho do robô de UM lead — o MESMO predicado dos degraus do Funil e
+ * das linhas da Mídia. `aceitou` ⇒ `respondeu` ⇒ `falou`. Sem WhatsApp lê a ETAPA do
+ * episódio (SOBRESCREVE), a mesma regra da junta "robô falou" — nunca o fato UMA VEZ
+ * `roboSemWhatsappEm` (K15): a Mídia e o Funil contam igual.
+ */
+export function fatosDoTrecho(s: SituacaoRobo): { falou: boolean; respondeu: boolean; aceitou: boolean; semWhatsapp: boolean } {
+  const falou = Boolean(s.falouEm);
+  const respondeu = falou && s.respondeu;
+  const aceitou = respondeu && Boolean(s.aceitouEm);
+  return { falou, respondeu, aceitou, semWhatsapp: s.etapa === "sem_whatsapp" };
+}
+
+const contagemZerada = (): ContagemDoTrecho => ({
+  leads: 0,
+  semTelefoneUtil: 0,
+  fora: foraZerado(),
+  testesECopias: 0,
+  testesECopiasPorFato: { falou: 0, respondeu: 0, aceitou: 0 },
+  noRobo: 0,
+  falou: 0,
+  respondeu: 0,
+  aceitou: 0,
+  semWhatsapp: 0,
+  noPrazo: 0,
+});
+
+/**
+ * O trecho do robô POR LINHA (criativo ou conjunto, pela `chaveDe` do lead) — a
+ * classificação ÚNICA (`classificar`) e os fatos ÚNICOS (`fatosDoTrecho`) do Funil,
+ * numa passada pela coorte. SEMPRE conta `leads` e `semTelefoneUtil` (com ou sem o
+ * robô, K14: = "Leads (painel)" da linha e a trava do candidato); os campos do robô
+ * só com `comRobo`. Teste e cópia de duplicado entram no degrau (como no Funil), mas
+ * ficam fora da qualidade (`testesECopias`, por fato). Só contagens por chave (LGPD):
+ * os ids continuam saindo só por `idsDoTrechoDoRobo`.
+ */
+export function trechoDoRoboPorLinha(
+  e: Pick<EntradaDoProcesso, "data" | "range" | "eventos" | "robo" | "agora">,
+  chaveDe: (l: Lead) => string | null,
+): TrechoPorLinha {
+  const c = classificar(e);
+  const { testes, duplicados } = testesEDuplicados(e.data.leads);
+  const motivoSemRobo: TrechoPorLinha["motivoSemRobo"] = !e.robo?.ligado ? "desligado" : !c.comRobo ? "antes-do-robo" : null;
+  const porLinha = new Map<string, ContagemDoTrecho>();
+  const semLinha = contagemZerada();
+  const degraus = { comRobo: 0, primeiraMsg: 0, responderam: 0, aceitaram: 0 };
+  const refMs = Date.parse(c.ref);
+  for (const l of c.coorte) {
+    const chave = chaveDe(l);
+    let acc = semLinha;
+    if (chave != null) {
+      acc = porLinha.get(chave) ?? contagemZerada();
+      porLinha.set(chave, acc);
+    }
+    acc.leads += 1;
+    if (!chaveTelefoneValida(l.phone)) acc.semTelefoneUtil += 1;
+    if (!c.comRobo) continue;
+    const x = c.porLead.get(l.id);
+    if (!x) continue;
+    if (x.motivo !== "com-robo") {
+      acc.fora[x.motivo] += 1;
+      continue;
+    }
+    const f = fatosDoTrecho(x.s);
+    degraus.comRobo += 1;
+    if (f.falou) degraus.primeiraMsg += 1;
+    if (f.respondeu) degraus.responderam += 1;
+    if (f.aceitou) degraus.aceitaram += 1;
+    if (testes.has(l.id) || duplicados.has(l.id)) {
+      acc.testesECopias += 1;
+      if (f.falou) acc.testesECopiasPorFato.falou += 1;
+      if (f.respondeu) acc.testesECopiasPorFato.respondeu += 1;
+      if (f.aceitou) acc.testesECopiasPorFato.aceitou += 1;
+      continue;
+    }
+    acc.noRobo += 1;
+    if (f.falou) acc.falou += 1;
+    if (f.respondeu) acc.respondeu += 1;
+    if (f.aceitou) acc.aceitou += 1;
+    if (f.semWhatsapp) acc.semWhatsapp += 1;
+    // Ainda nas primeiras 24 h depois da 1ª mensagem (contra a leitura do robô): não conta contra o criativo.
+    if (f.falou && !f.respondeu && Date.parse(x.s.falouEm!) + RESGATE_SEM_RESPOSTA_H * H_MS > refMs) acc.noPrazo += 1;
+  }
+  return {
+    comRobo: c.comRobo,
+    motivoSemRobo,
+    parada: c.parada,
+    leituraParada: linhaDaLeituraParada(c.robo, e.agora),
+    porLinha,
+    semLinha,
+    degraus,
+  };
+}
+
 // ---------------------------------------------------------------- degraus
 
 const DICA_DO_DEGRAU: Record<DegrauId, MetricaId> = {
@@ -575,13 +678,15 @@ export function funilDoProcesso(e: EntradaDoProcesso): FunilDoProcesso {
     const x = c.porLead.get(l.id);
     if (!comRobo || x?.motivo !== "com-robo") continue;
     noRobo += 1;
-    if (!x.s.falouEm) continue;
+    // Os fatos do trecho — a MESMA função das linhas da Mídia (`trechoDoRoboPorLinha`).
+    const f = fatosDoTrecho(x.s);
+    if (!f.falou) continue;
     primeira += 1;
-    if (!x.s.respondeu) continue;
+    if (!f.respondeu) continue;
     responderam += 1;
-    if (!x.s.aceitouEm) continue;
+    if (!f.aceitou) continue;
     aceitaram += 1;
-    if (booked && agendouAposAceite(l, x.s.aceitouEm)) peloConvite += 1;
+    if (booked && agendouAposAceite(l, x.s.aceitouEm!)) peloConvite += 1;
   }
 
   const contagem: Record<DegrauId, number> = {

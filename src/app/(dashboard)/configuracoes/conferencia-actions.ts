@@ -7,11 +7,10 @@ import { can } from "@/lib/auth/guard";
 import { currentActor } from "@/lib/auth/actor";
 import { addConferencia, getData } from "@/lib/data/store";
 import { conferenciaBate, diferencaDoGasto, textoDaDiferenca } from "@/lib/conferencia";
+import { gastoDoPeriodoParaConferir } from "@/lib/conferencia-periodo";
 import { mensagemHumana } from "@/lib/erros";
 import { formatCurrency0 } from "@/lib/format";
-import { kpisDoPeriodo } from "@/lib/kpis";
-import { pageRange } from "@/lib/page-range";
-import { hojeEmBrasilia, isRangeKey } from "@/lib/range";
+import { hojeEmBrasilia } from "@/lib/range";
 import { estadoDaFonte } from "@/lib/sincronizacao";
 
 export interface ResultadoConferencia {
@@ -21,9 +20,11 @@ export interface ResultadoConferencia {
 }
 
 /**
- * Registra a conferência do período com o valor que o Gerenciador mostra. O
- * gasto do painel é RECALCULADO aqui — o mesmo número do card de Investimento da
- * Mídia para esse período —, nunca o que o navegador diz que viu.
+ * Registra a conferência do período com o valor que o Gerenciador mostra
+ * (Configurações → Integrações `#conferir-gasto`). O gasto do painel é RECALCULADO
+ * aqui — o gasto TOTAL do período (`gastoDoPeriodoParaConferir`, o "Investimento
+ * total" do ⓘ do resumo da Mídia) —, nunca o que o navegador diz que viu. A
+ * permissão é conferida no servidor, antes de tudo.
  */
 export async function registrarConferencia(rangeKey: string | undefined, gastoGerenciador: number): Promise<ResultadoConferencia> {
   if (!(await can("data:write"))) return { ok: false, message: "Você não tem permissão para esta ação." };
@@ -33,18 +34,15 @@ export async function registrarConferencia(rangeKey: string | undefined, gastoGe
   try {
     const brand = await activeBrandSlug();
     const data = await getData(brand);
-    const { range } = pageRange(data, rangeKey && isRangeKey(rangeKey) ? rangeKey : undefined);
-    const hoje = hojeEmBrasilia();
-    const de = range?.from ?? data.adDaily[0]?.date ?? data.campaign.startDate ?? hoje;
-    const ate = range?.to ?? hoje;
-    const gastoPainel = kpisDoPeriodo(data, range).investimento.valor;
+    const c = gastoDoPeriodoParaConferir(data, rangeKey, hojeEmBrasilia());
+    const gastoPainel = c.gasto;
     const diferenca = diferencaDoGasto(gastoPainel, gastoGerenciador);
     const sync = await estadoDaFonte("ads", brand);
     await addConferencia({
       id: `CONF-${randomUUID()}`,
       brand,
-      periodoDe: de,
-      periodoAte: ate,
+      periodoDe: c.de,
+      periodoAte: c.ate,
       gastoPainel,
       gastoGerenciador,
       diferenca,
@@ -52,7 +50,7 @@ export async function registrarConferencia(rangeKey: string | undefined, gastoGe
       criadaEm: new Date().toISOString(),
       criadaPor: await currentActor(),
     });
-    revalidatePath("/midia");
+    revalidatePath("/configuracoes/integracoes");
     const bate = conferenciaBate(diferenca);
     return {
       ok: true,
@@ -60,7 +58,7 @@ export async function registrarConferencia(rangeKey: string | undefined, gastoGe
       message: `Painel ${formatCurrency0(gastoPainel)} × Gerenciador ${formatCurrency0(gastoGerenciador)}: ${textoDaDiferenca(diferenca)} — ${bate ? "dentro de 5%" : "acima de 5%, vale conferir o sync e as marcas"}.`,
     };
   } catch (e) {
-    console.error("[midia] conferência:", e);
+    console.error("[configuracoes] conferência:", e);
     return { ok: false, message: mensagemHumana("banco de dados", e) };
   }
 }

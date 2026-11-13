@@ -13,7 +13,13 @@ import type { AtalhoDaLive } from "@/lib/atalho-live";
 import type { Role } from "@/lib/auth/roles";
 import type { BrandDef } from "@/lib/brands";
 import { hasPlaybook } from "@/lib/content/playbook";
-import { PERIODO_PADRAO_DO_INICIO, comPeriodo, type RangeKey } from "@/lib/range";
+import {
+  PERIODO_PADRAO_DA_MIDIA,
+  PERIODO_PADRAO_DO_INICIO,
+  comPeriodo,
+  periodoPadraoDaRota,
+  type RangeKey,
+} from "@/lib/range";
 
 /**
  * A navegação é nomeada pela PERGUNTA que cada página responde — ou pelo dono do
@@ -50,10 +56,10 @@ export interface NavItem {
   /** Vistas dentro da página, em abas no topo do conteúdo. */
   vistas?: NavVista[];
   /**
-   * Período que a página assume sem `?range=` na URL. O Início olha a semana
-   * ("7 dias vs 7 anteriores", `PERIODO_PADRAO_DO_INICIO`); as outras páginas, a
-   * campanha inteira. O seletor lê daqui para marcar o preset certo quando a URL
-   * está limpa.
+   * Período que a página assume sem `?range=` na URL. O Início e a Mídia olham a
+   * semana (`PERIODO_PADRAO_DO_INICIO`, `PERIODO_PADRAO_DA_MIDIA`); as outras
+   * páginas, a campanha inteira. O comportamento sai de `PERIODO_PADRAO_POR_ROTA`
+   * (`lib/range.ts`): este campo o espelha, e o teste trava a igualdade.
    */
   periodoPadrao?: RangeKey;
 }
@@ -82,8 +88,9 @@ export const NAV: NavItem[] = [
     href: "/midia",
     Icon: Megaphone,
     grupo: "Diagnóstico",
-    pergunta: "Onde a verba vira reunião, e o que escalar ou pausar?",
+    pergunta: "O que faço com a verba esta semana?",
     conversaoOnly: true,
+    periodoPadrao: PERIODO_PADRAO_DA_MIDIA,
   },
   {
     label: "Conteúdo",
@@ -160,16 +167,19 @@ export function navItemFromPath(pathname: string): NavItem | undefined {
   return NAV.find((n) => isActive(pathname, n.href));
 }
 
-/** O período de uma página sem `?range=`: o da página, ou a campanha inteira. */
+/**
+ * O período de uma página sem `?range=`: o da página, ou a campanha inteira. Uma
+ * fonte de comportamento só: delega a `periodoPadraoDaRota` (`PERIODO_PADRAO_POR_ROTA`).
+ */
 export function periodoPadraoDe(pathname: string): RangeKey {
-  return navItemFromPath(pathname)?.periodoPadrao ?? "all";
+  return periodoPadraoDaRota(pathname);
 }
 
 /**
  * O link interno com o período que a tela está MOSTRANDO (`rangeAtual`, já com o
  * padrão da página de origem): `comPeriodo` com o padrão do DESTINO — "Campanha"
- * vai explícita para o Início (padrão = a semana), e some do link para as páginas
- * cujo padrão também é a campanha.
+ * vai explícita para o Início e a Mídia (padrão = a semana), e some do link para as
+ * páginas cujo padrão também é a campanha.
  */
 export function comPeriodoDaTela(href: string, rangeAtual: string | null | undefined): string {
   const destino = href.split(/[?#]/)[0] || "/";

@@ -48,6 +48,8 @@ export const VISTA_DA_ANCORA: Record<string, VistaConfig> = {
   integracoes: "integracoes",
   sync: "integracoes",
   robo: "integracoes",
+  // A conferência com o Gerenciador (Fase 4): a Mídia só linka para cá.
+  "conferir-gasto": "integracoes",
   marcas: "marcas",
   usuarios: "usuarios",
   importar: "importar",
