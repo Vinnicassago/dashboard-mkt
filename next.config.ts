@@ -25,7 +25,10 @@ const nextConfig: NextConfig = {
       { source: "/pessoas", destination: "/leads", permanent: false },
       { source: "/pessoas/:path*", destination: "/leads/:path*", permanent: false },
       { source: "/instagram", destination: "/conteudo", permanent: false },
-      { source: "/posts", destination: "/conteudo/posts", permanent: false },
+      // A vista Posts virou a página única do Conteúdo (Fase 5 de nov/26). O Next
+      // repassa a query (`?range=` sobrevive); o `#` fica com o navegador.
+      { source: "/posts", destination: "/conteudo", permanent: false },
+      { source: "/conteudo/posts", destination: "/conteudo", permanent: false },
       { source: "/producao", destination: "/conteudo/producao", permanent: false },
       { source: "/utm", destination: "/configuracoes/ferramentas", permanent: false },
       { source: "/config", destination: "/configuracoes", permanent: false },

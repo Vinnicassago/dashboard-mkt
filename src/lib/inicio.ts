@@ -15,7 +15,8 @@
  *      colunas `robo_*` lidas por `situacaoDoRobo`, nunca o banco do robô) e até
  *      três frases de AGORA, cada uma com o número do grupo da MESMA `montarFila`
  *      da /fila. `ondeTrava` (a manchete do Funil) vai junto só como DADO para a IA;
- *   4. RODAPÉ — Funil, Mídia e o último post da grade (`ultimoPostDaGrade`).
+ *   4. RODAPÉ — Funil, Mídia e o último post da grade (`ultimoPostDaGrade` com
+ *      `textoDoUltimoPost`, o MESMO texto do placar do Conteúdo; link para `/conteudo`).
  *
  * Os links já saem com o período (`comPeriodo`, idempotente: o componente pode
  * aplicá-lo de novo sem efeito). Quem carrega o que vem de fora (store, syncs,
@@ -23,6 +24,7 @@
  */
 
 import { diaCoberto, type Intervalo } from "./cobertura";
+import { textoDoUltimoPost } from "./conteudo-tela";
 import { dica } from "./dicionario";
 import type { Dono } from "./dono";
 import { esperandoOComercial, FILA_ETAPAS, gruposDaFila, montarFila, type FilaEtapa, type FilaResult } from "./fila";
@@ -647,22 +649,20 @@ function atendimentoDoInicio(e: EntradaInicio): AtendimentoDoInicio {
 
 // ---------------------------------------------------------------- 4. rodapé
 
-/** "Último post há 3 dias" / "Último post hoje" / "Nenhum post ainda". */
-export function textoDoUltimoPost(dias: number | null): string {
-  if (dias === null) return "Nenhum post ainda";
-  if (dias === 0) return "Último post hoje";
-  return `Último post há ${formatInt(dias)} ${dias === 1 ? "dia" : "dias"}`;
-}
+/** O texto do último post mora em `conteudo-tela.ts` (o placar do Conteúdo lê o mesmo); daqui, só reexportado. */
+export { textoDoUltimoPost } from "./conteudo-tela";
 
 function rodapeDoInicio(e: EntradaInicio): RodapeDoInicio {
-  // A MESMA conta de Posts e da IA: o último post DA GRADE (sem teste nem impulsionado), histórico inteiro.
+  // A MESMA conta e o MESMO texto do placar do Conteúdo e da IA: o último post DA
+  // GRADE (sem teste nem impulsionado), histórico inteiro (`textoDoUltimoPost`,
+  // de `conteudo-tela.ts`). O link vai à página única do Conteúdo, com o período.
   const dias = ultimoPostDaGrade(e.data.igPosts, e.data.creatives, e.agora);
   return {
     diasDesdeUltimoPost: dias,
     links: [
       { id: "funil", rotulo: "Funil completo", href: comPeriodo("/funil", e.rangeKey) },
       { id: "midia", rotulo: "Verba por criativo", href: comPeriodo("/midia", e.rangeKey) },
-      { id: "posts", rotulo: textoDoUltimoPost(dias), href: comPeriodo("/conteudo/posts", e.rangeKey) },
+      { id: "posts", rotulo: textoDoUltimoPost(dias), href: comPeriodo("/conteudo", e.rangeKey) },
     ],
   };
 }

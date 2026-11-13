@@ -322,20 +322,26 @@ describe("último post: o da grade, no histórico inteiro, em dias de Brasília"
     expect(postingCadence(dois, undefined, agora).maxGapDays).toBe(2);
   });
 
-  it("a cadência conta os MESMOS posts do card 'Posts' (um post às 22h na borda do período)", () => {
-    // 29/10 22h em Brasília = 30/10 01:00 em UTC: o período dos posts é o da tabela (`dayOf`).
+  it("a cadência e o placar contam os MESMOS posts no dia de Brasília (um post às 22h na borda do período)", () => {
+    // Fase 5 de nov/26 (F5-D25): o post é um instante e conta no dia de Brasília em todo
+    // filtro — 29/10 22h em Brasília (30/10 01:00 em UTC) é do dia 29/10: fica FORA.
     const posts = [post("borda", brt("2026-10-29", "22:00")), post("meio", brt("2026-11-02", "10:00"))];
     const periodo = { from: "2026-10-30", to: "2026-11-05" };
     const agora = brt("2026-11-05", "15:00");
     const cur = aggregatePostPerformance(postPerformance(posts, periodo, [], []));
     const cad = postingCadence(posts, periodo, agora, []);
-    expect(cur.count).toBe(2);
+    expect(cur.count).toBe(1);
     expect(cad.count).toBe(cur.count);
-    // E a borda do outro lado: 05/11 22h (06/11 01:00 UTC) fica fora dos dois.
-    const fora = [...posts, post("depois", brt("2026-11-05", "22:00"))];
-    expect(postingCadence(fora, periodo, agora, []).count).toBe(aggregatePostPerformance(postPerformance(fora, periodo, [], [])).count);
-    // Dentro da janela, o dia continua o de Brasília: a borda (29/10) → 02/11 são 4 dias.
-    expect(cad.maxGapDays).toBe(4);
+    // Só o do meio na janela: nenhum intervalo.
+    expect(cad.maxGapDays).toBe(0);
+    // E a borda do outro lado: 05/11 22h (06/11 01:00 UTC) é do dia 05/11: fica DENTRO dos dois.
+    const dentro = [...posts, post("depois", brt("2026-11-05", "22:00"))];
+    const curDentro = aggregatePostPerformance(postPerformance(dentro, periodo, [], []));
+    const cadDentro = postingCadence(dentro, periodo, agora, []);
+    expect(curDentro.count).toBe(2);
+    expect(cadDentro.count).toBe(curDentro.count);
+    // O intervalo também em Brasília: 02/11 → 05/11 são 3 dias.
+    expect(cadDentro.maxGapDays).toBe(3);
   });
 
   it("recomendação 'a grade parou': nunca houve post não dispara; 5 dias sem post dispara alta", () => {

@@ -230,7 +230,7 @@ export default async function MetasPage({ searchParams }: { searchParams: Promis
                 Metas de conteúdo
                 <Info
                   rotulo="Sobre as metas de conteúdo"
-                  texto="Seguidores e o plano de 90 dias do diagnóstico (retenção 40%, salvos/1k 8+, 4 posts/semana…) — lidas pela tela Conteúdo."
+                  texto="Seguidores e o plano de 90 dias do diagnóstico (retenção 40%, salvos/1k 8+, 4 posts/semana…). O resumo da IA lê todas; a meta de seguidores também aparece no Início da marca de seguidores. A tela Conteúdo não mostra status contra elas."
                 />
               </CardTitle>
             </CardHeader>

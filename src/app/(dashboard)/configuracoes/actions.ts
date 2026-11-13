@@ -17,7 +17,6 @@ import {
   setState,
   upsertAdDaily,
   upsertGoal,
-  upsertIgAccountDaily,
   upsertIgPosts,
 } from "@/lib/data/store";
 import { STATE_KEYS } from "@/lib/data/backend";
@@ -63,11 +62,6 @@ const SEM_CONFIRMACAO: ActionState = {
 export interface ActionState {
   ok: boolean;
   message: string;
-}
-
-function num(formData: FormData, key: string): number {
-  const v = Number(formData.get(key));
-  return Number.isFinite(v) ? v : 0;
 }
 
 function revalidateAll() {
@@ -161,114 +155,29 @@ export async function importLeadsCsv(
   }
 }
 
-export async function addManualIgDay(
-  _prev: ActionState | null,
-  formData: FormData,
-): Promise<ActionState> {
-  if (!(await can("data:write"))) return DENIED;
-  const date = String(formData.get("date") ?? "").trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    return { ok: false, message: "Informe uma data válida." };
-  }
-  await upsertIgAccountDaily([
-    {
-      brand: await activeBrandSlug(),
-      date,
-      followers: num(formData, "followers"),
-      reach: num(formData, "reach"),
-      views: num(formData, "views"),
-      profileLinkTaps: num(formData, "profileLinkTaps"),
-      accountsEngaged: num(formData, "accountsEngaged"),
-      totalInteractions: num(formData, "totalInteractions"),
-      profileViews: num(formData, "profileViews"),
-    },
-  ]);
-  revalidateAll();
-  return { ok: true, message: `Snapshot de ${date} salvo.` };
-}
-
-/**
- * Registra as conversas de DM iniciadas num dia (métrica de negócio — a API do
- * Instagram não expõe DMs). Faz MERGE no snapshot existente do dia; sem
- * snapshot, orienta a criar um primeiro (uma linha só com DMs zeraria
- * seguidores/alcance do dia e sujaria as séries).
- */
-export async function setDmConversationsAction(
-  _prev: ActionState | null,
-  formData: FormData,
-): Promise<ActionState> {
-  if (!(await can("data:write"))) return DENIED;
-  const date = String(formData.get("date") ?? "").trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    return { ok: false, message: "Informe uma data válida." };
-  }
-  const count = num(formData, "dmConversations");
-  const brand = await activeBrandSlug();
-  const data = await getData(brand);
-  const row = data.igAccountDaily.find((r) => r.date === date);
-  if (!row) {
-    return {
-      ok: false,
-      message: `Sem snapshot do Instagram em ${date}. Registre o snapshot do dia (ou rode a sincronização) e tente de novo.`,
-    };
-  }
-  await upsertIgAccountDaily([{ ...row, dmConversations: count }]);
-  revalidateAll();
-  return { ok: true, message: `${count} conversa(s) registrada(s) em ${date}.` };
-}
-
-/**
- * Registra a rotina diária de presença do guia (stories, comentários no nicho,
- * contas seguidas, "respondi tudo"). Nada disso vem da API — é o trabalho manual
- * de aquecer a base, e sem registro não há como cobrar aderência.
- *
- * Faz MERGE no snapshot do dia, como o registro de DMs: uma linha só com a
- * rotina zeraria seguidores/alcance e sujaria todas as séries.
- */
-export async function setPresenceRoutineAction(
-  _prev: ActionState | null,
-  formData: FormData,
-): Promise<ActionState> {
-  if (!(await can("data:write"))) return DENIED;
-  const date = String(formData.get("date") ?? "").trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    return { ok: false, message: "Informe uma data válida." };
-  }
-  const brand = await activeBrandSlug();
-  const data = await getData(brand);
-  const row = data.igAccountDaily.find((r) => r.date === date);
-  if (!row) {
-    return {
-      ok: false,
-      message: `Sem snapshot do Instagram em ${date}. Registre o snapshot do dia (ou rode a sincronização) e tente de novo.`,
-    };
-  }
-  // Campo em branco fica como estava; "0" é um registro legítimo de zero.
-  const opt = (key: string) => {
-    const raw = formData.get(key);
-    if (raw == null || String(raw).trim() === "") return undefined;
-    const v = Number(raw);
-    return Number.isFinite(v) && v >= 0 ? v : undefined;
-  };
-  await upsertIgAccountDaily([
-    {
-      ...row,
-      storiesPosted: opt("storiesPosted") ?? row.storiesPosted,
-      storiesInteractive: opt("storiesInteractive") ?? row.storiesInteractive,
-      nicheComments: opt("nicheComments") ?? row.nicheComments,
-      accountsFollowed: opt("accountsFollowed") ?? row.accountsFollowed,
-      repliedAll: formData.get("repliedAll") === "on",
-    },
-  ]);
-  revalidateAll();
-  return { ok: true, message: `Rotina de ${date} registrada.` };
-}
-
 const CTA_VALUES: CtaType[] = ["dm", "comentario", "salvamento", "marcacao", "outro"];
 
 /**
- * Salva os metadados manuais de conteúdo (duração do reel, pilar/série e CTA)
- * de todos os posts do formulário de uma vez. Só faz upsert dos que mudaram.
+ * O valor de um campo do formulário de posts, ou `null` (= ausente: não toca o
+ * post). Com o valor de origem (`orig_<nome>_<id>`, o de quando a página abriu),
+ * o campo que a pessoa NÃO mexeu (enviado igual ao de origem, como texto aparado)
+ * conta como ausente: vale o do banco. Assim uma aba aberta antes de uma marcação
+ * feita em outro lugar (o recolhido "Posts iguais no mesmo dia" do Conteúdo) não
+ * a desfaz ao salvar outro campo. Sem `orig_` (o caminho de
+ * `marcarComoTesteAction`), o campo presente grava, como sempre.
+ */
+function campoDoPost(formData: FormData, nome: string, id: string): FormDataEntryValue | null {
+  const valor = formData.get(`${nome}_${id}`);
+  if (valor == null) return null;
+  const orig = formData.get(`orig_${nome}_${id}`);
+  if (orig != null && String(orig).trim() === String(valor).trim()) return null;
+  return valor;
+}
+
+/**
+ * Salva os metadados manuais de conteúdo (teste, duração do reel, pilar/série e
+ * CTA) dos posts do formulário de uma vez. Só grava o campo que a pessoa mudou
+ * (`campoDoPost`, contra o `orig_`) e só faz upsert dos posts que mudaram.
  */
 export async function updatePostsMetaAction(
   _prev: ActionState | null,
@@ -279,10 +188,10 @@ export async function updatePostsMetaAction(
   const data = await getData(brand);
   const changed: IgPost[] = [];
   for (const post of data.igPosts) {
-    const durRaw = formData.get(`duration_${post.id}`);
-    const pillarRaw = formData.get(`pillar_${post.id}`);
-    const ctaRaw = formData.get(`cta_${post.id}`);
-    const testRaw = formData.get(`test_${post.id}`);
+    const durRaw = campoDoPost(formData, "duration", post.id);
+    const pillarRaw = campoDoPost(formData, "pillar", post.id);
+    const ctaRaw = campoDoPost(formData, "cta", post.id);
+    const testRaw = campoDoPost(formData, "test", post.id);
     // Campos ausentes do form (post fora da lista) não tocam o post.
     if (durRaw == null && pillarRaw == null && ctaRaw == null && testRaw == null) continue;
 
@@ -390,7 +299,8 @@ export async function setGoalsAction(
     { metric: "comentarios_post" },
     { metric: "compartilhamentos_post" },
     { metric: "posts_semana" },
-    { metric: "conversas_dm" },
+    // A meta de conversas de DM saiu na Fase 5 de nov/26 (o registro de DMs saiu:
+    // uma meta sem como medir); a linha antiga de `goals`, se houver, fica.
   ];
   for (const s of specs) {
     const raw = formData.get(`target_${s.metric}`);

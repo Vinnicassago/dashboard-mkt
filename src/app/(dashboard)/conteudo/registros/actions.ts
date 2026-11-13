@@ -3,9 +3,10 @@
 import { updatePostsMetaAction, type ActionState } from "@/app/(dashboard)/configuracoes/actions";
 
 /**
- * "Marcar como teste" da sugestão de variação de anúncio (Conteúdo → Conta).
- * Passa pelo MESMO caminho de escrita da marcação de posts em Registros: monta
- * só os campos `test_<id>` e deixa `updatePostsMetaAction` conferir a
+ * "Marcar como teste" do recolhido "Posts iguais no mesmo dia" do Conteúdo, que
+ * manda só os posts marcados. Passa pelo MESMO caminho de escrita da marcação de
+ * posts em Registros: monta só os campos `test_<id>` (sem `orig_`: grava sempre)
+ * e deixa `updatePostsMetaAction` conferir a
  * permissão (`data:write`), ignorar ids que não são posts da marca e gravar.
  * Campo ausente não toca o post — duração, pilar e CTA ficam como estão.
  */

@@ -21,6 +21,9 @@ export const PERIODO_PADRAO_DO_INICIO: RangeKey = "7d";
 /** Sem `?range=`, a Mídia olha a semana: "o que faço com a verba ESTA semana?". */
 export const PERIODO_PADRAO_DA_MIDIA: RangeKey = "7d";
 
+/** Sem `?range=`, o Conteúdo olha 30 dias: a grade é semanal, mas os "melhores posts" pedem amostra e insight maduro. */
+export const PERIODO_PADRAO_DO_CONTEUDO: RangeKey = "30d";
+
 /**
  * O período que cada rota abre sem `?range=`. A FONTE do comportamento:
  * `periodoPadraoDe` (nav-items) delega a `periodoPadraoDaRota`, e o 3º argumento
@@ -29,6 +32,7 @@ export const PERIODO_PADRAO_DA_MIDIA: RangeKey = "7d";
 export const PERIODO_PADRAO_POR_ROTA: Readonly<Record<string, RangeKey>> = {
   "/": PERIODO_PADRAO_DO_INICIO,
   "/midia": PERIODO_PADRAO_DA_MIDIA,
+  "/conteudo": PERIODO_PADRAO_DO_CONTEUDO,
 };
 
 /**

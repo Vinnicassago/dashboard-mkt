@@ -90,7 +90,7 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   reunião SÓ de `kpisDoPeriodo` (`lib/kpis.ts`) — valor, amostra `n`, confiança e
   anterior, e `mostrar()`/`custoExibivel()` para exibir. O lint (`eslint.config.mjs`)
   proíbe `src/app` e `src/components` de importar `overviewKpis`, `objectiveBreakdown`,
-  `adKpis`, `filterLeads`, `countMeetings`… e `assessTrust`. Funil, Início, Mídia, motor de ações, insights e briefing da IA leem o mesmo objeto; `fase3.test.ts` confere 3 períodos × 2 marcas, o Início e o Funil incluídos, e `fase4-midia-tela.test.ts` confere que o resumo da Mídia é o do Início (o investimento de conversão, o CPL e o fato do custo por reunião). O custo por reunião pronto para a tela é UM,
+  `adKpis`, `filterLeads`, `countMeetings`… e `assessTrust`. Funil, Início, Mídia, motor de ações, insights e briefing da IA leem o mesmo objeto; `fase3.test.ts` confere 3 períodos × 2 marcas, o Início e o Funil incluídos, e `fase4-midia-tela.test.ts` confere que o resumo da Mídia é o do Início (o investimento de conversão, o CPL e o fato do custo por reunião). `fase5-conteudo.test.ts` confere que o placar do Conteúdo é o que a IA recebe (posts da grade, último post, líquido de seguidores), que o último post é o do rodapé do Início e que o "da grade" de Registros é o do placar. O custo por reunião pronto para a tela é UM,
   `fatoDoCustoPorReuniao(k)` (`{exibivel, valor, n, fato}`): a razão só quando `exibivel`,
   senão o FATO "R$ X investidos em conversão · N reuniões de conversão" (decisão 4.2; reuniões
   em quarentena = "reuniões sem leitura confiável", sem contagem) — a Mídia mostra o fato
@@ -192,7 +192,8 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   para a IA (`atendimento.ondeTrava`, sempre um objeto com `situacao`), SEM marca nem palavra
   na tela; a frase da trava mora no Funil. E até 3 frases de AGORA com o número do grupo da
   MESMA `montarFila` (e `semMensagemDoRobo`). **Rodapé**: Funil, Mídia e o último post
-  (`ultimoPostDaGrade`).
+  (`ultimoPostDaGrade` com `textoDoUltimoPost` — o MESMO texto do placar do Conteúdo —, link
+  para `/conteudo`).
 - **Onde trava** (Fase 3, nov/26, `lib/onde-trava.ts`, puro): UMA função — a manchete do
   Funil e `inicio.atendimento.ondeTrava` da IA (`situacao`: trava · abaixo-da-amostra ·
   sem-leads · leitura-parada; nunca um `null` só). A maior perda em PESSOAS, sem meta nem
@@ -342,23 +343,23 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   de tabela (cartões ≤ 25, títulos ≤ 10, funil ≤ 20, frases ≤ 30, rodapé + resumo ≤ 15 —
   `fase2-inicio-tela.test.ts` conta, com as datas que o gráfico desenha no navegador; o ⓘ
   fechado não). As barras do Início desenham no máximo 4 datas, sem o eixo Y e sem o
-  "pausado" escrito (`BarrasDiarias` `semEixoY`/`semRotuloNasFaixas`/`maxDatasNoEixo`). Demais páginas ≤ 200 — o Funil é medido em `fase3-funil-tela.test.ts` (manchete ≤ 12, cada linha de perda ≤ 12, nenhuma frase > 25) e a Mídia em `fase4-midia-tela.test.ts` (resumo ≤ 20, cada título ≤ 15, até 5 cartões ≤ 125 — nome ≤ 8, desambiguação ≤ 4, selo, linha ≤ 10 — com os números em mini-tabelas, nenhuma frase > 25, também dentro dos ⓘ) —, Fila em até 3 telas de rolagem. O `<summary>` de um bloco
+  "pausado" escrito (`BarrasDiarias` `semEixoY`/`semRotuloNasFaixas`/`maxDatasNoEixo`). Demais páginas ≤ 200 — o Funil é medido em `fase3-funil-tela.test.ts` (manchete ≤ 12, cada linha de perda ≤ 12, nenhuma frase > 25), a Mídia em `fase4-midia-tela.test.ts` (resumo ≤ 20, cada título ≤ 15, até 5 cartões ≤ 125 — nome ≤ 8, desambiguação ≤ 4, selo, linha ≤ 10 — com os números em mini-tabelas, nenhuma frase > 25, também dentro dos ⓘ) e o Conteúdo em `fase5-conteudo-tela.test.ts` (placar ≤ 15, a linha das variações ≤ 10, o título ≤ 8, até 3 cartões ≤ 16 — legenda ≤ 8, linha ≤ 8 —, até 2 ações ≤ 12, nenhuma frase > 25, também dentro dos ⓘ; nenhuma legenda inteira no HTML) —, Fila em até 3 telas de rolagem. O `<summary>` de um bloco
   recolhido é rótulo de navegação, não título de resposta (sem número). Todo `Info` leva
   `rotulo` próprio ("Sobre …").
 - **Navegação** (`components/layout/nav-items.ts`): 7 páginas nomeadas pela PERGUNTA
-  que respondem ou pelo DONO do trabalho — Início (`/`, ícone casa), Funil (`/funil`), Mídia (`/midia`, 7 dias), Conteúdo, Fila de contato, Leads (`/leads`), Configurações
+  que respondem ou pelo DONO do trabalho — Início (`/`, ícone casa), Funil (`/funil`), Mídia (`/midia`, 7 dias), Conteúdo (`/conteudo`, 30 dias), Fila de contato, Leads (`/leads`), Configurações
   (`/configuracoes`) —, agrupadas na sidebar (Visão geral · Diagnóstico · Operação ·
   Configurações), não pela fonte do dado — eram 14, uma por sistema, e a mesma pessoa
   aparecia contada em três com números diferentes. A pergunta é o ⓘ ao lado do título do
   cabeçalho, nunca uma linha embaixo dele. Página nova = fundir outra;
-  sub-vista (`vistas`) só onde o trabalho é outro (Conteúdo: Conta · Posts · Registros ·
-  Produção; Configurações: Metas · Integrações · Marcas · Usuários · Importar ·
+  sub-vista (`vistas`) só onde o trabalho é outro (Conteúdo: Posts · Registros — a Produção
+  saiu das abas e abre pelas ações do Conteúdo; Configurações: Metas · Integrações · Marcas · Usuários · Importar ·
   Ferramentas · Zona de perigo); o Início não tem vistas (a antiga aba Live é um atalho de
   período, ver Live 01/12) e o item ativo sai só da rota (`itemAtivo`). Um fato mora num
   lugar só: se duas páginas precisam dele, uma mostra e a outra linka — e o número do link é
   o da página que ele abre. O período viaja em TODOS os links (`comPeriodo`, `lib/range.ts`;
-  sem `?range=` vale o `periodoPadrao` da página — `useComPeriodo`, `periodoPadraoDe`); "Campanha" vai EXPLÍCITA (`range=all`) para destino cujo padrão é outro — o Início e a Mídia (7 dias: `PERIODO_PADRAO_DO_INICIO`, `PERIODO_PADRAO_DA_MIDIA`) —: o padrão do destino sai de `periodoPadraoDaRota` (`PERIODO_PADRAO_POR_ROTA`, `lib/range.ts`, pelo caminho do href: `/#topo` é `/`), que é o 3º argumento padrão de `comPeriodo` e a fonte de `periodoPadraoDe` — também nos links montados no servidor (senão Funil → Início ou Mídia abria em 7 dias). Rota
-  antiga (`/jornada`, `/dinheiro`, `/pessoas`, `/config`…) = redirect em `next.config.ts`,
+  sem `?range=` vale o `periodoPadrao` da página — `useComPeriodo`, `periodoPadraoDe`); "Campanha" vai EXPLÍCITA (`range=all`) para destino cujo padrão é outro — o Início e a Mídia (7 dias: `PERIODO_PADRAO_DO_INICIO`, `PERIODO_PADRAO_DA_MIDIA`) e o Conteúdo (30 dias: `PERIODO_PADRAO_DO_CONTEUDO`) —: o padrão do destino sai de `periodoPadraoDaRota` (`PERIODO_PADRAO_POR_ROTA`, `lib/range.ts`, pelo caminho do href: `/#topo` é `/`), que é o 3º argumento padrão de `comPeriodo` e a fonte de `periodoPadraoDe` — também nos links montados no servidor (senão Funil → Início ou Mídia abria em 7 dias). Rota
+  antiga (`/jornada`, `/dinheiro`, `/pessoas`, `/config`, `/conteudo/posts`…) = redirect em `next.config.ts`,
   nunca 404; `/funil?vista=` antigo é ignorado (o Funil é só coorte) — exceção: `/live` redireciona na própria página (`destinoDaLive`), porque as
   datas da régua estão no store.
 - **Telas de diagnóstico** (Fase 6): cada página extrai sua visão de UMA função pura
@@ -388,16 +389,7 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   arquivo — célula que começa com = + - @ ganha apóstrofo e o telefone só leva dígitos e
   separadores; o papel Marketing vê telefone e e-mail mascarados (`lib/lgpd.ts`) em
   tabela, ficha, histórico e no motivo de "parece teste".
-  **Conteúdo**: 1º bloco "Contribuição para o funil"; "Alcance da conta (pago + orgânico)"
-  ≠ "Alcance orgânico dos posts"; variações de anúncio (mesma legenda no mesmo dia) viram
-  sugestão de teste; `postingCadence` ignora testes e impulsionados; quem é do período sai de
-  `dayOf` (UTC) em toda a tela de Posts, mas os intervalos e o último post contam o dia de
-  Brasília. "Último post há N dias" = `ultimoPostDaGrade` (histórico INTEIRO, só a grade;
-  `null` = nenhum, nunca "há 0" numa semana sem post) — Posts, Início, recomendações e IA.
-  Seguidores com a série
-  parcial explicada (100+ seguidores) e UMA regra do líquido, `seguidoresDoPeriodo`
-  (metrics.ts: último total conhecido, o 1º dia contra a véspera) — Início da awareness,
-  Conteúdo, IA e metas leem dali; registros manuais na vista Registros. As métricas
+  **Conteúdo** (Fase 5, nov/26; `montarConteudoDaTela` e `registrosDoPeriodo` em `lib/conteudo.ts` + `carregarConteudo`, `lib/conteudo-server.ts`; os tipos da tela e o que o client lê em `lib/conteudo-tela.ts` — valor só de `./format`): "a grade está em dia, e quais posts funcionaram?" — UMA página (a antiga vista Posts é redirect), abre em 30 dias. O dia do post é o de Brasília em TUDO (`diaDoPost`: período, datas, variações, Registros, grade da semana). De cima para baixo: o placar sem régua (sem Δ, sem meta) numa linha — "N posts no período" (`aggregatePostPerformance(...).count`: a grade, sem teste nem impulsionado) · "Último post há N dias" (`ultimoPostDaGrade` + `textoDoUltimoPost`, o MESMO do rodapé do Início; histórico inteiro; `null` = "Nenhum post ainda", nunca "há 0") · "Seguidores +N (pago + orgânico)" (`resumoSeguidores`, a regra única; sem total = "—"; total, ganhos e perdas, a nota dos 100+ e desde quando a variação conta — véspera ou 1ª leitura — no ⓘ); a linha "N grupos de posts iguais no mesmo dia para conferir →" (`variacoesNaGrade`: os grupos de `variacoesDeAnuncio` no histórico INTEIRO que ainda têm 2+ posts na GRADE — um post que sobra é a peça do dia; o impulsionado já está fora); o recolhido "Posts iguais no mesmo dia" tem um checkbox por post da grade (todos marcados de início, com hora e link do post) e marca só os marcados por `marcarComoTesteAction` — nada muda sem uma pessoa confirmar; desmarcar = Registros); os posts que mais funcionaram (`melhoresDaGrade`: salvos + compartilhamentos, depois interações, em número, não taxa; empate por alcance e recência; ≥ 1 interação; o título diz a chave que decidiu e "empatam" no empate; a IA usa a MESMA função no período dela), até 3 cartões com miniatura (`MiniaturaDoCriativo`; reel = `thumbnailUrl`, os outros a imagem que não é vídeo; `miniaturaValida` em `lib/miniatura.ts`) e a legenda em 1 linha (`legendaCurta`: 1ª linha, ≤ 8 palavras ou 60 caracteres + "…"; a completa abre no post, nunca no DOM, em `title=` nem na chave do grupo das variações, que é dia + id do 1º post); até 2 ações de conteúdo (`acoesDaGrade`: `IDS_DE_CONTEUDO` — cadência, a grade da SEMANA CORRENTE e formato —, por severidade, uma linha ≤ 12 palavras com o verbo e o número — `Recommendation.linha` — e "→ Produção"; o `detail` no ⓘ; `same-day-pileup` espera os grupos de variação do período; `no-recent-post` e `grade-da-semana` são do AGORA e aparecem em qualquer período; a IA recebe a lista inteira, com `grade-composicao`, a média do período); recolhidos "Posts iguais no mesmo dia", "Todos os posts" (`PostsTable` recebe só `LinhaDePost`: teste e impulsionado com selo) e "Conta do Instagram" ("Alcance da conta (pago + orgânico)" ≠ "Alcance orgânico dos posts", views, interações, visitas ao perfil; o gráfico "Total de seguidores" só na marca de conversão). Saíram: leads orgânicos (moram no ⓘ do cartão Leads do Início), custo por seguidor (Início da awareness), "Cliques no link da bio" (`profile_links_taps` mede os botões de contato do perfil, não o link — tela, dicionário e IA), conversas de DM, metas e status, funis do perfil, o melhor dia (sem leitor; `weekdayPerformance` saiu), formato campeão, CTA, pilar e retenção (a IA continua lendo). `vanity-objective` (verba de descoberta) é ação só da marca de awareness. A marca de awareness vê a mesma página sem ações (moram no Início dela). **Registros** = só "Conteúdo dos posts" (teste, duração, pilar, CTA) dos posts do período, com "dd/mm hh:mm" e o link do post; título "N posts da grade · N de teste · N impulsionados" (soma a lista; o "da grade" é o do placar); o formulário manda o valor de origem (`orig_*`) e `updatePostsMetaAction` só grava o campo que a pessoa mudou — uma aba velha não desfaz a marcação (a linha do formulário remonta quando o valor gravado muda: o React não reaplica o `defaultValue` de um `<select>`, e o reset do form depois da action o voltaria ao da montagem). Risco conhecido: o sync do Instagram regrava teste, duração, pilar e CTA lidos no INÍCIO dele — uma marcação feita durante um sync é desfeita (fica para quando o sync for mexido). Saíram o snapshot manual (o sync grava a mesma linha), as DMs e a rotina de presença (nunca usadas; o sync apagava a rotina). As métricas
   da conta estão no MESMO dicionário (`lib/dicionario.ts`). **Configurações**: uma rota
   por vista, loader compartilhado (`_carregar.ts`), `lib/configuracoes.ts` é a fonte de
   qual vista tem qual âncora (`linkDeConfiguracoes`) e das pendências; guardas de papel no
@@ -407,7 +399,10 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   90 dias. Fonte ÚNICA: `validator.ts` (pré-publicação) e `recommendations.ts`
   (pós-publicação) leem dali — nunca hardcode um limite. Guia novo = subir
   `PLAYBOOK_VERSION` (cada validação grava contra qual régua passou). Só marcas em
-  `hasPlaybook()` têm a vista Produção (em Conteúdo).
+  `hasPlaybook()` têm a Produção (`/conteudo/producao`): fora das abas desde a Fase 5 de
+  nov/26, abre pelo "→ Produção" das ações do Conteúdo e pelo link no fim de "Todos os
+  posts". A grade da semana é UMA função, `gradeDaSemana` (`content/outcomes.ts`, dia de
+  Brasília): a Produção e a ação "Complete a grade da semana" leem dela.
 - **Validação de peça** (`content/validator.ts`): função **pura**, roda no servidor e
   no cliente. `bloqueio` = item do checklist ou "Nunca mais" (não publica);
   `aviso` = fora do padrão. A nota gravada é sempre recalculada no servidor —
@@ -431,8 +426,11 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   é FUTURO e dia antes da 1ª linha de anúncio não existia — nem "sem dados" nem "sem
   veiculação"; Mídia, motor e IA terminam em `fimDoPeriodo` = min(range.to, hoje); o "no ar" ancora em min(`fimDoPeriodo`, dia do último sync de anúncios OK) (`refDaVeiculacao`; sem sync, o último dia com linha) e, quando esse dia é anterior a hoje, a tela diz "no ar em dd/mm" (`noArTexto`). **Dia de
   lead e de evento = Brasília** (`diaDoLead`, `horario-util.ts`, nunca lança) — em UTC o lead
-  das 22h de quinta caía na sexta. Seguem o dia da FONTE: `ad_daily`, a conta do Instagram e o
-  período dos posts (`dayOf`); `lp_daily` é de Brasília desde 05/11/2026 (histórico em UTC).
+  das 22h de quinta caía na sexta. Seguem o dia da FONTE: `ad_daily` e a conta do Instagram
+  (`dayOf`); o post é um instante e conta no dia de Brasília (`diaDoPost`, desde a Fase 5 de
+  nov/26) em todo filtro e toda data de post — período, cadência, variações, último post,
+  Registros, a grade da semana e a Produção (o dia ocupado da nota gravada, o vínculo peça →
+  post e as datas exibidas); `lp_daily` é de Brasília desde 05/11/2026 (histórico em UTC).
   O CSV grava `-03:00` (`instanteDoCsv`); lead antigo importado só com a data recua 1 dia. O
   painel da live, os criativos da live (Mídia) e `ehInscritoDaLive` (congelados) contam o dia
   em UTC até a D1 — na mesma Mídia, o lead das 22h cai num dia nos criativos da live e no

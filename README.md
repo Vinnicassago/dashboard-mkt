@@ -42,13 +42,13 @@ src/
       midia/                # o que fazer com a verba: para onde vai, criativos no ar com sinal e resposta ao robô; detalhes recolhidos
       fila/                 # fila de contato única (painel + robô + especialista)
       leads/                # leads, ficha, revisão, excluídos, histórico
-      conteudo/             # Instagram: conta, posts, registros manuais e produção
+      conteudo/             # Instagram: placar, os posts que mais funcionaram, ações da grade e todos os posts; registros (teste, duração, pilar, CTA); produção fora das abas
       configuracoes/        # metas, integrações, marcas, usuários, importar, ferramentas, zona de perigo
         actions.ts          # server actions (import, entradas manuais, reset)
     layout.tsx              # root: tema claro/escuro, fontes, metadados
     globals.css             # design tokens (paleta validada) + tema
   components/
-    charts/                 # Recharts wrappers (linha/área, barras, funil)
+    charts/                 # Recharts wrappers (linha/área, barras diárias)
     kpi/                    # KpiCard, GoalBar
     tables/                 # tabelas ordenáveis (criativos, posts, leads)
     layout/                 # sidebar, header, seletor de período, tema
@@ -92,9 +92,9 @@ formato exato. Colunas usadas:
 
 ### Entrada manual
 
-Na mesma tela: snapshot diário do Instagram (o histórico de seguidores se constrói
-guardando esses snapshots — a API da Meta só retém ~90 dias), cadastro de leads /
-reuniões, e edição das metas.
+Em Conteúdo → Registros: a marcação de teste, a duração do reel, o pilar e o CTA dos
+posts. Leads em Configurações → Importar; metas em Configurações. O histórico de
+seguidores vem do sync diário do Instagram (não há mais snapshot manual).
 
 ## Fase 2 — Supabase + coleta automática (implementada)
 

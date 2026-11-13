@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 
 /**
  * As vistas de uma página, em abas no topo do conteúdo. Só aparece onde há mais
- * de uma — hoje, Conteúdo (Conta · Posts · Registros · Produção) e Configurações.
+ * de uma — hoje, Conteúdo (Posts · Registros) e Configurações.
  * O Início não tem vistas: a live de 01/12 é o atalho de período do cabeçalho.
  */
 export function SubNav({ brand }: { brand: BrandDef }) {

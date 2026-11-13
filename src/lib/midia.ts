@@ -74,6 +74,7 @@ import { MIN_REUNIOES } from "./trust";
 import { ultimasSemanas } from "./semana";
 import { formatCurrency, formatCurrency0, formatDateTimeCurta, formatInt } from "./format";
 import { diaDoLead } from "./horario-util";
+import { miniaturaValida } from "./miniatura";
 import { dicaDoRecorteDoRobo, textoDaTaxa, trechoDoRoboPorLinha } from "./funil-processo";
 import { ehDaLive, type CampanhaDaLive } from "./live";
 import { criativosDaLive } from "./criativos-live";
@@ -116,6 +117,7 @@ import type {
 import type { AdDaily, DashboardData, Lead } from "./types";
 
 export * from "./midia-tela";
+export { miniaturaValida } from "./miniatura";
 
 const div = (a: number, b: number): number | null => (b > 0 ? a / b : null);
 const dm = (dia: string) => `${dia.slice(8, 10)}/${dia.slice(5, 7)}`;
@@ -1350,27 +1352,7 @@ export function descobertaDaMidia(kp: KpisDoPeriodo): DescobertaMidia {
 
 // ---------------------------------------------------------------- 8. helpers da tela
 
-/**
- * A miniatura do criativo, se ainda vale: só `https:`; o parâmetro `oe` (validade em
- * hex de segundos da época, CDN da Meta) vencido → null; sem `oe` → a URL; URL
- * inválida → null.
- */
-export function miniaturaValida(url: string | undefined, agoraMs: number): string | null {
-  if (!url) return null;
-  let u: URL;
-  try {
-    u = new URL(url);
-  } catch {
-    return null;
-  }
-  if (u.protocol !== "https:") return null;
-  const oe = u.searchParams.get("oe");
-  if (oe && /^[0-9a-f]+$/i.test(oe)) {
-    const validade = parseInt(oe, 16) * 1000;
-    if (Number.isFinite(validade) && Number.isFinite(agoraMs) && validade <= agoraMs) return null;
-  }
-  return url;
-}
+// `miniaturaValida` mora em `lib/miniatura.ts` (o Conteúdo também a usa) e é reexportada no topo.
 
 /** O nome cru de uma linha de criativo (sem o rótulo de desambiguação). */
 const nomeCruDe = (l: LinhaCriativo): string => l.nomeCru ?? l.nome;

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { getData, getDraft, listDrafts, upsertDraft, deleteDraft } from "@/lib/data/store";
 import { can } from "@/lib/auth/guard";
 import { activeBrandSlug } from "@/lib/active-brand";
-import { ctaOf, dayOf } from "@/lib/metrics";
+import { ctaOf, diaDoPost } from "@/lib/metrics";
 import { buildValidationContext, validateDraft, type ValidationContext } from "@/lib/content/validator";
 import { hasPlaybook } from "@/lib/content/playbook";
 import { isAiConfigured } from "@/lib/ai/config";
@@ -55,8 +55,12 @@ const isDay = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v);
  */
 async function contextFor(brand: string, excludeDraftId?: string): Promise<ValidationContext> {
   const [data, drafts] = await Promise.all([getData(brand), listDrafts(brand)]);
+  // As MESMAS peças publicadas da página (a prévia do validador no cliente) e da grade
+  // da semana: sem os posts de teste, no dia de Brasília (`diaDoPost`) — a nota gravada
+  // não diverge da prévia.
   const published = data.igPosts
-    .map((p) => ({ day: dayOf(p.publishedAt), cta: ctaOf(p) }))
+    .filter((p) => !p.isTest)
+    .map((p) => ({ day: diaDoPost(p), cta: ctaOf(p) }))
     .sort((a, b) => b.day.localeCompare(a.day));
   return buildValidationContext({
     published,

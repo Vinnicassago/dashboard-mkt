@@ -4,132 +4,112 @@ import { useMemo, useState } from "react";
 import { ExternalLink } from "lucide-react";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { Badge } from "@/components/ui/badge";
+import { ROTULO_DO_TIPO, type LinhaDePost } from "@/lib/conteudo-tela";
+import { formatInt, formatPercent } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { CTA_LABEL, type PostPerf } from "@/lib/metrics";
-import { formatDateShort, formatDecimal, formatDuration, formatInt, formatPercent } from "@/lib/format";
 
-const typeLabel: Record<PostPerf["type"], string> = {
-  feed: "Feed",
-  carrossel: "Carrossel",
-  reel: "Reel",
-  story: "Story",
-};
-
-const columns: Column<PostPerf>[] = [
+const columns: Column<LinhaDePost>[] = [
   {
-    key: "publishedAt",
+    key: "iso",
     header: "Publicado",
     sortable: true,
-    sortValue: (r) => r.publishedAt,
-    render: (r) => (
-      <span className="text-muted-foreground">{formatDateShort(r.publishedAt)}</span>
-    ),
+    sortValue: (r) => r.iso,
+    render: (r) => <span className="whitespace-nowrap text-muted-foreground">{r.data}</span>,
   },
   {
-    key: "caption",
+    key: "legenda",
     header: "Post",
     sortable: true,
-    sortValue: (r) => r.caption,
+    sortValue: (r) => r.legenda,
     render: (r) => (
       <div className="flex flex-col gap-1">
-        {r.permalink ? (
+        {r.href ? (
           <a
-            href={r.permalink}
+            href={r.href}
             target="_blank"
             rel="noopener noreferrer"
             className="group inline-flex max-w-[320px] items-center gap-1 font-medium hover:text-primary"
           >
-            <span className="line-clamp-1">{r.caption}</span>
-            <ExternalLink className="size-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
+            <span className="line-clamp-1">{r.legenda}</span>
+            <ExternalLink className="size-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" aria-hidden="true" />
           </a>
         ) : (
-          <span className="line-clamp-1 max-w-[320px] font-medium">{r.caption}</span>
+          <span className="line-clamp-1 max-w-[320px] font-medium">{r.legenda}</span>
         )}
         <div className="flex flex-wrap gap-1">
-          <Badge variant="muted">{typeLabel[r.type]}</Badge>
-          {r.isTest ? <Badge variant="warning">Teste</Badge> : null}
-          {r.boosted && !r.isTest ? <Badge variant="default">Impulsionado</Badge> : null}
-          {r.pillar ? <Badge variant="muted">{r.pillar}</Badge> : null}
-          {r.cta ? <Badge variant="muted">CTA: {CTA_LABEL[r.cta]}</Badge> : null}
+          <Badge variant="muted">{r.tipoTexto}</Badge>
+          {r.teste ? <Badge variant="warning">Teste</Badge> : null}
+          {r.impulsionado && !r.teste ? <Badge variant="default">Impulsionado</Badge> : null}
         </div>
       </div>
     ),
   },
-  { key: "reach", header: "Alcance", align: "right", sortable: true, sortValue: (r) => r.reach, render: (r) => formatInt(r.reach) },
+  { key: "alcance", header: "Alcance", align: "right", sortable: true, sortValue: (r) => r.alcance, render: (r) => formatInt(r.alcance) },
   { key: "views", header: "Views", align: "right", sortable: true, sortValue: (r) => r.views, render: (r) => formatInt(r.views) },
-  { key: "likes", header: "Curtidas", align: "right", sortable: true, sortValue: (r) => r.likes, render: (r) => formatInt(r.likes) },
-  { key: "comments", header: "Coment.", align: "right", sortable: true, sortValue: (r) => r.comments, render: (r) => formatInt(r.comments) },
-  { key: "saved", header: "Salvos", align: "right", sortable: true, sortValue: (r) => r.saved, render: (r) => formatInt(r.saved) },
   {
-    key: "savesPer1k",
-    header: "Salvos/1k",
+    key: "interacoes",
+    header: "Interações",
     align: "right",
     sortable: true,
-    sortValue: (r) => r.savesPer1k,
-    render: (r) =>
-      r.views > 0 ? formatDecimal(r.savesPer1k, 1) : <span className="text-muted-foreground">—</span>,
+    sortValue: (r) => r.interacoes,
+    render: (r) => formatInt(r.interacoes),
   },
-  { key: "shares", header: "Compart.", align: "right", sortable: true, sortValue: (r) => r.shares, render: (r) => formatInt(r.shares) },
+  { key: "salvos", header: "Salvos", align: "right", sortable: true, sortValue: (r) => r.salvos, render: (r) => formatInt(r.salvos) },
   {
-    key: "avgWatchTime",
-    header: "Retenção",
+    key: "compartilhamentos",
+    header: "Compart.",
     align: "right",
     sortable: true,
-    // Retenção % em [0,1] no topo; reels só com segundos mapeiam para (-1,0)
-    // monotônicos (sempre abaixo de qualquer %); sem nada, -2 por último.
-    sortValue: (r) => r.retention ?? (r.avgWatchTime != null ? -1 / (1 + r.avgWatchTime) : -2),
-    render: (r) =>
-      r.type === "reel" && r.retention != null ? (
-        <span>
-          {formatPercent(r.retention, 0)}{" "}
-          <span className="text-xs text-muted-foreground">· {formatDuration(r.avgWatchTime)}</span>
-        </span>
-      ) : r.type === "reel" && r.avgWatchTime != null ? (
-        formatDuration(r.avgWatchTime)
-      ) : (
-        <span className="text-muted-foreground">—</span>
-      ),
+    sortValue: (r) => r.compartilhamentos,
+    render: (r) => formatInt(r.compartilhamentos),
   },
   {
-    key: "engagementRate",
+    key: "engajamento",
     header: "Engaj.",
     align: "right",
     sortable: true,
-    sortValue: (r) => r.engagementRate,
-    render: (r) => formatPercent(r.engagementRate),
+    // Sem alcance não há taxa: fica por último nas duas direções (o `DataTable` põe o não-finito no fim).
+    sortValue: (r) => r.engajamento ?? Number.NaN,
+    render: (r) =>
+      r.engajamento === null ? <span className="text-muted-foreground">—</span> : formatPercent(r.engajamento),
   },
 ];
 
-const ALL_TYPES = ["feed", "carrossel", "reel", "story"] as const;
+const TIPOS = ["feed", "carrossel", "reel", "story"] as const;
+type Filtro = "todos" | "teste" | LinhaDePost["tipo"];
 
-export function PostsTable({ rows }: { rows: PostPerf[] }) {
-  const [type, setType] = useState<"all" | "test" | PostPerf["type"]>("all");
-  const present = useMemo(
-    () => ALL_TYPES.filter((t) => rows.some((r) => r.type === t)),
-    [rows],
-  );
-  const hasTests = useMemo(() => rows.some((r) => r.isTest), [rows]);
-  const filtered =
-    type === "all"
-      ? rows
-      : type === "test"
-        ? rows.filter((r) => r.isTest)
-        : rows.filter((r) => r.type === type);
+/**
+ * "Todos os posts" do Conteúdo (Fase 5 de nov/26, §2.6): os posts do período, os de
+ * teste e os impulsionados com selo. Recebe só `LinhaDePost` — pronta no servidor
+ * (`montarConteudoDaTela`): a data é o dia de Brasília que decide o período, a legenda
+ * é a curta (a completa abre no post) e nada de URL do CDN nem marca. Só leitura: marcar
+ * ou desmarcar um teste é em Registros.
+ */
+export function PostsTable({ linhas }: { linhas: LinhaDePost[] }) {
+  const [filtro, setFiltro] = useState<Filtro>("todos");
+  const presentes = useMemo(() => TIPOS.filter((t) => linhas.some((r) => r.tipo === t)), [linhas]);
+  const temTeste = useMemo(() => linhas.some((r) => r.teste), [linhas]);
+  const filtradas =
+    filtro === "todos"
+      ? linhas
+      : filtro === "teste"
+        ? linhas.filter((r) => r.teste)
+        : linhas.filter((r) => r.tipo === filtro);
 
   return (
-    <div className="space-y-3">
-      {present.length > 1 || hasTests ? (
+    <div className="min-w-0 space-y-3">
+      {presentes.length > 1 || temTeste ? (
         <div className="flex flex-wrap gap-1.5">
-          <Chip active={type === "all"} onClick={() => setType("all")}>
+          <Chip ativo={filtro === "todos"} onClick={() => setFiltro("todos")}>
             Todos
           </Chip>
-          {present.map((t) => (
-            <Chip key={t} active={type === t} onClick={() => setType(t)}>
-              {typeLabel[t]}
+          {presentes.map((t) => (
+            <Chip key={t} ativo={filtro === t} onClick={() => setFiltro(t)}>
+              {ROTULO_DO_TIPO[t]}
             </Chip>
           ))}
-          {hasTests ? (
-            <Chip active={type === "test"} onClick={() => setType("test")}>
+          {temTeste ? (
+            <Chip ativo={filtro === "teste"} onClick={() => setFiltro("teste")}>
               Testes
             </Chip>
           ) : null}
@@ -137,8 +117,8 @@ export function PostsTable({ rows }: { rows: PostPerf[] }) {
       ) : null}
       <DataTable
         columns={columns}
-        rows={filtered}
-        initialSortKey="publishedAt"
+        rows={filtradas}
+        initialSortKey="iso"
         initialSortDir="desc"
         rowKey={(r) => r.id}
       />
@@ -146,24 +126,15 @@ export function PostsTable({ rows }: { rows: PostPerf[] }) {
   );
 }
 
-function Chip({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
+function Chip({ ativo, onClick, children }: { ativo: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
     <button
       type="button"
+      aria-pressed={ativo}
       onClick={onClick}
       className={cn(
         "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
-        active
-          ? "border-primary bg-primary/10 text-primary"
-          : "text-muted-foreground hover:text-foreground",
+        ativo ? "border-primary bg-primary/10 text-primary" : "text-muted-foreground hover:text-foreground",
       )}
     >
       {children}

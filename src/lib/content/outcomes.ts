@@ -10,9 +10,10 @@
  * pares qualquer diferença é ruído, então `sampleOk` governa o que a UI mostra.
  */
 
-import { RULE_LABEL } from "./playbook";
+import { RULE_LABEL, WEEK_ORDER, type WeekSlot } from "./playbook";
 import { normalizeText, firstLine } from "./validator";
-import { dayOf, postEngagementRate, reelRetention } from "../metrics";
+import { diaDoPost, postEngagementRate, reelRetention } from "../metrics";
+import { segundaDaSemana, somarDias } from "../semana";
 import type { IgMediaType, IgPost, PostDraft } from "../types";
 
 /**
@@ -70,7 +71,9 @@ export function suggestMatches(
       out.push({ ...base(p), confianca: "alta", motivo: "1ª linha idêntica" });
       continue;
     }
-    if (draft.plannedFor && dayOf(p.publishedAt) === draft.plannedFor && p.type === draft.type) {
+    // O dia do post é o de Brasília (`diaDoPost`): a peça planejada para um dia e
+    // postada às 22h desse dia casa com ele.
+    if (draft.plannedFor && diaDoPost(p) === draft.plannedFor && p.type === draft.type) {
       out.push({ ...base(p), confianca: "media", motivo: "mesmo dia e formato" });
     }
   }
@@ -246,6 +249,81 @@ export function buildOutcomeReport(drafts: PostDraft[], posts: IgPost[]): Outcom
     correlacaoNotaAlcance: sampleOk
       ? pearson(pairs.map((p) => p.score), pairs.map((p) => p.reach))
       : null,
+  };
+}
+
+// ---- grade da semana corrente --------------------------------------
+
+export interface DiaDaGrade {
+  /** De WEEK_ORDER (seg … dom). */
+  slot: WeekSlot;
+  /** AAAA-MM-DD. */
+  dia: string;
+  ehHoje: boolean;
+  /** Posts não-teste no dia de Brasília (`diaDoPost`) — impulsionado incluído: saiu no perfil e ocupa o dia. */
+  publicados: number;
+  /** Peças não descartadas com `plannedFor` = dia. */
+  pecas: PostDraft[];
+}
+
+export interface GradeDaSemana {
+  /** Segunda (`segundaDaSemana(hoje)`, lib/semana.ts). */
+  inicio: string;
+  /** Domingo. */
+  fim: string;
+  dias: DiaDaGrade[];
+  /** Dias com `slot.type !== null` (6 no guia v3). */
+  slotsDeFeed: number;
+  /** Slots de feed com publicado ou peça. */
+  preenchidos: number;
+  /** Slots de feed com dia < hoje, sem publicado e sem peça. */
+  vaziosAntesDeHoje: string[];
+}
+
+/**
+ * A grade da semana corrente (pura). A Produção (o "{p}/{s} slots com peça") e a
+ * ação "Complete a grade da semana" (`grade-da-semana`, recommendations.ts) leem
+ * DAQUI: um número só. `hoje` é o dia de Brasília (`hojeEmBrasilia()`), e o dia do
+ * post também (`diaDoPost`): depois das 21h a grade não pula para o dia seguinte.
+ */
+export function gradeDaSemana(posts: IgPost[], drafts: PostDraft[], hoje: string): GradeDaSemana {
+  const inicio = segundaDaSemana(hoje);
+  const fim = somarDias(inicio, 6);
+
+  const publicadosPorDia = new Map<string, number>();
+  for (const p of posts) {
+    if (p.isTest) continue;
+    const d = diaDoPost(p);
+    if (d < inicio || d > fim) continue;
+    publicadosPorDia.set(d, (publicadosPorDia.get(d) ?? 0) + 1);
+  }
+
+  const pecasPorDia = new Map<string, PostDraft[]>();
+  for (const d of drafts) {
+    if (d.status === "descartado" || !d.plannedFor) continue;
+    pecasPorDia.set(d.plannedFor, [...(pecasPorDia.get(d.plannedFor) ?? []), d]);
+  }
+
+  const dias: DiaDaGrade[] = WEEK_ORDER.map((slot, i) => {
+    const dia = somarDias(inicio, i);
+    return {
+      slot,
+      dia,
+      ehHoje: dia === hoje,
+      publicados: publicadosPorDia.get(dia) ?? 0,
+      pecas: pecasPorDia.get(dia) ?? [],
+    };
+  });
+
+  const deFeed = dias.filter((d) => d.slot.type !== null);
+  const comPeca = (d: DiaDaGrade) => d.publicados > 0 || d.pecas.length > 0;
+  return {
+    inicio,
+    fim,
+    dias,
+    slotsDeFeed: deFeed.length,
+    preenchidos: deFeed.filter(comPeca).length,
+    vaziosAntesDeHoje: deFeed.filter((d) => d.dia < hoje && !comPeca(d)).map((d) => d.dia),
   };
 }
 

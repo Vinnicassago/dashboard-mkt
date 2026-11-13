@@ -49,7 +49,8 @@ export function BudgetForm({
 export function GoalsForm({ current }: { current: Partial<Record<string, number>> }) {
   const [state, action] = useActionState(setGoalsAction, null);
   // As metas do funil (leads, reuniões, CPL, custo por reunião…) moraram aqui
-  // até a Fase 4; agora têm vigência e calculadora — card "Metas", abaixo.
+  // até a Fase 4; agora têm vigência e calculadora — card "Metas", abaixo. A de
+  // conversas de DM saiu na Fase 5 de nov/26, com o registro de DMs.
   const fields: { metric: string; label: string }[] = [
     { metric: "followers", label: "Seguidores (meta)" },
     { metric: "retencao_reels", label: "Retenção de reels (%)" },
@@ -58,7 +59,6 @@ export function GoalsForm({ current }: { current: Partial<Record<string, number>
     { metric: "comentarios_post", label: "Comentários por post" },
     { metric: "compartilhamentos_post", label: "Compartilhamentos por post" },
     { metric: "posts_semana", label: "Posts por semana" },
-    { metric: "conversas_dm", label: "Conversas de DM (período)" },
   ];
   return (
     <form action={action} className="space-y-3">

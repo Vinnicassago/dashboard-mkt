@@ -30,6 +30,7 @@ import { montarInicio } from "../inicio";
 import { LIVE_PADRAO, type CampanhaDaLive } from "../live";
 import {
   PERIODO_PADRAO_DA_MIDIA,
+  PERIODO_PADRAO_DO_CONTEUDO,
   PERIODO_PADRAO_DO_INICIO,
   PERIODO_PADRAO_POR_ROTA,
   buildCustomKey,
@@ -86,9 +87,16 @@ describe("navegação — o Início", () => {
     expect(periodoPadraoDe("/midia")).toBe(PERIODO_PADRAO_DA_MIDIA);
     expect(NAV.find((n) => n.href === "/midia")!.periodoPadrao).toBe(PERIODO_PADRAO_DA_MIDIA);
     expect(NAV.find((n) => n.href === "/midia")!.pergunta).toBe("O que faço com a verba esta semana?");
+    // O Conteúdo olha 30 dias (Fase 5 de nov/26: "a grade está em dia, e quais posts funcionaram?"),
+    // nas duas abas (por prefixo).
+    expect(PERIODO_PADRAO_DO_CONTEUDO).toBe("30d");
+    expect(periodoPadraoDe("/conteudo")).toBe(PERIODO_PADRAO_DO_CONTEUDO);
+    expect(periodoPadraoDe("/conteudo/registros")).toBe(PERIODO_PADRAO_DO_CONTEUDO);
+    const conteudo = NAV.find((n) => n.href === "/conteudo")!;
+    expect(conteudo.periodoPadrao).toBe(PERIODO_PADRAO_DO_CONTEUDO);
+    expect(conteudo.pergunta).toBe("A grade está em dia, e quais posts funcionaram?");
     // O resto olha a campanha inteira; /live (redirect) não é página da navegação.
     expect(periodoPadraoDe("/funil")).toBe("all");
-    expect(periodoPadraoDe("/conteudo/posts")).toBe("all");
     expect(periodoPadraoDe("/live")).toBe("all");
     // O carregador lê a mesma constante (o nome que page.tsx importa fica).
     expect(ler("src/lib/bussola-server.ts")).toMatch(/export const PERIODO_PADRAO_DA_BUSSOLA = PERIODO_PADRAO_DO_INICIO;/);
@@ -96,7 +104,11 @@ describe("navegação — o Início", () => {
   });
 
   it("UMA fonte do comportamento (K38): o campo do NAV, `periodoPadraoDe` e `periodoPadraoDaRota` concordam", () => {
-    expect(PERIODO_PADRAO_POR_ROTA).toEqual({ "/": PERIODO_PADRAO_DO_INICIO, "/midia": PERIODO_PADRAO_DA_MIDIA });
+    expect(PERIODO_PADRAO_POR_ROTA).toEqual({
+      "/": PERIODO_PADRAO_DO_INICIO,
+      "/midia": PERIODO_PADRAO_DA_MIDIA,
+      "/conteudo": PERIODO_PADRAO_DO_CONTEUDO,
+    });
     for (const item of NAV) {
       expect(item.periodoPadrao ?? "all", item.href).toBe(periodoPadraoDaRota(item.href));
       expect(periodoPadraoDe(item.href), item.href).toBe(periodoPadraoDaRota(item.href));
@@ -120,7 +132,7 @@ describe("navegação — o Início", () => {
     expect(itemAtivo("/", inicio())).toBe(true);
     expect(itemAtivo("/live", inicio())).toBe(false);
     expect(navItemFromPath("/live")).toBeUndefined();
-    expect(navItemFromPath("/conteudo/posts")?.label).toBe("Conteúdo");
+    expect(navItemFromPath("/conteudo/registros")?.label).toBe("Conteúdo");
     expect(navItemFromPath("/configuracoes/marcas")?.label).toBe("Configurações");
     expect(navItemFromPath("/leads/LEAD-1")?.label).toBe("Leads");
     expect(navItemFromPath("/filas")).toBeUndefined();
@@ -338,8 +350,11 @@ describe("o período viaja nos links — Campanha vai explícita para o Início"
     const hrefFor = (h: string) => comPeriodoDaTela(h, naTela);
     expect(hrefDoItem(inicio(), hrefFor, null)).toBe("/?range=all");
     // Os destinos cujo padrão também é a campanha seguem sem o parâmetro (a Mídia não: abre na semana).
-    for (const h of ["/funil", "/fila", "/leads", "/conteudo/posts", "/configuracoes"]) expect(comPeriodoDaTela(h, "all")).toBe(h);
+    for (const h of ["/funil", "/fila", "/leads", "/configuracoes"]) expect(comPeriodoDaTela(h, "all")).toBe(h);
     expect(comPeriodoDaTela("/midia", "all")).toBe("/midia?range=all");
+    // O Conteúdo abre em 30 dias: "Campanha" vai explícita, e os 30 dias também (o link leva o período).
+    expect(comPeriodoDaTela("/conteudo", "all")).toBe("/conteudo?range=all");
+    expect(comPeriodoDaTela("/conteudo", "30d")).toBe("/conteudo?range=30d");
     // O Início do comercial no modo live não muda.
     expect(hrefDoItem(inicio(), hrefFor, `/?range=${CHAVES.campanha}`)).toBe(`/?range=${CHAVES.campanha}`);
   });
@@ -377,11 +392,15 @@ describe("o período viaja nos links — Campanha vai explícita para o Início"
     expect(hrefs).not.toContain("/midia");
   });
 
-  it("o 'abrir →' de vanity-objective em Conteúdo (sem ?range= = Campanha) leva `range=all` à Mídia", () => {
-    const rec = { id: "vanity-objective", severity: "media", title: "Mude o objetivo de 2 conjuntos de descoberta", detail: "x", dono: "MKT", href: "/midia#conjuntos" } as Recommendation;
-    const html = renderToStaticMarkup(createElement(RecommendationsCard, { recs: [rec], rangeKey: periodoPadraoDe("/conteudo") }));
-    expect(periodoPadraoDe("/conteudo")).toBe("all");
-    expect(html).toContain('href="/midia?range=all#conjuntos"');
+  it("o 'abrir →' de uma ação de conteúdo no Início da marca de awareness leva o período ao Conteúdo", () => {
+    const rec = { id: "no-recent-post", severity: "alta", title: "Publique hoje — a grade parou", detail: "x", dono: "MKT", href: "/conteudo" } as Recommendation;
+    const semana = renderToStaticMarkup(createElement(RecommendationsCard, { recs: [rec], rangeKey: "7d" }));
+    expect(semana).toContain('href="/conteudo?range=7d"');
+    // "Campanha" vai explícita: o padrão do Conteúdo é 30 dias.
+    const campanha = renderToStaticMarkup(createElement(RecommendationsCard, { recs: [rec], rangeKey: "all" }));
+    expect(campanha).toContain('href="/conteudo?range=all"');
+    // A Produção (fora das abas) também abre com o padrão do Conteúdo (por prefixo).
+    expect(periodoPadraoDaRota("/conteudo/producao")).toBe("30d");
   });
 
   it("o hook da barra lateral usa a regra do destino", () => {

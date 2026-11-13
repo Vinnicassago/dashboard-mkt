@@ -969,11 +969,11 @@ describe("rodapé: o último post da grade", () => {
     return { data, range: R, rangeKey: "7d", kpis: kpisDoPeriodo(data, R, { hoje: H, agora }), eventos: [], filaLive: [], agora, hoje: H };
   };
 
-  it("uma semana sem post é 'há 9 dias', nunca 'há 0' — o mesmo número de Posts", () => {
+  it("uma semana sem post é 'há 9 dias', nunca 'há 0' — o mesmo número do placar do Conteúdo", () => {
     const ini = conferir(entrada([post("p1", brt("2026-09-29", "22:00"))]));
     expect(ini.rodape.diasDesdeUltimoPost).toBe(9);
-    expect(ini.rodape.links.find((l) => l.id === "posts")).toMatchObject({ rotulo: "Último post há 9 dias", href: "/conteudo/posts?range=7d" });
-    expect(ini.rodape.links.map((l) => l.href)).toEqual(["/funil?range=7d", "/midia?range=7d", "/conteudo/posts?range=7d"]);
+    expect(ini.rodape.links.find((l) => l.id === "posts")).toMatchObject({ rotulo: "Último post há 9 dias", href: "/conteudo?range=7d" });
+    expect(ini.rodape.links.map((l) => l.href)).toEqual(["/funil?range=7d", "/midia?range=7d", "/conteudo?range=7d"]);
   });
 
   it("teste e impulsionado não contam; nunca houve post = 'Nenhum post ainda'", () => {

@@ -12,9 +12,9 @@ import {
 import type { AtalhoDaLive } from "@/lib/atalho-live";
 import type { Role } from "@/lib/auth/roles";
 import type { BrandDef } from "@/lib/brands";
-import { hasPlaybook } from "@/lib/content/playbook";
 import {
   PERIODO_PADRAO_DA_MIDIA,
+  PERIODO_PADRAO_DO_CONTEUDO,
   PERIODO_PADRAO_DO_INICIO,
   comPeriodo,
   periodoPadraoDaRota,
@@ -29,10 +29,11 @@ import {
  * pessoa aparecia contada em três delas com números diferentes. São 7, nos nomes
  * do relatório de out/2026 (decisão 4.4), agrupadas: Visão geral · Diagnóstico ·
  * Operação · Configurações. Um fato mora num lugar só. Aba nova = fundir outra.
- * Sub-vista só onde o trabalho é outro — Produção é pauta, Registros é entrada
- * manual, Configurações se divide por assunto. A live de 01/12 não é vista nem
- * página: é um atalho de PERÍODO no seletor do cabeçalho (`lib/atalho-live.ts`),
- * e o Início com a chave dela mostra o painel da live.
+ * Sub-vista só onde o trabalho é outro — Registros é entrada manual; a Produção
+ * é pauta e abre pelas ações do Conteúdo, fora das abas; Configurações se divide
+ * por assunto. A live de 01/12 não é vista nem página: é um atalho de PERÍODO no
+ * seletor do cabeçalho (`lib/atalho-live.ts`), e o Início com a chave dela mostra
+ * o painel da live.
  */
 
 export type NavGrupo = "Visão geral" | "Diagnóstico" | "Operação" | "Configurações";
@@ -40,8 +41,6 @@ export type NavGrupo = "Visão geral" | "Diagnóstico" | "Operação" | "Configu
 export interface NavVista {
   label: string;
   href: string;
-  /** Depende de um guia de produção — oculta para marcas que ainda não têm um. */
-  playbookOnly?: boolean;
 }
 
 export interface NavItem {
@@ -57,9 +56,10 @@ export interface NavItem {
   vistas?: NavVista[];
   /**
    * Período que a página assume sem `?range=` na URL. O Início e a Mídia olham a
-   * semana (`PERIODO_PADRAO_DO_INICIO`, `PERIODO_PADRAO_DA_MIDIA`); as outras
-   * páginas, a campanha inteira. O comportamento sai de `PERIODO_PADRAO_POR_ROTA`
-   * (`lib/range.ts`): este campo o espelha, e o teste trava a igualdade.
+   * semana (`PERIODO_PADRAO_DO_INICIO`, `PERIODO_PADRAO_DA_MIDIA`); o Conteúdo, 30
+   * dias (`PERIODO_PADRAO_DO_CONTEUDO`); as outras páginas, a campanha inteira. O
+   * comportamento sai de `PERIODO_PADRAO_POR_ROTA` (`lib/range.ts`): este campo o
+   * espelha, e o teste trava a igualdade.
    */
   periodoPadrao?: RangeKey;
 }
@@ -97,13 +97,14 @@ export const NAV: NavItem[] = [
     href: "/conteudo",
     Icon: Camera,
     grupo: "Diagnóstico",
-    pergunta: "O conteúdo está melhorando, e alimenta o funil?",
+    pergunta: "A grade está em dia, e quais posts funcionaram?",
+    // A Produção saiu das abas (Fase 5 de nov/26): a rota fica e abre pelo
+    // "→ Produção" das ações do Conteúdo e pelo link no fim de "Todos os posts".
     vistas: [
-      { label: "Conta", href: "/conteudo" },
-      { label: "Posts", href: "/conteudo/posts" },
+      { label: "Posts", href: "/conteudo" },
       { label: "Registros", href: "/conteudo/registros" },
-      { label: "Produção", href: "/conteudo/producao", playbookOnly: true },
     ],
+    periodoPadrao: PERIODO_PADRAO_DO_CONTEUDO,
   },
   {
     label: "Fila de contato",
@@ -147,12 +148,17 @@ export function navForBrand(brand: BrandDef): NavItem[] {
   return NAV.filter((n) => !(n.conversaoOnly && brand.type === "awareness"));
 }
 
-/** Vistas visíveis de um item: marca sem guia de produção não vê a Produção. */
+/**
+ * Vistas visíveis de um item para uma marca. Hoje todas as marcas veem as mesmas: a
+ * única vista que dependia da marca (a Produção, só com guia) saiu das abas na Fase
+ * 5 de nov/26. A marca fica na assinatura (a sub-nav e os testes a passam).
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function vistasForBrand(item: NavItem, brand: BrandDef): NavVista[] {
-  return (item.vistas ?? []).filter((v) => !(v.playbookOnly && !hasPlaybook(brand.slug)));
+  return item.vistas ?? [];
 }
 
-/** `/conteudo/posts` pertence a `/conteudo`; `/filas` não pertenceria a `/fila`. */
+/** `/conteudo/registros` pertence a `/conteudo`; `/filas` não pertenceria a `/fila`. */
 export function isActive(pathname: string, href: string): boolean {
   if (href === "/") return pathname === "/";
   return pathname === href || pathname.startsWith(`${href}/`);

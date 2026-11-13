@@ -2,6 +2,8 @@ import { TrendingUp } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import type { OutcomeReport } from "@/lib/content/outcomes";
+// O dia do post exibido é o de Brasília (`diaDoPost`): o MESMO que casa post e peça.
+import { diaDoPost } from "@/lib/metrics";
 import { formatCompact, formatDateShort, formatDecimal, formatInt, formatPercent } from "@/lib/format";
 
 /**
@@ -132,7 +134,7 @@ export function OutcomesPanel({ report }: { report: OutcomeReport }) {
                   {p.hookText || "(sem gancho)"}
                   <span className="text-muted-foreground">
                     {" "}
-                    · {formatDateShort(p.publishedAt.slice(0, 10))}
+                    · {formatDateShort(diaDoPost(p))}
                   </span>
                 </span>
                 <span className="flex items-center gap-2 text-xs text-muted-foreground">

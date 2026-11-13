@@ -29,7 +29,8 @@ import {
   type ValidationResult,
 } from "@/lib/content/validator";
 import { suggestMatches } from "@/lib/content/outcomes";
-import { CTA_LABEL } from "@/lib/metrics";
+// O dia do post exibido é o de Brasília (`diaDoPost`): o MESMO que `suggestMatches` casa.
+import { CTA_LABEL, diaDoPost } from "@/lib/metrics";
 import { formatDateShort, formatDateTime } from "@/lib/format";
 import type { AiReview, CtaType, DraftStatus, IgMediaType, PostDraft } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -537,7 +538,7 @@ export function ProducaoBoard({
                         </Badge>
                         <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
                           {c.caption || "(sem legenda)"} ·{" "}
-                          {formatDateShort(c.publishedAt.slice(0, 10))}
+                          {formatDateShort(diaDoPost(c))}
                         </span>
                         <button
                           type="button"

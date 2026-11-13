@@ -48,8 +48,6 @@ export type MetricaId =
   | "fora_das_linhas"
   // ---- conta do Instagram (Conteúdo, Fase 6) ----
   | "seguidores"
-  | "cliques_link_bio"
-  | "conversas_dm"
   | "alcance_conta"
   | "alcance_organico_posts"
   | "views"
@@ -344,35 +342,17 @@ export const DICIONARIO: Record<MetricaId, Definicao> = {
     id: "seguidores",
     nome: "Seguidores",
     definicao:
-      "Último total de seguidores conhecido no período; o líquido é a variação desde o fim do dia anterior ao período — com a série completa, ganhos − perdas.",
+      "Último total de seguidores conhecido no período. O líquido é a variação desde a véspera do período; com a série completa, ganhos − perdas.",
     formula: "followers no último dia com total · líquido = ganhos − perdas (série completa) ou fim − total da véspera",
     fonte: "Instagram (followers_count no sync; follows_and_unfollows para ganhos e perdas)",
     inclui: "ganhos e perdas do período, quando a API fornece a série (100+ seguidores)",
     exclui: "nada — é o total da conta",
   },
-  cliques_link_bio: {
-    id: "cliques_link_bio",
-    nome: "Cliques no link da bio",
-    definicao: "Toques nos links do perfil (site e WhatsApp) somados dia a dia no período.",
-    formula: "Σ profile_links_taps do período",
-    fonte: "Instagram (profile_links_taps)",
-    inclui: "site e botão de WhatsApp",
-    exclui: "cliques em anúncios (ficam na Mídia)",
-  },
-  conversas_dm: {
-    id: "conversas_dm",
-    nome: "Conversas de DM",
-    definicao: "Conversas de DM iniciadas no período — registro manual em Registros; a API não expõe DMs.",
-    formula: "Σ conversas registradas por dia",
-    fonte: "Registro manual (Conteúdo → Registros)",
-    inclui: "só os dias com registro",
-    exclui: "dias sem registro — não viram zero, viram “—”",
-  },
   alcance_conta: {
     id: "alcance_conta",
     nome: "Alcance da conta (pago + orgânico)",
     definicao:
-      "Soma do alcance diário da conta no período, incluindo o que os anúncios entregaram — a Meta não separa o pago aqui.",
+      "Soma do alcance diário da conta no período, com o que os anúncios entregaram. A Meta não separa o pago aqui.",
     formula: "Σ reach diário da conta",
     fonte: "Instagram (reach da conta, por dia)",
     inclui: "orgânico e pago; feed, reels e stories",
@@ -403,7 +383,7 @@ export const DICIONARIO: Record<MetricaId, Definicao> = {
     formula: "Σ total_interactions do período",
     fonte: "Instagram (total_interactions)",
     inclui: "todas as superfícies",
-    exclui: "cliques no link e visitas ao perfil",
+    exclui: "visitas ao perfil",
   },
   visitas_perfil: {
     id: "visitas_perfil",

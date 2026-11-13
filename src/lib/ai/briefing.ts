@@ -22,11 +22,13 @@ import {
   formatPerformance,
   igAccountTotals,
   inRange,
+  melhoresDaGrade,
   objectiveBreakdown,
   pillarPerformance,
   postPerformance,
   postingCadence,
   previousRange,
+  rankingDaGrade,
   type DataWarning,
   type DateRange,
 } from "../metrics";
@@ -174,7 +176,7 @@ export function buildBriefing(
   const ig = igAccountTotals(data.igAccountDaily, range);
   const igPrev = prevRange ? igAccountTotals(data.igAccountDaily, prevRange) : undefined;
 
-  // ---- orgânico: mesmo universo da página Posts (sem teste, sem impulsionado) ----
+  // ---- orgânico: mesmo universo da tela Conteúdo (sem teste, sem impulsionado) ----
   const postsAll = postPerformance(data.igPosts, range, data.igAccountDaily, data.creatives);
   const organicos = postsAll.filter((p) => !p.isTest && !p.boosted);
   const agg = aggregatePostPerformance(postsAll);
@@ -187,27 +189,37 @@ export function buildBriefing(
   const organicRaw = data.igPosts.filter((p) => organicIds.has(p.id));
   const cadencia = postingCadence(data.igPosts, range, opts.nowIso, data.creatives);
 
-  const melhores = [...organicos]
-    .sort((a, b) => b.engagementRate - a.engagementRate)
-    .slice(0, 3)
+  // Os melhores e os piores na MESMA ordem dos "posts que mais funcionaram" do
+  // Conteúdo (`rankingDaGrade`: salvos + compartilhamentos, depois interações, em
+  // número), no período DESTE briefing — no resumo semanal, a semana fechada.
+  const ranking = rankingDaGrade(postsAll);
+  const melhoresDaTela = melhoresDaGrade(postsAll, 3);
+  const melhores = melhoresDaTela.map((p) => ({
+    gancho: short(p.caption),
+    formato: p.type,
+    pilar: p.pillar,
+    alcance: p.reach,
+    salvos: p.saved,
+    compartilhamentos: p.shares,
+    interacoes: p.interactions,
+    engajamento: pct(p.engagementRate),
+    salvosPor1k: r1(p.savesPer1k),
+    retencao: p.retention != null ? pct(p.retention) : undefined,
+    cta: p.cta ? CTA_LABEL[p.cta] : undefined,
+  }));
+  // O fim do ranking (os de 0 interação incluídos), do último para o penúltimo,
+  // nunca repetindo um dos melhores; sem post que sobre, nenhum.
+  const piores = ranking
+    .slice(Math.max(melhoresDaTela.length, ranking.length - 2))
+    .reverse()
     .map((p) => ({
       gancho: short(p.caption),
       formato: p.type,
       pilar: p.pillar,
       alcance: p.reach,
-      engajamento: pct(p.engagementRate),
-      salvosPor1k: r1(p.savesPer1k),
-      retencao: p.retention != null ? pct(p.retention) : undefined,
-      cta: p.cta ? CTA_LABEL[p.cta] : undefined,
-    }));
-  const piores = [...organicos]
-    .sort((a, b) => a.engagementRate - b.engagementRate)
-    .slice(0, 2)
-    .map((p) => ({
-      gancho: short(p.caption),
-      formato: p.type,
-      pilar: p.pillar,
-      alcance: p.reach,
+      salvos: p.saved,
+      compartilhamentos: p.shares,
+      interacoes: p.interactions,
       engajamento: pct(p.engagementRate),
     }));
 
@@ -215,8 +227,9 @@ export function buildBriefing(
   const FUNIL_LEGADO = new Set(["leads", "meetings", "cpl", "cpr"]);
   const metas = data.goals
     .filter((g) => !FUNIL_LEGADO.has(g.metric))
-    // A meta de conversas de DM é da CAMPANHA (o card só a julga na campanha
-    // inteira): num recorte, a IA não recebe um veredito que a tela não dá.
+    // A meta de conversas de DM é da CAMPANHA e não tem mais campo nem tela (o
+    // registro de DMs saiu na Fase 5 de nov/26): a linha antiga, se houver, só
+    // vale na campanha inteira — num recorte, a IA não recebe veredito.
     .filter((g) => !(g.metric === "conversas_dm" && range))
     .map((g) => {
       // `actualForGoal` ancora "agora" em data.updatedAt para permanecer pura;
@@ -255,8 +268,6 @@ export function buildBriefing(
       views: ig.views,
       interacoes: ig.interactions,
       visitasAoPerfil: ig.profileViews,
-      cliquesNoLink: ig.profileLinkTaps,
-      taxaCliqueNoLinkPct: pct(ig.linkTapRate),
       alcanceDiarioSobreBasePct: pct(ig.reachRateOnBase),
       engajamentoSobreAlcancePct: pct(ig.engagementRate),
       descobertaPct: ig.hasReachSplit ? pct(ig.discoveryRate) : null,
@@ -317,10 +328,11 @@ export function buildBriefing(
     },
 
     metas,
-    // O que o painel já detectou sozinho: as regras de conteúdo — a IA prioriza
-    // ou discorda, não redescobre. As ações do motor não vão (dormente). A Mídia
-    // vai como a tela a escreve (`pago.midia`).
-    alertasJaDetectados: buildRecommendations(data, range, opts.nowIso).map((r) => ({
+    // O que o painel já detectou sozinho: as regras de conteúdo (até 6) — a IA
+    // prioriza ou discorda, não redescobre; a tela do Conteúdo mostra só 2
+    // (`acoesDaGrade`). As ações do motor não vão (dormente). A Mídia vai como a
+    // tela a escreve (`pago.midia`).
+    alertasJaDetectados: buildRecommendations(data, range, opts.nowIso, opts.drafts ?? []).map((r) => ({
       severidade: r.severity,
       titulo: r.title,
       dono: r.dono,

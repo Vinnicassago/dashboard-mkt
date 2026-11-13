@@ -57,23 +57,28 @@ export interface IgAccountDaily {
   followers: number; // snapshot at end of day
   reach: number;
   views: number; // unified metric that replaced `impressions`
+  /** Toques nos botões de contato do perfil (`profile_links_taps`), não o link da
+   *  bio; sem leitor de tela desde a Fase 5 (nov/26). */
   profileLinkTaps: number;
   accountsEngaged: number;
   totalInteractions: number;
   profileViews: number; // visits to the profile
   reachFollowers?: number; // reach among existing followers
   reachNonFollowers?: number; // reach among non-followers (discovery)
-  /** Conversas de DM iniciadas no dia — registro MANUAL (a API do Instagram não
-   *  expõe DMs). É a métrica de negócio do perfil; semanal = soma dos dias. */
+  /** Conversas de DM iniciadas no dia — registro manual até nov/26; o formulário
+   *  saiu na Fase 5 (a API do Instagram não expõe DMs). O que foi gravado
+   *  continua legível. */
   dmConversations?: number;
   /** Crescimento BRUTO do dia (métrica follows_and_unfollows): quem começou a
    *  seguir vs quem deixou — o líquido esconde churn. Exige conta 100+. */
   followsDay?: number;
   unfollowsDay?: number;
-  /** Cliques no link da bio por tipo de botão (breakdown contact_button_type). */
+  /** Toques por tipo de botão (breakdown `contact_button_type`). O breakdown não
+   *  tem WEBSITE nem WHATSAPP: sempre vazio. */
   linkTapsWebsite?: number;
   linkTapsWhatsApp?: number;
-  // ---- rotina diária de presença (registro MANUAL — a API não expõe nada disto) ----
+  // ---- rotina diária de presença (registro manual até nov/26; o formulário saiu
+  // na Fase 5 — a API não expõe nada disto) ----
   /** Stories publicados no dia (o guia pede 3–5). */
   storiesPosted?: number;
   /** Destes, quantos eram interativos: enquete, quiz, caixinha (o guia pede ≥1). */

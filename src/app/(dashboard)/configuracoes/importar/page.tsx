@@ -32,8 +32,7 @@ export default async function ImportarPage({ searchParams }: { searchParams: Pro
     <div className="max-w-3xl space-y-6">
       <RolarParaAncora />
       <p className="text-sm text-muted-foreground">
-        O que entra à mão. Registros manuais do Instagram (snapshot, DMs, rotina de presença, marcação de
-        posts) ficam em{" "}
+        O que entra à mão. A marcação de teste, a duração, o pilar e o CTA dos posts ficam em{" "}
         <Link href={comPeriodo("/conteudo/registros", ctx.rangeKey)} className="font-medium text-primary underline-offset-4 hover:underline">
           Conteúdo → Registros
         </Link>

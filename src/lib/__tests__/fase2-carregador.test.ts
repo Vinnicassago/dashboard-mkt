@@ -61,7 +61,7 @@ describe("carregarBussola: o modo sai da chave do período", () => {
     expect(b.range).toEqual({ from: "2026-10-30", to: "2026-11-05" });
     expect(b.live).toBeNull();
     expect(b.inicio.cartoes.leads.valor).toBe(b.kpis.leads.valor);
-    expect(b.inicio.rodape.links.map((l) => l.href)).toEqual(["/funil?range=7d", "/midia?range=7d", "/conteudo/posts?range=7d"]);
+    expect(b.inicio.rodape.links.map((l) => l.href)).toEqual(["/funil?range=7d", "/midia?range=7d", "/conteudo?range=7d"]);
     // O seed tem LP em julho e nada nesta semana: o rastreio "parou", sem citar "Onde trava".
     const lp = b.alertas.find((a) => a.id === "lp-sem-dado");
     expect(lp?.titulo).toBe("O rastreio da landing page parou: sem visitas registradas no período");

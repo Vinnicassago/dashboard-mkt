@@ -7,36 +7,22 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { getData, listDrafts } from "@/lib/data/store";
 import { activeBrandSlug } from "@/lib/active-brand";
 import { can } from "@/lib/auth/guard";
-import { ctaOf, dayOf } from "@/lib/metrics";
+import { ctaOf, diaDoPost } from "@/lib/metrics";
 import {
   PLAYBOOK_DATE,
   PLAYBOOK_VERSION,
   WEEKLY_MIX,
-  WEEK_ORDER,
   hasPlaybook,
 } from "@/lib/content/playbook";
 import { isAiConfigured } from "@/lib/ai/config";
-import { buildOutcomeReport, presenceRoutine } from "@/lib/content/outcomes";
+import { buildOutcomeReport, gradeDaSemana, presenceRoutine } from "@/lib/content/outcomes";
 import { ROTINA_DIARIA } from "@/lib/content/playbook";
 import { formatDateShort, formatDecimal, formatPercentValue } from "@/lib/format";
+import { hojeEmBrasilia } from "@/lib/range";
 import { cn } from "@/lib/utils";
-import type { PostDraft } from "@/lib/types";
 
 // A grade da semana depende de "hoje" — nunca do momento do build.
 export const dynamic = "force-dynamic";
-
-/** Segunda-feira (UTC) da semana de uma data — mesma convenção de `weekdayOf`. */
-function weekStart(day: string): string {
-  const d = new Date(`${day}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
-  return d.toISOString().slice(0, 10);
-}
-
-function addDays(day: string, n: number): string {
-  const d = new Date(`${day}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + n);
-  return d.toISOString().slice(0, 10);
-}
 
 export default async function ProducaoPage() {
   const brand = await activeBrandSlug();
@@ -57,10 +43,10 @@ export default async function ProducaoPage() {
   // funciona igual, só sem a camada de julgamento editorial.
   const aiEnabled = isAiConfigured();
 
-  // Contexto do ciclo de CTA: peças já publicadas, mais recente primeiro.
+  // Contexto do ciclo de CTA: peças já publicadas, mais recente primeiro (no dia de Brasília, `diaDoPost`).
   const published = data.igPosts
     .filter((p) => !p.isTest)
-    .map((p) => ({ day: dayOf(p.publishedAt), cta: ctaOf(p) }))
+    .map((p) => ({ day: diaDoPost(p), cta: ctaOf(p) }))
     .sort((a, b) => b.day.localeCompare(a.day));
 
   // ---- loop fechado e rotina (Etapa 4) ----
@@ -68,33 +54,10 @@ export default async function ProducaoPage() {
   const rotina = presenceRoutine(data.igAccountDaily);
 
   // ---- grade da semana corrente ----
-  const hoje = new Date().toISOString().slice(0, 10);
-  const inicio = weekStart(hoje);
-  const publicadosPorDia = new Map<string, number>();
-  for (const p of published) publicadosPorDia.set(p.day, (publicadosPorDia.get(p.day) ?? 0) + 1);
-
-  const draftsAtivos = drafts.filter((d) => d.status !== "descartado");
-  const draftsPorDia = new Map<string, PostDraft[]>();
-  for (const d of draftsAtivos) {
-    if (!d.plannedFor) continue;
-    draftsPorDia.set(d.plannedFor, [...(draftsPorDia.get(d.plannedFor) ?? []), d]);
-  }
-
-  const semana = WEEK_ORDER.map((slot, i) => {
-    const day = addDays(inicio, i);
-    return {
-      slot,
-      day,
-      isToday: day === hoje,
-      publicados: publicadosPorDia.get(day) ?? 0,
-      drafts: draftsPorDia.get(day) ?? [],
-    };
-  });
-
-  // Aderência: dos slots de feed da grade, quantos têm peça (publicada ou agendada).
-  const slotsDeFeed = semana.filter((d) => d.slot.type !== null);
-  const preenchidos = slotsDeFeed.filter((d) => d.publicados > 0 || d.drafts.length > 0).length;
-  const aprovadas = draftsAtivos.filter((d) => d.status === "aprovado").length;
+  // UMA função (`gradeDaSemana`, dia de Brasília): a MESMA da ação "Complete a grade da
+  // semana" do Conteúdo — o "{p}/{s} slots com peça" daqui é o "{p} de {s}" de lá.
+  const g = gradeDaSemana(data.igPosts, drafts, hojeEmBrasilia());
+  const aprovadas = drafts.filter((d) => d.status === "aprovado").length;
 
   return (
     <div className="space-y-6">
@@ -117,35 +80,35 @@ export default async function ProducaoPage() {
               <CalendarDays className="size-4 text-muted-foreground" />
               Grade da semana
               <span className="font-normal text-muted-foreground">
-                {formatDateShort(inicio)} – {formatDateShort(addDays(inicio, 6))}
+                {formatDateShort(g.inicio)} – {formatDateShort(g.fim)}
               </span>
             </p>
             <div className="flex items-center gap-2">
-              <Badge variant={preenchidos === slotsDeFeed.length ? "good" : "muted"}>
-                {preenchidos}/{slotsDeFeed.length} slots com peça
+              <Badge variant={g.preenchidos === g.slotsDeFeed ? "good" : "muted"}>
+                {g.preenchidos}/{g.slotsDeFeed} slots com peça
               </Badge>
               {aprovadas > 0 ? <Badge variant="good">{aprovadas} aprovada(s)</Badge> : null}
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
-            {semana.map((d) => {
+            {g.dias.map((d) => {
               const semFeed = d.slot.type === null;
-              const total = d.publicados + d.drafts.length;
+              const total = d.publicados + d.pecas.length;
               const canibaliza = total > 1;
               return (
                 <div
-                  key={d.day}
+                  key={d.dia}
                   className={cn(
                     "rounded-lg border p-2.5",
-                    d.isToday && "border-primary/40 bg-primary/5",
+                    d.ehHoje && "border-primary/40 bg-primary/5",
                     canibaliza && "border-[var(--critical)]/50",
                   )}
                 >
                   <p className="flex items-baseline justify-between gap-1">
                     <span className="text-xs font-semibold">{d.slot.label}</span>
                     <span className="tabular text-[11px] text-muted-foreground">
-                      {formatDateShort(d.day)}
+                      {formatDateShort(d.dia)}
                     </span>
                   </p>
                   <p className="mt-1 text-[11px] leading-tight text-muted-foreground">
@@ -155,7 +118,7 @@ export default async function ProducaoPage() {
                     {d.publicados > 0 ? (
                       <Badge variant="muted">{d.publicados} publicado(s)</Badge>
                     ) : null}
-                    {d.drafts.map((dr) => (
+                    {d.pecas.map((dr) => (
                       <Badge
                         key={dr.id}
                         variant={dr.status === "aprovado" ? "good" : "warning"}
@@ -176,7 +139,7 @@ export default async function ProducaoPage() {
             })}
           </div>
 
-          {semana.some((d) => d.publicados + d.drafts.length > 1) ? (
+          {g.dias.some((d) => d.publicados + d.pecas.length > 1) ? (
             <p className="text-xs text-[var(--danger-text)]">
               Há dia com 2+ peças — elas disputam a mesma janela de teste do algoritmo. Espace uma
               por dia.

@@ -21,6 +21,7 @@ import type {
 import { isAwareness } from "./brands";
 import { diaCoberto, type Intervalo } from "./cobertura";
 import { diaDoLead } from "./horario-util";
+import { ROTULO_DO_TIPO } from "./conteudo-tela";
 import { hojeEmBrasilia } from "./range";
 import { atribuidor, isPaidSource } from "./atribuicao";
 import {
@@ -41,17 +42,22 @@ export interface DateRange {
 const div = (a: number, b: number) => (b > 0 ? a / b : 0);
 
 /**
- * O prefixo AAAA-MM-DD da string, sem fuso nenhum — o dia UTC de um instante.
- * Serve para o que já é dia da FONTE: as métricas diárias da conta do Instagram
- * (dia UTC da Meta, `instagram.ts`) e o filtro de PERÍODO dos posts — UM só na
- * tela de Posts: a tabela (`postPerformance`), os agregados (pilar, formato, dia
- * da semana, retenção) e a cadência (`postingCadence`) contam o mesmo conjunto. O
- * dia de um lead ou evento é o de Brasília: `diaDoLead` (`horario-util.ts`); DENTRO
- * da cadência (maior intervalo, dias com 2+ peças) e no "último post"
- * (`ultimoPostDaGrade`) o dia do post também é o de Brasília.
+ * O prefixo AAAA-MM-DD da string — o dia UTC de um instante. Serve ao que é dia
+ * da FONTE: as linhas diárias (`ad_daily`, a conta do Instagram) e a base de
+ * seguidores do dia do post (`followersAt`). O post é um instante: quem é do
+ * período sai de `diaDoPost` (Brasília), em todo filtro de post.
  */
 export function dayOf(iso: string): string {
   return iso.slice(0, 10);
+}
+
+/**
+ * O dia de um post: o de Brasília (`diaDoLead(publishedAt)`). O post é um INSTANTE, não
+ * um agregado diário da fonte: quem é do período, a cadência, as variações, o último
+ * post, Registros e a grade da semana contam o MESMO dia — o que a tela exibe.
+ */
+export function diaDoPost(p: Pick<IgPost, "publishedAt">): string {
+  return diaDoLead(p.publishedAt);
 }
 
 export function inRange(day: string, range?: DateRange): boolean {
@@ -1607,9 +1613,10 @@ export function postPerformance(
     return found;
   };
   return posts
-    .filter((p) => inRange(dayOf(p.publishedAt), range))
+    .filter((p) => inRange(diaDoPost(p), range))
     .map((p) => {
       const interactions = p.likes + p.comments + p.saved + p.shares;
+      // A base é a junção com as linhas DIÁRIAS da conta (dia da fonte): fica em `dayOf`.
       const base = followersAt(dayOf(p.publishedAt));
       return {
         ...p,
@@ -1637,7 +1644,7 @@ export interface PostAggregate {
   avgReach: number;
   avgEr: number; // média das taxas de engajamento por post
   /** Σ salvos ÷ Σ views × 1000 — POOLED: posts com mais views pesam mais
-   *  (a coluna "Salvos/1k" da tabela é por post; aqui é o agregado da janela) */
+   *  (`PostPerf.savesPer1k` é por post; aqui é o agregado da janela) */
   savesPer1k: number;
   sharesPerPost: number;
   commentsPerPost: number;
@@ -1700,6 +1707,36 @@ export function aggregatePostPerformance(input: PostPerf[]): PostAggregate {
   };
 }
 
+/**
+ * A GRADE do período na ordem do que FUNCIONOU: mais salvos + compartilhamentos
+ * (`saved + shares`, os sinais que o guia mede); empate: mais interações (curtidas +
+ * comentários + salvos + compartilhamentos, `PostPerf.interactions`); depois mais
+ * alcance; depois o mais recente (`publishedAt`); depois o id. Sem teste nem
+ * impulsionado (a régua de `aggregatePostPerformance`). Sempre em número, nunca taxa.
+ * Inclui os de 0 interação (no fim). Tela (os melhores do Conteúdo) e IA (melhores e
+ * piores do resumo) leem desta ordem — um fato, um número.
+ */
+export function rankingDaGrade(posts: PostPerf[]): PostPerf[] {
+  const sc = (p: PostPerf) => p.saved + p.shares;
+  return posts
+    .filter((p) => !p.isTest && !p.boosted)
+    .sort(
+      (a, b) =>
+        sc(b) - sc(a) ||
+        b.interactions - a.interactions ||
+        b.reach - a.reach ||
+        b.publishedAt.localeCompare(a.publishedAt) ||
+        (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+    );
+}
+
+/** Os `n` primeiros de `rankingDaGrade` com ≥ 1 interação (n padrão 3). */
+export function melhoresDaGrade(posts: PostPerf[], n = 3): PostPerf[] {
+  return rankingDaGrade(posts)
+    .filter((p) => p.interactions > 0)
+    .slice(0, n);
+}
+
 /** Distribuição de CTA dos posts (para ver o excesso de "me chama na DM"). */
 export function ctaDistribution(
   list: PostPerf[],
@@ -1733,7 +1770,7 @@ export interface PillarPerf {
 export function pillarPerformance(posts: IgPost[], range?: DateRange): PillarPerf[] {
   const byPillar = new Map<string, IgPost[]>();
   for (const p of posts.filter(
-    (p) => p.pillar && !p.isTest && inRange(dayOf(p.publishedAt), range),
+    (p) => p.pillar && !p.isTest && inRange(diaDoPost(p), range),
   )) {
     const list = byPillar.get(p.pillar!) ?? [];
     list.push(p);
@@ -1759,46 +1796,6 @@ export function pillarPerformance(posts: IgPost[], range?: DateRange): PillarPer
       };
     })
     .sort((a, b) => b.avgEngagement - a.avgEngagement);
-}
-
-// ---- reels: tendência de retenção ----------------------------------
-
-export interface ReelWatchPoint {
-  /** ISO completo da publicação — único por reel (dois reels no mesmo dia não
-   *  podem dividir a categoria do eixo X, senão o chart colapsa os pontos). */
-  date: string;
-  caption: string;
-  avgWatchTime: number; // segundos
-  movingAvg: number; // média móvel dos últimos 3 reels (inclusive)
-}
-
-/**
- * Série de tempo médio assistido por reel, em ordem de publicação, com média
- * móvel — responde "a retenção está subindo?" mesmo sem a duração do vídeo
- * (a API não fornece duração; retenção percentual entra com dado manual).
- */
-export function reelWatchSeries(posts: IgPost[], range?: DateRange): ReelWatchPoint[] {
-  const reels = posts
-    .filter(
-      (p) =>
-        p.type === "reel" &&
-        !p.isTest &&
-        p.avgWatchTime != null &&
-        inRange(dayOf(p.publishedAt), range),
-    )
-    .sort((a, b) => a.publishedAt.localeCompare(b.publishedAt));
-  return reels.map((p, i) => {
-    const window = reels.slice(Math.max(0, i - 2), i + 1);
-    return {
-      date: p.publishedAt,
-      caption: p.caption,
-      avgWatchTime: p.avgWatchTime ?? 0,
-      movingAvg: div(
-        window.reduce((s, r) => s + (r.avgWatchTime ?? 0), 0),
-        window.length,
-      ),
-    };
-  });
 }
 
 // ---- cadência de publicação ----------------------------------------
@@ -1827,9 +1824,10 @@ export interface PostingCadence {
 /**
  * O filtro da GRADE: fora os testes e os impulsionados (criativo aponta para a
  * mídia por id ou permalink, a MESMA regra de `postPerformance`) — ou um
- * conjunto de ids já resolvido.
+ * conjunto de ids já resolvido. Exportado: `variacoesNaGrade` (conteudo.ts) lê o
+ * MESMO filtro.
  */
-function filtroDaGrade(foraDaGrade?: ReadonlySet<string> | Creative[]): (p: IgPost) => boolean {
+export function filtroDaGrade(foraDaGrade?: ReadonlySet<string> | Creative[]): (p: IgPost) => boolean {
   const idsImpulsionados = new Set<string>();
   const permalinksImpulsionados = new Set<string>();
   if (Array.isArray(foraDaGrade)) {
@@ -1847,7 +1845,7 @@ function filtroDaGrade(foraDaGrade?: ReadonlySet<string> | Creative[]): (p: IgPo
 }
 
 /**
- * "Último post há N dias" — UMA conta para Posts, Início e IA: dias entre o dia
+ * "Último post há N dias" — UMA conta para o Conteúdo, o Início e a IA: dias entre o dia
  * de Brasília do último post DA GRADE no histórico INTEIRO (sem teste nem
  * impulsionado) e hoje em Brasília (`hojeEmBrasilia(nowIso)`). 0 = hoje; `null`
  * = nunca houve post da grade. Não olha o período: uma semana sem post é "há 9
@@ -1862,7 +1860,7 @@ export function ultimoPostDaGrade(
   let ultimo: string | undefined;
   for (const p of posts) {
     if (!daGrade(p)) continue;
-    const d = diaDoLead(p.publishedAt);
+    const d = diaDoPost(p);
     if (d && (!ultimo || d > ultimo)) ultimo = d;
   }
   if (!ultimo) return null;
@@ -1881,10 +1879,10 @@ export function ultimoPostDaGrade(
  * (impulsionado = criativo aponta para a mídia por id ou permalink, a MESMA
  * regra de `postPerformance`) ou um conjunto de ids já resolvido.
  *
- * Fase 2 (nov/26): dentro da janela, o dia do post é o de Brasília (intervalo,
- * dias com 2+) e `daysSinceLast` sai de `ultimoPostDaGrade` (histórico inteiro,
- * `null` sem post nenhum); quem é da janela sai do filtro de `postPerformance`
- * (`dayOf`) — a contagem é a do card "Posts" da mesma tela.
+ * Fase 2 (nov/26): `daysSinceLast` sai de `ultimoPostDaGrade` (histórico inteiro,
+ * `null` sem post nenhum). Fase 5 (nov/26): o período e os dias da janela
+ * (intervalo, dias com 2+) são o MESMO dia de Brasília (`diaDoPost`), o filtro de
+ * `postPerformance` — a contagem é a do placar do Conteúdo ("N posts no período").
  */
 export function postingCadence(
   posts: IgPost[],
@@ -1894,12 +1892,11 @@ export function postingCadence(
 ): PostingCadence {
   const daGrade = filtroDaGrade(foraDaGrade);
   // O dia do post é o de Brasília (a mesma régua do "último post"): um post às
-  // 22h é do dia em que foi publicado para quem usa o painel. Mas QUEM é do
-  // período sai do mesmo filtro da tabela e do card "Posts" (`dayOf`, dia UTC):
-  // senão um post das 21h–24h na borda entrava num número da tela e não no outro.
-  const diaDoPost = (p: IgPost) => diaDoLead(p.publishedAt);
+  // 22h é do dia em que foi publicado para quem usa o painel. QUEM é do período
+  // sai do MESMO dia (`diaDoPost`), o filtro de `postPerformance` e do placar do
+  // Conteúdo: o período e os dias da janela são o mesmo dia de Brasília.
   const sorted = posts
-    .filter((p) => daGrade(p) && inRange(dayOf(p.publishedAt), range))
+    .filter((p) => daGrade(p) && inRange(diaDoPost(p), range))
     .sort((a, b) => Date.parse(a.publishedAt) - Date.parse(b.publishedAt) || a.publishedAt.localeCompare(b.publishedAt));
   const first = sorted[0] ? diaDoPost(sorted[0]) : undefined;
   const last = sorted.at(-1) ? diaDoPost(sorted.at(-1)!) : undefined;
@@ -1961,11 +1958,9 @@ export interface IgAccountTotals {
   reach: number;
   views: number;
   interactions: number;
-  profileLinkTaps: number;
   profileViews: number;
   accountsEngaged: number;
   engagementRate: number; // interactions / reach
-  linkTapRate: number; // profile link taps / profile views
   reachFollowers: number;
   reachNonFollowers: number;
   discoveryRate: number; // non-follower reach / total split reach
@@ -1984,10 +1979,9 @@ export interface IgAccountTotals {
   followsTotal: number;
   unfollowsTotal: number;
   hasFollowSplit: boolean;
-  /** cliques na bio por destino (breakdown contact_button_type) */
-  linkTapsWebsite: number;
-  linkTapsWhatsApp: number;
-  hasLinkTapSplit: boolean;
+  // Os toques nos botões de contato do perfil (`profileLinkTaps`, `linkTaps*`) ficam só na
+  // linha diária, que o sync grava: sem leitor desde a Fase 5 de nov/26 — não medem o link
+  // da bio, e o breakdown `contact_button_type` não tem WEBSITE nem WHATSAPP.
 }
 
 /** Sum an Instagram account window, reusable for the current and previous period. */
@@ -1998,7 +1992,6 @@ export function igAccountTotals(rows: IgAccountDaily[], range?: DateRange): IgAc
   const sum = (pick: (r: IgAccountDaily) => number) => sorted.reduce((s, r) => s + pick(r), 0);
   const reach = sum((r) => r.reach);
   const interactions = sum((r) => r.totalInteractions);
-  const profileLinkTaps = sum((r) => r.profileLinkTaps);
   const profileViews = sum((r) => r.profileViews ?? 0);
   /**
    * Split de alcance seguidor/não-seguidor: só entram os dias com AS DUAS
@@ -2014,12 +2007,9 @@ export function igAccountTotals(rows: IgAccountDaily[], range?: DateRange): IgAc
   const reachFollowers = diasComSplit.reduce((s, r) => s + (r.reachFollowers ?? 0), 0);
   const reachNonFollowers = diasComSplit.reduce((s, r) => s + (r.reachNonFollowers ?? 0), 0);
   const hasReachSplit = diasComSplit.length > 0;
-  // Mesmo critério para os outros dois breakdowns da Meta.
+  // Mesmo critério para o breakdown de seguir/deixar de seguir.
   const diasComFollowSplit = sorted.filter(
     (r) => r.followsDay != null && r.unfollowsDay != null,
-  );
-  const diasComLinkSplit = sorted.filter(
-    (r) => r.linkTapsWebsite != null && r.linkTapsWhatsApp != null,
   );
   // Seguidores: a regra ÚNICA (`seguidoresDoPeriodo`) — o último total conhecido
   // e o líquido desde a véspera. "Último − 1º dia" deixava o 1º dia de fora e
@@ -2035,11 +2025,9 @@ export function igAccountTotals(rows: IgAccountDaily[], range?: DateRange): IgAc
     reach,
     views: sum((r) => r.views),
     interactions,
-    profileLinkTaps,
     profileViews,
     accountsEngaged: sum((r) => r.accountsEngaged),
     engagementRate: div(interactions, reach),
-    linkTapRate: div(profileLinkTaps, profileViews),
     reachFollowers,
     reachNonFollowers,
     discoveryRate: div(reachNonFollowers, reachFollowers + reachNonFollowers),
@@ -2054,66 +2042,7 @@ export function igAccountTotals(rows: IgAccountDaily[], range?: DateRange): IgAc
     followsTotal: diasComFollowSplit.reduce((s, r) => s + (r.followsDay ?? 0), 0),
     unfollowsTotal: diasComFollowSplit.reduce((s, r) => s + (r.unfollowsDay ?? 0), 0),
     hasFollowSplit: diasComFollowSplit.length > 0,
-    linkTapsWebsite: diasComLinkSplit.reduce((s, r) => s + (r.linkTapsWebsite ?? 0), 0),
-    linkTapsWhatsApp: diasComLinkSplit.reduce((s, r) => s + (r.linkTapsWhatsApp ?? 0), 0),
-    hasLinkTapSplit: diasComLinkSplit.length > 0,
   };
-}
-
-// ---- conversas de DM por semana ------------------------------------
-
-export interface DmWeekPoint {
-  week: string; // yyyy-mm-dd da segunda-feira
-  label: string; // "dd/mm"
-  conversations: number;
-}
-
-/** Conversas de DM (registro manual) somadas por semana ISO. */
-export function weeklyDmSeries(rows: IgAccountDaily[], range?: DateRange): DmWeekPoint[] {
-  const byWeek = new Map<string, number>();
-  for (const r of rows.filter((r) => inRange(r.date, range))) {
-    if (r.dmConversations == null) continue;
-    const w = weekStart(r.date);
-    byWeek.set(w, (byWeek.get(w) ?? 0) + r.dmConversations);
-  }
-  return [...byWeek.entries()]
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([week, conversations]) => ({
-      week,
-      label: `${week.slice(8, 10)}/${week.slice(5, 7)}`,
-      conversations,
-    }));
-}
-
-// ---- instagram: série diária orgânica ------------------------------
-
-export interface IgDailyPoint {
-  date: string;
-  reach: number;
-  views: number;
-  interactions: number;
-  profileViews: number;
-  linkTaps: number;
-  engagementRate: number; // interações ÷ alcance do dia
-  /** interações ÷ seguidores do dia — tendência de aquecimento da base */
-  warmth: number;
-}
-
-/** Série diária p/ tendência de engajamento e do funil de perfil (orgânico). */
-export function igEngagementSeries(rows: IgAccountDaily[], range?: DateRange): IgDailyPoint[] {
-  return [...rows]
-    .filter((r) => inRange(r.date, range))
-    .sort((a, b) => a.date.localeCompare(b.date))
-    .map((r) => ({
-      date: r.date,
-      reach: r.reach,
-      views: r.views,
-      interactions: r.totalInteractions,
-      profileViews: r.profileViews,
-      linkTaps: r.profileLinkTaps,
-      engagementRate: div(r.totalInteractions, r.reach),
-      warmth: div(r.totalInteractions, r.followers),
-    }));
 }
 
 // ---- awareness: North Star de marca de seguidores ------------------
@@ -2146,7 +2075,6 @@ export interface AwarenessKpis {
   discoveryRate: number; // alcance de não-seguidores ÷ alcance com split
   hasReachSplit: boolean;
   profileViews: number;
-  profileLinkTaps: number;
 }
 
 export function awarenessKpis(data: DashboardData, range?: DateRange): AwarenessKpis {
@@ -2168,18 +2096,10 @@ export function awarenessKpis(data: DashboardData, range?: DateRange): Awareness
     discoveryRate: t.discoveryRate,
     hasReachSplit: t.hasReachSplit,
     profileViews: t.profileViews,
-    profileLinkTaps: t.profileLinkTaps,
   };
 }
 
 // ---- instagram: performance by post format -------------------------
-
-const IG_TYPE_LABEL: Record<IgPost["type"], string> = {
-  feed: "Feed",
-  carrossel: "Carrossel",
-  reel: "Reel",
-  story: "Story",
-};
 
 /** Amostra mínima para coroar um "melhor formato"/"melhor dia" sem enganar. */
 export const MIN_SAMPLE_POSTS = 2;
@@ -2201,7 +2121,7 @@ export interface FormatPerf {
 /** Group posts by format so the planner can compare reel vs carousel vs feed. */
 export function formatPerformance(posts: IgPost[], range?: DateRange): FormatPerf[] {
   const byType = new Map<IgPost["type"], IgPost[]>();
-  for (const p of posts.filter((p) => !p.isTest && inRange(dayOf(p.publishedAt), range))) {
+  for (const p of posts.filter((p) => !p.isTest && inRange(diaDoPost(p), range))) {
     const list = byType.get(p.type) ?? [];
     list.push(p);
     byType.set(p.type, list);
@@ -2216,7 +2136,8 @@ export function formatPerformance(posts: IgPost[], range?: DateRange): FormatPer
     const totWatch = list.reduce((s, p) => s + (p.totalWatchTime ?? 0), 0);
     out.push({
       type,
-      label: IG_TYPE_LABEL[type],
+      // O rótulo do tipo é o da tela (`ROTULO_DO_TIPO`, `conteudo-tela.ts`): fonte única.
+      label: ROTULO_DO_TIPO[type],
       count: n,
       avgReach: div(totReach, n),
       avgEngagement: div(
@@ -2237,51 +2158,6 @@ export function formatPerformance(posts: IgPost[], range?: DateRange): FormatPer
   }
   // best-engaging format first (the "champion" to double down on)
   return out.sort((a, b) => b.avgEngagement - a.avgEngagement);
-}
-
-// ---- instagram: best weekday to post -------------------------------
-
-const WEEKDAY_LABEL = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
-
-export interface WeekdayPerf {
-  weekday: number; // 0=Sun … 6=Sat
-  label: string;
-  count: number;
-  avgReach: number;
-  avgEngagement: number;
-  /** false = amostra pequena (< MIN_SAMPLE_POSTS) — não tratar como "melhor dia" */
-  sampleOk: boolean;
-}
-
-/** Average engagement/reach per weekday, to hint the best publishing days. */
-export function weekdayPerformance(posts: IgPost[], range?: DateRange): WeekdayPerf[] {
-  const byDay = new Map<number, IgPost[]>();
-  for (const p of posts.filter((p) => !p.isTest && inRange(dayOf(p.publishedAt), range))) {
-    const wd = new Date(p.publishedAt).getUTCDay();
-    const list = byDay.get(wd) ?? [];
-    list.push(p);
-    byDay.set(wd, list);
-  }
-  const out: WeekdayPerf[] = [];
-  for (let wd = 0; wd < 7; wd++) {
-    const list = byDay.get(wd);
-    if (!list?.length) continue;
-    out.push({
-      weekday: wd,
-      label: WEEKDAY_LABEL[wd],
-      count: list.length,
-      avgReach: div(
-        list.reduce((s, p) => s + p.reach, 0),
-        list.length,
-      ),
-      avgEngagement: div(
-        list.reduce((s, p) => s + postEngagementRate(p), 0),
-        list.length,
-      ),
-      sampleOk: list.length >= MIN_SAMPLE_POSTS,
-    });
-  }
-  return out;
 }
 
 // ---- landing page ---------------------------------------------------
@@ -2386,7 +2262,7 @@ export function actualForGoal(goal: Goal, data: DashboardData, range?: DateRange
     // As percentuais devolvem VALOR percentual (40 = 40%) — o alvo é gravado
     // na mesma unidade no GoalsForm, e a exibição usa formatPercentValue.
     // data.creatives habilita a exclusão de posts impulsionados — mesmas contas
-    // da página Posts, senão a meta leria um universo diferente do painel.
+    // do placar do Conteúdo, senão a meta leria um universo diferente do painel.
     case "retencao_reels": {
       const agg = aggregatePostPerformance(
         postPerformance(data.igPosts, range, undefined, data.creatives),
@@ -2431,12 +2307,12 @@ export function actualForGoal(goal: Goal, data: DashboardData, range?: DateRange
 /**
  * Funil de crescimento do perfil: Alcance → Visitas ao perfil → Novos
  * seguidores. Mostra ONDE o perfil vaza — muito alcance e pouca visita = gancho
- * fraco; muita visita e poucos seguidores = feed/prova social fraca. (A perda
- * visita→clique no link já aparece como "Taxa de clique no link".)
+ * fraco; muita visita e poucos seguidores = feed/prova social fraca.
  *
  * O alcance é o da CONTA, pago + orgânico — o rótulo diz isso (B11). O 3º
  * degrau é o líquido de `seguidoresDoPeriodo` (via `netNew`), o mesmo do card
- * Seguidores. A tela de Conteúdo usa `funilDoPerfil` (lib/conteudo.ts).
+ * Seguidores. Sem leitor de tela desde a Fase 5 de nov/26 (o Conteúdo mostra os
+ * números da conta num recolhido); fica com o teste de `fase6-conteudo`.
  */
 export function buildOrganicFunnel(rows: IgAccountDaily[], range?: DateRange): FunnelStage[] {
   const t = igAccountTotals(rows, range);
@@ -2445,20 +2321,6 @@ export function buildOrganicFunnel(rows: IgAccountDaily[], range?: DateRange): F
     { key: "alcance", label: "Alcance da conta (pago + orgânico)", value: t.reach },
     { key: "visitas", label: "Visitas ao perfil", value: t.profileViews, fromPrev: div(t.profileViews, t.reach) },
     { key: "seguidores", label: "Novos seguidores", value: netNew, fromPrev: div(netNew, t.profileViews) },
-  ];
-}
-
-/**
- * O braço de CONVERSÃO do perfil: Views → Visitas ao perfil → Cliques no link.
- * Complementa o funil de crescimento (alcance→seguidor) mostrando onde o
- * tráfego vaza antes de virar clique na bio (CTR baixo = bio/oferta fraca).
- */
-export function buildProfileClickFunnel(rows: IgAccountDaily[], range?: DateRange): FunnelStage[] {
-  const t = igAccountTotals(rows, range);
-  return [
-    { key: "views", label: "Views", value: t.views },
-    { key: "visitas", label: "Visitas ao perfil", value: t.profileViews, fromPrev: div(t.profileViews, t.views) },
-    { key: "link", label: "Cliques no link", value: t.profileLinkTaps, fromPrev: div(t.profileLinkTaps, t.profileViews) },
   ];
 }
 

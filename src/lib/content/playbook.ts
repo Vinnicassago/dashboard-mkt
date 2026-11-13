@@ -72,8 +72,7 @@ export function slotForWeekday(weekday: number): WeekSlot | undefined {
 
 /**
  * Dia da semana de uma data pura `yyyy-mm-dd`, em UTC. Usar UTC (e não o fuso
- * local) mantém a leitura estável no servidor e no cliente — mesma convenção de
- * `weekdayPerformance` em metrics.ts.
+ * local) mantém a leitura estável no servidor e no cliente.
  */
 export function weekdayOf(day: string): number {
   return new Date(`${day.slice(0, 10)}T00:00:00Z`).getUTCDay();
