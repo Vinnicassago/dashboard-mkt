@@ -2,7 +2,9 @@
  * De qual anúncio veio o lead — puro, fonte ÚNICA da junção lead → anúncio.
  *
  * O utm_content chega de quatro jeitos, e cada um pede uma resposta diferente:
- *   • "nome|123456789" ou só o id — o id do anúncio decide (o caso bom);
+ *   • com o id — "nome|123456789" (a página antiga), "nome__ad_123456789" (o link
+ *     da Meta desde nov/26: `{{ad.name}}__ad_{{ad.id}}`) ou só o id — o id do
+ *     anúncio decide (o caso bom);
  *   • só o nome — vale se UM anúncio da marca tem esse nome; se dois têm
  *     ("Carrossel -"), a origem é AMBÍGUA e não se atribui a nenhum (atribuir ao
  *     primeiro mandaria pausar o errado);
@@ -35,13 +37,29 @@ export function temMacro(utmContent?: string | null): boolean {
 }
 
 /**
- * Extrai o id do anúncio embutido no utm_content ("nome do criativo|123456789"
- * → "123456789"). Ids da Meta são numéricos longos; sem id embutido, undefined.
+ * O id no FIM do utm_content: sozinho ("123456789"), depois de "|" ("nome do
+ * criativo|123456789") ou depois de "__ad_" ("nome do criativo__ad_123456789", o
+ * link da Meta desde nov/26). Ids da Meta são numéricos longos; número colado ao
+ * nome ("Post 12345", "nome|abc12345") não é id.
  */
+const ID_NO_UTM_CONTENT = /(?:^|\||__ad_)\s*(\d{5,})$/i;
+
+/** O id da campanha no fim do utm_campaign do link da Meta desde nov/26 (`{{campaign.name}}__cid_{{campaign.id}}`). */
+const ID_NO_UTM_CAMPAIGN = /__cid_\s*(\d{5,})$/i;
+
+/** Extrai o id do anúncio embutido no utm_content ("nome|123456789" ou "nome__ad_123456789" → "123456789"); sem id embutido, undefined. */
 export function adIdFromUtmContent(utmContent?: string | null): string | undefined {
   if (!utmContent) return undefined;
-  const last = utmContent.split("|").pop()?.trim();
-  return last && /^\d{5,}$/.test(last) ? last : undefined;
+  return ID_NO_UTM_CONTENT.exec(utmContent.trim())?.[1];
+}
+
+/**
+ * O NOME do anúncio no utm_content, sem o id embutido ("nome|123" e
+ * "nome__ad_123" → "nome"). É por ele que se casa por nome e que a origem se
+ * escreve quando o id não diz — nunca com o "__ad_…" colado.
+ */
+export function nomeDoUtmContent(utmContent?: string | null): string {
+  return (utmContent ?? "").split("|")[0].split(/__ad_/i)[0].trim();
 }
 
 /** Id numérico da Meta (anúncio, conjunto, campanha): só dígitos, 5 ou mais. */
@@ -50,8 +68,9 @@ const ID_META = /^\d{5,}$/;
 /**
  * Os ids que o UTM padrão (D6) traz: `utm_campaign={{campaign.id}}`,
  * `utm_term={{adset.id}}`, `utm_content={{ad.id}}`. Só vira id o que é número
- * (macro literal ou nome ficam de fora); `utm_content` aceita também o formato
- * antigo "nome|id".
+ * (macro literal ou nome ficam de fora). Também o id embutido: no `utm_content`,
+ * "nome|id" e "nome__ad_id"; no `utm_campaign`, "nome__cid_id" (o link da Meta
+ * desde nov/26, cujo `utm_term` é o posicionamento — nunca vira id).
  */
 export function idsDoUtm(attr: {
   utm_campaign?: string | null;
@@ -65,7 +84,7 @@ export function idsDoUtm(attr: {
   return {
     adId: id(attr.utm_content) ?? adIdFromUtmContent(attr.utm_content),
     adsetId: id(attr.utm_term),
-    campaignId: id(attr.utm_campaign),
+    campaignId: id(attr.utm_campaign) ?? ID_NO_UTM_CAMPAIGN.exec(attr.utm_campaign?.trim() ?? "")?.[1],
   };
 }
 
@@ -92,7 +111,7 @@ export function atribuidor(
     if (id) return { adId: id, tipo: "id" };
     // Dado em que o utm_content já é o próprio id do anúncio (seed, CSV antigo).
     if (ids.has(uc)) return { adId: uc, tipo: "id" };
-    const nome = uc.split("|")[0].trim().toLowerCase();
+    const nome = nomeDoUtmContent(uc).toLowerCase();
     const candidatos = porNome.get(nome) ?? [];
     if (candidatos.length === 1) return { adId: candidatos[0], tipo: "nome" };
     if (candidatos.length > 1) return { tipo: "ambigua", candidatos: candidatos.length };

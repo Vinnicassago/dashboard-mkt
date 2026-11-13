@@ -10,6 +10,7 @@ import { statusMeta } from "@/components/tables/lead-status";
 import type { LeadEvent } from "@/lib/types";
 import { formatDateTime } from "@/lib/format";
 import { CANAL_LABEL, type CanalContato } from "@/lib/contato";
+import { nomeDoUtmContent } from "@/lib/atribuicao";
 import { FATOS_DA_FICHA, RESULTADOS_CONTATO, lerOpcao, type FatoDaFicha } from "@/lib/qualificacao";
 
 /** O que aconteceu, em uma linha — usado no histórico de Pessoas e na ficha. */
@@ -80,7 +81,7 @@ export function DescricaoEvento({ e }: { e: LeadEvent }) {
           ? `Preencheu o formulário de novo (reconhecido pelo ${e.payload.pelo})`
           : "Reenviou o formulário"}
         {novo ? ` com contato diferente: ${novo}` : ""}
-        {e.payload?.origemNova ? ` · veio por ${e.payload.origemNova.split("|")[0]}` : ""} — o cadastro
+        {e.payload?.origemNova ? ` · veio por ${nomeDoUtmContent(e.payload.origemNova)}` : ""} — o cadastro
         não foi alterado
       </span>
     );

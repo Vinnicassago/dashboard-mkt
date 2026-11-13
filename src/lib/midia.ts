@@ -21,7 +21,7 @@
  *
  * UMA regra de atribuição de reunião em toda a tela e no motor (relatório §7.3): a
  * reunião só entra num conjunto, num criativo ou numa ação quando o lead tem id de
- * anúncio (`lead.adId`, "nome|id" no utm_content ou o `adsetId` da UTM padrão).
+ * anúncio (`lead.adId`, "nome|id" ou "nome__ad_id" no utm_content, ou o `adsetId` da UTM padrão).
  * Nome único ainda atribui o LEAD — nunca a reunião.
  *
  * Regras de exibição: custo com denominador zero é `null` ("—"); custo por reunião só
@@ -67,7 +67,7 @@ import {
   type Medida,
   type OpcoesKpis,
 } from "./kpis";
-import { atribuidor, type TipoAtribuicao } from "./atribuicao";
+import { atribuidor, nomeDoUtmContent, type TipoAtribuicao } from "./atribuicao";
 import type { Intervalo } from "./cobertura";
 import type { AvaliacaoMeta } from "./metas";
 import { MIN_REUNIOES } from "./trust";
@@ -820,7 +820,7 @@ export function criativosAgregados(
   for (const l of filterLeads(data.leads, range)) {
     const a = atribuir(l);
     if (a.tipo === "ambigua") {
-      const nome = (l.utmContent ?? "").split("|")[0].trim().toLowerCase();
+      const nome = nomeDoUtmContent(l.utmContent).toLowerCase();
       ambiguosPorNome.set(nome, (ambiguosPorNome.get(nome) ?? 0) + 1);
     }
     const chave = a.adId ? chavePorAd.get(a.adId) : undefined;

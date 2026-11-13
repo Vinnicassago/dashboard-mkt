@@ -12,7 +12,7 @@
  */
 
 import { creativePerformance, rotuloCriativo } from "./metrics";
-import { atribuidor } from "./atribuicao";
+import { atribuidor, nomeDoUtmContent } from "./atribuicao";
 import type { DashboardData, Lead } from "./types";
 
 export type LeadParaOrigem = Pick<Lead, "utmContent" | "adId" | "adsetId" | "campaignId">;
@@ -59,14 +59,14 @@ export function origemDoLead(data: DashboardData): (lead: LeadParaOrigem) => Ori
         anuncio = "Desconhecida (macro não resolvida)";
         break;
       case "ambigua":
-        anuncio = `Atribuição ambígua (“${uc.split("|")[0].trim()}” em ${a.candidatos} anúncios)`;
+        anuncio = `Atribuição ambígua (“${nomeDoUtmContent(uc)}” em ${a.candidatos} anúncios)`;
         break;
       case "id":
       case "nome":
-        anuncio = nameById.get(a.adId!) ?? (uc ? uc.split("|")[0] : a.adId!);
+        anuncio = nameById.get(a.adId!) ?? (nomeDoUtmContent(uc) || a.adId!);
         break;
       default:
-        anuncio = uc.split("|")[0];
+        anuncio = nomeDoUtmContent(uc);
     }
     const doAnuncio = a.adId ? porAnuncio.get(a.adId) : undefined;
     const campanha = (lead.campaignId && campanhaPorId.get(lead.campaignId)) || doAnuncio?.campanha || undefined;

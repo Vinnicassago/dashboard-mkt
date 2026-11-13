@@ -105,7 +105,10 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   anúncio em TODO o histórico (`baldeDosLeads`). Junção lead → anúncio só por
   `lib/atribuicao.ts` (o `lead.adId` gravado na entrada vence; depois id ou nome único no
   `utm_content`; macro `{{…}}` = desconhecida; nome repetido = ambígua — nenhuma é
-  atribuída). **UTM padrão** (D6, `lib/utm.ts`): UM link com as macros da Meta
+  atribuída). O id no `utm_content` vem sozinho, depois de `|` ou depois de `__ad_` — o link
+  que a Meta usa desde nov/26 é `{{ad.name}}__ad_{{ad.id}}`, com `{{campaign.name}}__cid_{{campaign.id}}`
+  e o POSICIONAMENTO no `utm_term` (nunca vira conjunto); o nome sem o id sai de
+  `nomeDoUtmContent` — nunca `split("|")` solto. **UTM padrão** (D6, `lib/utm.ts`): UM link com as macros da Meta
   `utm_source=meta&utm_medium=paid_social&utm_campaign={{campaign.id}}&utm_term={{adset.id}}&utm_content={{ad.id}}`
   (macros nunca codificadas na URL); `/api/track` guarda `adId`/`adsetId`/`campaignId`
   (migração 0019, `idsDoUtm`: só id numérico) e `origemDoLead` monta "campanha › conjunto ›
