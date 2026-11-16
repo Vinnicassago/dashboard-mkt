@@ -357,6 +357,23 @@ describe("API do n8n — quem já era lead e se inscreve na live", () => {
     expect((await (await get("5511999991212")).json()).lead.id).toBe(leadId);
   });
 
+  it("dois cadastros do mesmo número, o n8n antes da página: os dois também ficam no MESMO", async () => {
+    await leadAntigo("LEAD-LP-dup2-velho", "5511999991515");
+    await r.store.addLead({ id: "LEAD-LP-dup2-novo", brand: "consorcio", createdAt: "2026-11-01T15:00:00.000Z", name: "Teste Antigo", phone: "5511999991515", status: "lead" });
+    const n8n = await (await post({ ...inscricaoA, nome: "Teste Antigo", whatsapp: "11 99999-1515", email: undefined })).json();
+    // O principal da mesclagem: o que carrega mais história (o de outubro, que foi trabalhado).
+    expect(n8n.lead.id).toBe("LEAD-LP-dup2-velho");
+    const pagina = await r.track.POST(
+      new Request("http://localhost/api/track", {
+        method: "POST",
+        body: JSON.stringify({ type: "lead", eventId: "evt-dup2", name: "Teste Antigo", phone: "11 99999-1515", bem: "Imóvel", prazo: "Em até 1 ano" }),
+      }),
+    );
+    expect((await pagina.json()).leadId).toBe("LEAD-LP-dup2-velho");
+    const inscritos = (await r.store.listLeads("consorcio")).filter((l) => l.phone === "5511999991515" && l.inscritoLiveEm);
+    expect(inscritos.map((l) => l.id)).toEqual(["LEAD-LP-dup2-velho"]);
+  });
+
   it("achado pela página só pelo e-mail, com OUTRO número: a pessoa da live é a do número novo (conta uma vez)", async () => {
     await leadAntigo("LEAD-LP-email", "5511999991313", { email: "mesma.pessoa@exemplo.test" });
     await r.track.POST(

@@ -11,8 +11,7 @@ import {
 import { newEventId } from "../auth/actor";
 import { expedienteAtual } from "../atendimento-server";
 import { comClasse } from "../classe-server";
-import { resumoContato } from "../contato";
-import { montarFilaDaLive } from "../fila-live";
+import { montarFilaDaLive, resumoDaCadencia } from "../fila-live";
 import { gravarFicha } from "../leads/gravar-ficha";
 import { payloadDaReinscricao, registrarInscricaoNaLive } from "../leads/inscricao-live";
 import { aplicarStatus } from "../leads/mudar-status";
@@ -23,6 +22,7 @@ import { isLostStatus, podeTransitar, statusLabel } from "../lead-status";
 import { tocadoHaPouco, ultimaEntrada } from "../live";
 import { everBooked } from "../metrics";
 import { mesmoTelefone, normalizarTelefone } from "../phone";
+import { principalDaPessoa } from "../identidade";
 import { CLASSES_NA_FILA, type Classe } from "../qualificacao";
 import { DEFAULT_BRAND, type Lead, type LeadStatus } from "../types";
 import { ATOR_N8N, type Atualizacao, type Inscricao } from "./entrada";
@@ -54,15 +54,14 @@ export async function buscarPorChave(chave: string): Promise<Lead | null> {
  * O lead que é esta pessoa, pelo WhatsApp. Havendo mais de um cadastro com o
  * mesmo número (duplicado antigo — mesclar é decisão de gente, em Leads →
  * Revisar), vale o inscrito na live (o da inscrição mais recente: é nele que a
- * live conta e a ficha foi gravada), depois o que carrega mais história, e no
- * empate o mais antigo.
+ * live conta e a ficha foi gravada), senão o principal da mesclagem
+ * (`principalDaPessoa`: mais história, e no empate o mais antigo) — a página faz a
+ * mesma escolha, e o cadastro que recebe a live é o que sobrevive a uma mesclagem.
  */
 export function pessoaDoWhatsapp(whatsapp: string, leads: Lead[]): Lead | undefined {
-  const peso = (l: Lead) => [l.firstContactAt, l.bookedAt, l.attendedAt, l.closedAt].filter(Boolean).length;
-  return cadastrosDoWhatsapp(whatsapp, leads).sort(
-    (a, b) =>
-      (b.inscritoLiveEm ?? "").localeCompare(a.inscritoLiveEm ?? "") || peso(b) - peso(a) || a.createdAt.localeCompare(b.createdAt),
-  )[0];
+  const cadastros = cadastrosDoWhatsapp(whatsapp, leads);
+  const inscritos = cadastros.filter((l) => l.inscritoLiveEm).sort((a, b) => b.inscritoLiveEm!.localeCompare(a.inscritoLiveEm!));
+  return inscritos[0] ?? principalDaPessoa(cadastros);
 }
 
 const cadastrosDoWhatsapp = (whatsapp: string, leads: Lead[]) =>
@@ -266,7 +265,7 @@ export async function atualizar(lead: Lead, a: Atualizacao): Promise<ResultadoAt
     }
 
     if (a.semResposta) {
-      const resumo = resumoContato(await listLeadEvents({ leadId: lead.id, limit: 0 }));
+      const resumo = resumoDaCadencia(atual, await listLeadEvents({ leadId: lead.id, limit: 0 }));
       const bloqueio = podeTransitar(
         { status: atual.status, jaAgendou: everBooked(atual), tentativas: resumo.tentativas, diasComTentativa: resumo.diasComTentativa },
         "sem_resposta",
@@ -284,7 +283,7 @@ export async function atualizar(lead: Lead, a: Atualizacao): Promise<ResultadoAt
 /** A reunião pelo estado que o n8n informa; devolve o erro, ou null se gravou. */
 async function aplicarReuniao(lead: Lead, s: NonNullable<NonNullable<Atualizacao["reuniao"]>["status"]>, em?: string): Promise<string | null> {
   const transitar = async (para: LeadStatus, dados: { meetingFor?: string } = {}) => {
-    const resumo = resumoContato(await listLeadEvents({ leadId: lead.id, limit: 0 }));
+    const resumo = resumoDaCadencia(lead, await listLeadEvents({ leadId: lead.id, limit: 0 }));
     const bloqueio = podeTransitar(
       { status: lead.status, jaAgendou: everBooked(lead), tentativas: resumo.tentativas, diasComTentativa: resumo.diasComTentativa },
       para,

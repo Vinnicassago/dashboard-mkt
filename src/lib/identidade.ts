@@ -99,6 +99,16 @@ function peso(l: Lead): number {
   return marcos * 10 + status;
 }
 
+/**
+ * Entre os cadastros da mesma pessoa, o principal: quem carrega mais história
+ * (marcos, status mais avançado); empate fica com o mais antigo. A régua da
+ * mesclagem (Leads → Revisar) e da entrada da live (a página e o n8n gravam no
+ * mesmo cadastro, o que sobrevive a uma mesclagem).
+ */
+export function principalDaPessoa<T extends Lead>(cadastros: readonly T[]): T | undefined {
+  return [...cadastros].sort((a, b) => peso(b) - peso(a) || a.createdAt.localeCompare(b.createdAt))[0];
+}
+
 export interface GrupoDuplicado {
   principal: Lead;
   duplicados: Lead[];
@@ -150,6 +160,7 @@ export function gruposDuplicados(leads: Lead[]): GrupoDuplicado[] {
     const ordem = [...membros].sort(
       (a, b) => peso(b) - peso(a) || a.createdAt.localeCompare(b.createdAt),
     );
+    // ordem[0] === principalDaPessoa(membros): a mesma régua da entrada da live.
     out.push({
       principal: ordem[0],
       duplicados: ordem.slice(1),

@@ -81,6 +81,16 @@ export function eventosDoEpisodioDaLive(eventos: LeadEvent[], desde: string): Le
   return eventos.filter((e) => e.action !== "tentativa" || Date.parse(quando(e)) >= t);
 }
 
+/**
+ * As tentativas que valem para a cadência e para a régua do "Sem resposta": as do
+ * EPISÓDIO da live para o lead com classe (a inscrição ou o último reaberto — as da
+ * campanha antiga ficam só no histórico), o histórico inteiro para os demais. O
+ * registro da tentativa, a mudança de status (tela e n8n) e a ficha leem daqui.
+ */
+export function resumoDaCadencia(l: Lead, eventos: LeadEvent[]): ResumoContato {
+  return resumoContato(classeDoLead(l) ? eventosDoEpisodioDaLive(eventos, inicioDoEpisodioDaLive(l, eventos)) : eventos);
+}
+
 /** A etapa e o prazo de UM lead A/B em contato; null = nada a fazer na Fila da live. */
 export function etapaDaLive(
   l: Lead,

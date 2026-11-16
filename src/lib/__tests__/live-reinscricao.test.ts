@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 import { DescricaoEvento } from "@/components/leads/lead-activity";
 import { LIVE_PADRAO, ehInscritoDaLive, entradaNaLive, inicioDaLive, ultimaEntrada } from "../live";
 import { montarPainelLive } from "../live-painel";
-import { etapaDaLive, montarFilaDaLive } from "../fila-live";
+import { etapaDaLive, montarFilaDaLive, resumoDaCadencia } from "../fila-live";
 import { fichaParaN8n } from "../n8n/ficha";
 import { EXPEDIENTE_PADRAO, prazoDaPrimeiraTentativa } from "../turno";
 import type { DashboardData, Lead, LeadEvent } from "../types";
@@ -139,6 +139,11 @@ describe("o painel da live conta a reinscrição", () => {
     expect(p.aSemTentativa).toBe(2);
   });
 
+  it("\"A sem tentativa\" segue igual para o lead da live que voltou a \"Novo\" (reaberto)", () => {
+    const reaberto: Lead = { ...novo, firstContactAt: "2026-11-17T23:00:00.000Z" };
+    expect(painel([reaberto], []).aSemTentativa).toBe(1);
+  });
+
   it("a 1ª tentativa depois da inscrição conta no prazo, que sai da data da inscrição", () => {
     const prazo = prazoA(reinscrito);
     expect(Date.parse(prazo)).toBeGreaterThan(Date.parse(reinscrito.inscritoLiveEm!));
@@ -165,9 +170,12 @@ describe("o painel da live conta a reinscrição", () => {
     expect(antes.metas.find((m) => m.id === "realizadas")?.valor).toBe(0);
     expect(antes.fechamento.vendas).toBeNull();
     expect(antes.reunioes.realizada).toBe(0);
+    // A reunião antiga não o tira da base das ligações do pós-live.
+    expect(antes.ligacoesPosLive.semReuniao).toBe(1);
 
     // Voltou a agendar depois da inscrição: o marco não é regravado, vale a mudança de status.
-    const reagendou: Lead = { ...comHistoria, status: "agendado", meetingFor: "2026-11-26T22:00:00.000Z", closedAt: undefined, attendedAt: undefined };
+    // A presença de outubro (marco gravado uma vez) fica no lead: a reunião nova não pode parecer realizada.
+    const reagendou: Lead = { ...comHistoria, status: "agendado", meetingFor: "2026-11-26T22:00:00.000Z", closedAt: undefined };
     const mudou: LeadEvent = {
       id: "s1",
       leadId: "ANTIGO",
@@ -181,7 +189,9 @@ describe("o painel da live conta a reinscrição", () => {
     };
     const depois = painel([reagendou], [mudou]);
     expect(depois.metas.find((m) => m.id === "agendadas")?.valor).toBe(1);
-    expect(depois.reunioes.agendada).toBe(1);
+    expect(depois.metas.find((m) => m.id === "realizadas")?.valor).toBe(0);
+    expect(depois.reunioes).toMatchObject({ agendada: 1, realizada: 0 });
+    expect(depois.ligacoesPosLive.semReuniao).toBe(0); // agendou na live, antes do pós-live
 
     // O lead novo segue igual: o marco dele é depois da entrada.
     const novoAgendou = painel([{ ...novo, status: "agendado", bookedAt: "2026-11-18T20:00:00.000Z" }], []);
@@ -226,6 +236,19 @@ describe("a Fila da live: quem se reinscreve começa do zero", () => {
   it("o lead novo segue igual: 1ª tentativa pela entrada", () => {
     const [item] = montarFilaDaLive([novo], [], AGORA, EXPEDIENTE_PADRAO);
     expect(item).toMatchObject({ etapa: "primeira", prazo: prazoA(novo), desde: novo.createdAt });
+  });
+});
+
+describe("a régua do \"Sem resposta\" e o registro da tentativa", () => {
+  it("o lead da live conta só as tentativas da inscrição; o lead sem classe, o histórico inteiro", () => {
+    const outubro = [
+      tentativa("ANTIGO", "2026-10-27T16:00:00.000Z", false),
+      tentativa("ANTIGO", "2026-10-28T16:00:00.000Z", false),
+      tentativa("ANTIGO", "2026-10-28T20:00:00.000Z", false),
+    ];
+    expect(resumoDaCadencia(reinscrito, outubro)).toMatchObject({ tentativas: 0, diasComTentativa: 0 });
+    const semClasse: Lead = { ...reinscrito, classe: undefined };
+    expect(resumoDaCadencia(semClasse, outubro)).toMatchObject({ tentativas: 3, diasComTentativa: 2 });
   });
 });
 

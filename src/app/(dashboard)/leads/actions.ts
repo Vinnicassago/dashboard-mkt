@@ -19,6 +19,8 @@ import { can } from "@/lib/auth/guard";
 import { currentActor, newEventId } from "@/lib/auth/actor";
 import { aplicarStatus, type StatusResult } from "@/lib/leads/mudar-status";
 import { registrarContato } from "@/lib/leads/registrar-contato";
+import { resumoDaCadencia } from "@/lib/fila-live";
+import { registrarInscricaoNaLive } from "@/lib/leads/inscricao-live";
 import {
   BENS,
   FAIXAS_PARCELA,
@@ -109,7 +111,8 @@ export async function changeLeadStatus(
   const lead = await getLead(leadId);
   if (!lead || lead.deletedAt) return { ok: false, message: "Lead não encontrado." };
 
-  const resumo = resumoContato(await listLeadEvents({ leadId, limit: 0 }));
+  // A régua do "Sem resposta" conta a cadência da live do episódio (as tentativas da campanha antiga não).
+  const resumo = resumoDaCadencia(lead, await listLeadEvents({ leadId, limit: 0 }));
   const bloqueio = podeTransitar(
     {
       status: lead.status,
@@ -357,6 +360,8 @@ export async function mesclarLeads(principalId: string, duplicadoIds: string[]):
       ...(dup.closedAt ? { closedAt: dup.closedAt } : {}),
     };
     if (Object.keys(marcos).length) await setLeadStatus(principal.id, atual.status, marcos);
+    // A inscrição na live também é desta pessoa: o principal fica com ela (a 1ª do período vale).
+    if (dup.inscritoLiveEm) await registrarInscricaoNaLive(principal.id, dup.inscritoLiveEm);
 
     const motivo = `duplicado de ${principal.name} (${principal.id})`;
     await softDeleteLead(dup.id, { at, by: actor, reason: motivo.slice(0, 200) });

@@ -57,6 +57,10 @@ describe("migração 0024 — reparo do que chegou antes do código", () => {
     await lead("PAGINA", "2026-10-27T15:00:00Z", { bem: "imovel" });
     await evento("PAGINA", "reenvio", "2026-11-16T20:00:00Z", "Landing page", { pelo: "telefone" });
     await evento("PAGINA", "ficha", "2026-11-16T20:00:01Z", "Landing page", { fato: "respostas" });
+    // A página achou pelo e-mail, com OUTRO número: a pessoa da live é a do número (o n8n cria por ele).
+    await lead("POR-EMAIL", "2026-10-27T15:00:00Z", { bem: "imovel" });
+    await evento("POR-EMAIL", "reenvio", "2026-11-16T20:00:00Z", "Landing page", { pelo: "e-mail", telefoneNovo: "11988887777" });
+    await evento("POR-EMAIL", "ficha", "2026-11-16T20:00:01Z", "Landing page", { fato: "respostas" });
     // A página de sempre (sem respostas) e uma ficha que o comercial preencheu: não é inscrição na live.
     await lead("COMERCIAL", "2026-10-27T15:00:00Z", { classe: "A" });
     await evento("COMERCIAL", "reenvio", "2026-11-16T18:30:00Z", "Landing page", { pelo: "telefone" });
@@ -76,6 +80,7 @@ describe("migração 0024 — reparo do que chegou antes do código", () => {
     expect(await inscricao("REINSCRITO")).toBe("2026-11-16T18:30");
     expect(await inscricao("PAGINA")).toBe("2026-11-16T20:00");
     expect(await inscricao("COMERCIAL")).toBeNull();
+    expect(await inscricao("POR-EMAIL")).toBeNull();
     expect(await inscricao("DEPOIS")).toBeNull();
     expect(await inscricao("ANTES")).toBeNull();
     expect(await inscricao("JA-TINHA")).toBe("2026-11-16T10:00");

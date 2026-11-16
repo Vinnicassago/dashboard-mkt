@@ -23,6 +23,9 @@ update leads l set inscrito_live_em = e.em from (
   select r.lead_id, min(r.created_at) as em from lead_events r
   where r.action = 'reenvio'
     and r.created_at >= '2026-11-16T00:00:00Z' and r.created_at < '2026-11-17T12:00:00Z'
+    -- achado só pelo e-mail, ou com OUTRO número: a pessoa da live é a do número (o n8n cria por ele)
+    and coalesce(r.payload->>'pelo', '') <> 'e-mail'
+    and not (coalesce(r.payload, '{}'::jsonb) ? 'telefoneNovo')
     and (r.payload->>'origem' = 'n8n'
          or (r.actor = 'Landing page' and exists (
                select 1 from lead_events f

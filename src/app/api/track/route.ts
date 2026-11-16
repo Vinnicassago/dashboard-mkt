@@ -4,7 +4,7 @@ import { addLead, addLeadEvent, bumpLpDaily, comTravaDaPessoa, getLead, listLead
 import { DEFAULT_BRAND, type Lead } from "@/lib/types";
 import { candidatosIdLead, resolverIdLead } from "@/lib/lead-id";
 import { mesmoTelefone, normalizarTelefone } from "@/lib/phone";
-import { MESMA_INSCRICAO_MIN } from "@/lib/n8n/servico";
+import { MESMA_INSCRICAO_MIN, pessoaDoWhatsapp } from "@/lib/n8n/servico";
 import { lerRespostasDoFormulario } from "@/lib/n8n/entrada";
 import { comClasse } from "@/lib/classe-server";
 import { gravarFicha } from "@/lib/leads/gravar-ficha";
@@ -220,11 +220,13 @@ export async function POST(request: Request) {
     if (resolucao.tipo !== "reenvio") {
       const todos = await listLeads(DEFAULT_BRAND);
       jaCadastrado = acharMesmaPessoa({ phone, email }, todos, DEFAULT_BRAND);
-      // A inscrição na live com dois cadastros do número: vale o que o n8n acabou de inscrever
-      // (a mesma inscrição) — senão cada caminho marcaria um e a pessoa contaria duas vezes.
+      // A inscrição na live com dois cadastros do número: o que o n8n acabou de inscrever (a
+      // mesma inscrição), senão a MESMA escolha do n8n (`pessoaDoWhatsapp`: o inscrito na live,
+      // senão o principal da mesclagem) — cada caminho marcando um contaria a pessoa duas vezes.
       if (jaCadastrado && inscricaoNaLive && phone) {
         const doNumero = todos.filter((l) => !l.deletedAt && l.phone && mesmoTelefone(l.phone, phone));
-        jaCadastrado = tocadoHaPouco(doNumero, Date.now(), MESMA_INSCRICAO_MIN * 60_000) ?? jaCadastrado;
+        jaCadastrado =
+          tocadoHaPouco(doNumero, Date.now(), MESMA_INSCRICAO_MIN * 60_000) ?? pessoaDoWhatsapp(phone, todos) ?? jaCadastrado;
       }
       if (jaCadastrado) leadId = jaCadastrado.id;
     }

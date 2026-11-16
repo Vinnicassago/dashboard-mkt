@@ -27,7 +27,7 @@ import {
   statusReuniao,
 } from "@/lib/qualificacao";
 import { etapaDoLead, FILA_ETAPAS, reunioesPorTelefone } from "@/lib/fila";
-import { ETAPA_DA_LIVE, etapaDaLive, eventosDoEpisodioDaLive, inicioDoEpisodioDaLive } from "@/lib/fila-live";
+import { ETAPA_DA_LIVE, etapaDaLive, eventosDoEpisodioDaLive, inicioDoEpisodioDaLive, resumoDaCadencia } from "@/lib/fila-live";
 import { expedienteAtual } from "@/lib/atendimento-server";
 import { gruposDuplicados, pareceTeste, problemasDeContato } from "@/lib/identidade";
 import { ETAPA_MAXIMA_LABEL, etapaMaxima } from "@/lib/lead-status";
@@ -172,7 +172,11 @@ export default async function FichaDoLead({
 
   const contato = resumoContato(proprios);
   // O card Atendimento é a cadência da live: as tentativas do EPISÓDIO (como a Fila e o n8n); as antigas ficam na linha do tempo.
-  const tentativas = tentativasDoLead(eventosDoEpisodioDaLive(proprios, inicioDoEpisodioDaLive(lead, proprios)));
+  const tentativas = tentativasDoLead(
+    classeDoLead(lead) ? eventosDoEpisodioDaLive(proprios, inicioDoEpisodioDaLive(lead, proprios)) : proprios,
+  );
+  // A régua do "Sem resposta" (pedir confirmação) com as tentativas que valem para a cadência — a mesma do servidor.
+  const cadencia = resumoDaCadencia(lead, proprios);
   const ultimoResultado = [...tentativas].reverse().find((t) => t.resultado)?.resultado;
   const reuniao = statusReuniao(lead);
   // A linha para o Brunno só faz sentido com a reunião marcada e pela frente (E5-05).
@@ -687,8 +691,8 @@ export default async function FichaDoLead({
                   name={lead.name}
                   status={lead.status}
                   jaAgendou={everBooked(lead)}
-                  tentativas={contato.tentativas}
-                  diasComTentativa={contato.diasComTentativa}
+                  tentativas={cadencia.tentativas}
+                  diasComTentativa={cadencia.diasComTentativa}
                   // Sem telefone para o papel mascarado: o botão do WhatsApp não aparece.
                   telefone={mascarar ? undefined : lead.phone}
                   optOut={optOut}
