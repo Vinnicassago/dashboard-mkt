@@ -93,6 +93,37 @@ function contrato(nome: string, abrir: () => Promise<{ backend: DataBackend; fec
       expect(l?.adId).toBeUndefined();
     });
 
+    it("inscrição na live (0024): grava vazia ou de antes do período, a 1ª do período vale, a entrada não muda", async () => {
+      const INICIO = "2026-11-16T00:00:00.000Z";
+      const id = `LEAD-LP-live-${sfx}`;
+      await b.addLead({ id, brand: "consorcio", createdAt: "2026-10-27T15:00:00.000Z", name: "Pessoa Teste", phone: "11999990001", status: "lead" });
+      expect((await b.getLead(id))?.inscritoLiveEm).toBeUndefined();
+
+      // Já era lead e se inscreve na live: grava a hora desta inscrição.
+      expect(await b.marcarInscricaoNaLive(id, "2026-11-16T18:30:00.000Z", INICIO)).toBe(true);
+      // A 2ª inscrição dentro do período não muda nada.
+      expect(await b.marcarInscricaoNaLive(id, "2026-11-20T12:00:00.000Z", INICIO)).toBe(false);
+      let l = await b.getLead(id);
+      expect(l?.inscritoLiveEm).toBe("2026-11-16T18:30:00.000Z");
+      expect(l?.createdAt).toBe("2026-10-27T15:00:00.000Z");
+
+      // O reenvio do formulário (addLead no id que existe) não toca a inscrição.
+      await b.addLead({ id, brand: "consorcio", createdAt: "2026-11-21T10:00:00.000Z", inscritoLiveEm: "2026-11-21T10:00:00.000Z", name: "Pessoa Teste", status: "lead" });
+      expect((await b.getLead(id))?.inscritoLiveEm).toBe("2026-11-16T18:30:00.000Z");
+
+      // Uma data de antes do período (outra live, um teste) é trocada pela inscrição nova.
+      expect(await b.marcarInscricaoNaLive(id, "2026-11-22T12:00:00.000Z", "2026-12-01T00:00:00.000Z")).toBe(true);
+      l = await b.getLead(id);
+      expect(l?.inscritoLiveEm).toBe("2026-11-22T12:00:00.000Z");
+      expect(l?.status).toBe("lead");
+
+      // O cadastro novo nasce com ela; id que não existe não grava nada.
+      const novo = `LEAD-LP-live-novo-${sfx}`;
+      await b.addLead({ id: novo, brand: "consorcio", createdAt: "2026-11-17T22:00:00.000Z", inscritoLiveEm: "2026-11-17T22:00:00.000Z", name: "Pessoa Teste", status: "lead" });
+      expect((await b.getLead(novo))?.inscritoLiveEm).toBe("2026-11-17T22:00:00.000Z");
+      expect(await b.marcarInscricaoNaLive(`nao-existe-${sfx}`, "2026-11-17T22:00:00.000Z", INICIO)).toBe(false);
+    });
+
     it("exclusão é reversível e o histórico do lead fica", async () => {
       const id = `LEAD-LP-excluir-${sfx}`;
       await b.addLead({ id, brand: "consorcio", createdAt: new Date().toISOString(), name: "Pessoa Teste", status: "lead" });

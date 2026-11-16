@@ -132,10 +132,57 @@ export const ehDaLive = (r: Pick<AdDaily, "campaign" | "campaignId">, cfg: Campa
 export const ehDoCarro = (r: Pick<AdDaily, "adset" | "adsetId">, cfg: CampanhaDaLive) =>
   cfg.carro.conjuntos.some((t) => casaToken(r.adset, r.adsetId, t));
 
-/** O lead é inscrito da live? Pela ficha (respostas do formulário) ou pelo utm_campaign. */
+// ---------------------------------------------------------------- a entrada na live
+
+/**
+ * O instante que vale para a live: a inscrição nela (`inscritoLiveEm`), senão a
+ * entrada. Quem já era lead de outra campanha e se inscreveu conta pela data da
+ * inscrição — `createdAt` (a origem e a atribuição antigas) não muda. O período,
+ * o prazo da 1ª tentativa, a janela de 48 h e a Fila da live leem daqui.
+ */
+export function entradaNaLive(l: Pick<Lead, "createdAt" | "inscritoLiveEm">): string {
+  return l.inscritoLiveEm ?? l.createdAt;
+}
+
+/**
+ * A entrada mais recente: o cadastro ou a inscrição na live. É a régua do "a mesma
+ * inscrição chegou pelo outro caminho" (a página e o n8n mandam juntos): quem já
+ * era lead e acabou de se inscrever pela página não vira um 2º reenvio no n8n.
+ */
+export function ultimaEntrada(l: Pick<Lead, "createdAt" | "inscritoLiveEm">): string {
+  return l.inscritoLiveEm && Date.parse(l.inscritoLiveEm) > Date.parse(l.createdAt) ? l.inscritoLiveEm : l.createdAt;
+}
+
+/**
+ * Entre os cadastros da mesma pessoa, o que a OUTRA entrada acabou de tocar (a
+ * página e o n8n mandam a mesma inscrição juntos): a `ultimaEntrada` mais recente
+ * dentro de `janelaMs`. Os dois caminhos ficam no MESMO cadastro — com um duplicado
+ * não mesclado, cada um marcaria um e a pessoa contaria duas vezes na live.
+ */
+export function tocadoHaPouco<T extends Pick<Lead, "createdAt" | "inscritoLiveEm">>(
+  cadastros: T[],
+  agoraMs: number,
+  janelaMs: number,
+): T | undefined {
+  return cadastros
+    .filter((l) => agoraMs - Date.parse(ultimaEntrada(l)) < janelaMs)
+    .sort((a, b) => Date.parse(ultimaEntrada(b)) - Date.parse(ultimaEntrada(a)))[0];
+}
+
+/** O dia da entrada na live (AAAA-MM-DD em UTC: o calendário congelado da live até a D1). */
+export const diaDaEntradaNaLive = (l: Pick<Lead, "createdAt" | "inscritoLiveEm">) => entradaNaLive(l).slice(0, 10);
+
+/**
+ * O começo do período da live como instante. Uma inscrição gravada ANTES dele é de
+ * outra live (ou de um teste antes da captação): a inscrição nova a substitui
+ * (`marcarInscricaoNaLive`). Dentro do período, vale a 1ª.
+ */
+export const inicioDaLive = (cfg: Pick<CampanhaDaLive, "periodo">) => `${cfg.periodo.de}T00:00:00.000Z`;
+
+/** O lead é inscrito da live? Pela ficha (respostas do formulário) ou pelo utm_campaign, com a entrada na live no período. */
 export function ehInscritoDaLive(l: Lead, cfg: CampanhaDaLive): boolean {
   if (l.deletedAt) return false;
-  const dia = l.createdAt.slice(0, 10);
+  const dia = diaDaEntradaNaLive(l);
   if (dia < cfg.periodo.de || dia > cfg.periodo.ate) return false;
   if (cfg.inscritos.criterio === "utm") {
     // Id numérico compara com o id gravado na entrada e, sem ele, com o próprio utm_campaign.

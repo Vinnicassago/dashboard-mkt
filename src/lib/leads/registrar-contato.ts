@@ -3,10 +3,11 @@ import { addLeadEvent, getLead, listLeadEvents, setLeadStatus } from "../data/st
 import { newEventId } from "../auth/actor";
 import { resumoContato, type CanalContato } from "../contato";
 import { cadenciaPara } from "../atendimento-server";
+import { eventosDoEpisodioDaLive, inicioDoEpisodioDaLive } from "../fila-live";
 import { formatDateTime } from "../format";
 import { encerrado, podeTransitar, statusLabel } from "../lead-status";
 import { everBooked } from "../metrics";
-import { RESULTADOS_CONTATO, type ResultadoContato } from "../qualificacao";
+import { RESULTADOS_CONTATO, classeDoLead, type ResultadoContato } from "../qualificacao";
 import type { Lead, LeadStatus } from "../types";
 import { aplicarStatus, type StatusResult } from "./mudar-status";
 
@@ -76,7 +77,11 @@ export async function registrarContato(leadId: string, r: RegistroDeContato): Pr
     quando = new Date(t).toISOString();
   }
 
-  const antes = resumoContato(await listLeadEvents({ leadId, limit: 0 }));
+  const eventos = await listLeadEvents({ leadId, limit: 0 });
+  // Os da live (com classe) contam a cadência do EPISÓDIO — a inscrição na live ou o
+  // último reaberto, como a Fila da live: quem já era lead e se inscreveu recomeça do
+  // zero, e as tentativas da campanha antiga ficam só no histórico.
+  const antes = resumoContato(classeDoLead(lead) ? eventosDoEpisodioDaLive(eventos, inicioDoEpisodioDaLive(lead, eventos)) : eventos);
 
   // O desfecho que o resultado pede, conferido ANTES de gravar qualquer coisa:
   // "Agendou" sem data não vira meia escrita (tentativa gravada, status não).

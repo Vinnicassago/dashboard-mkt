@@ -346,6 +346,7 @@ export const toLead = (r: Row): Lead => ({
   diagnostico: lerDiagnostico(r.diagnostico),
   reuniaoConfirmadaEm: r.reuniao_confirmada_em ? iso(r.reuniao_confirmada_em) : undefined,
   reuniaoRemarcarEm: r.reuniao_remarcar_em ? iso(r.reuniao_remarcar_em) : undefined,
+  inscritoLiveEm: r.inscrito_live_em ? iso(r.inscrito_live_em) : undefined,
   // Robô de WhatsApp (0023). A etapa é lista fechada: valor desconhecido some, não quebra a tela.
   roboVistoEm: isoRobo(r.robo_visto_em),
   roboRecebidoEm: isoRobo(r.robo_recebido_em),
@@ -429,6 +430,7 @@ export const fromLead = (l: Lead): Row => ({
   diagnostico: l.diagnostico ?? null,
   reuniao_confirmada_em: l.reuniaoConfirmadaEm ?? null,
   reuniao_remarcar_em: l.reuniaoRemarcarEm ?? null,
+  inscrito_live_em: l.inscritoLiveEm ?? null,
   robo_visto_em: l.roboVistoEm ?? null,
   robo_recebido_em: l.roboRecebidoEm ?? null,
   robo_saudacao_em: l.roboSaudacaoEm ?? null,

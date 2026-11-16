@@ -8,7 +8,8 @@ export const dynamic = "force-dynamic";
 /**
  * POST /api/n8n/leads — a inscrição que o n8n recebeu da página. Cria o lead ou,
  * se o WhatsApp já é de alguém, atualiza a ficha dessa pessoa (nunca duplica).
- * 201 = criado, 200 = atualizado. Ver docs/api-n8n.md.
+ * 201 = criado, 200 = atualizado; `lead.reinscricao` = já era lead antes desta
+ * inscrição. Ver docs/api-n8n.md.
  */
 export async function POST(request: Request) {
   const negado = semAutorizacao(request);
@@ -19,7 +20,10 @@ export async function POST(request: Request) {
   if (!lido.ok) return invalido(lido.erros);
   try {
     const r = await inscrever(lido.valor);
-    return NextResponse.json({ ok: true, criado: r.criado, lead: r.ficha }, { status: r.criado ? 201 : 200 });
+    return NextResponse.json(
+      { ok: true, criado: r.criado, lead: { ...r.ficha, reinscricao: r.reinscricao } },
+      { status: r.criado ? 201 : 200 },
+    );
   } catch (e) {
     return falhaInterna("POST leads", e);
   }

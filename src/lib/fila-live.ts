@@ -13,10 +13,16 @@
  *   • encerrar  — a cadência acabou ou passou a janela de 48 h sem contato
  *                 válido; prazo = o fim da janela → "Sem resposta";
  *   • retornar  — falou e não houve desfecho; prazo = 24 h depois da conversa.
+ *
+ * O relógio é o do EPISÓDIO (`inicioDoEpisodioDaLive`): a entrada na live — quem
+ * já era lead de outra campanha começa na inscrição, como "1ª tentativa" — ou o
+ * último `reaberto` depois dela. As tentativas de antes do episódio ficam no
+ * histórico e fora da cadência.
  */
-import { eventosPorLead, resumoContato, type ResumoContato } from "./contato";
+import { eventosPorLead, quando, resumoContato, type ResumoContato } from "./contato";
 import { HORAS_APOS_CONVERSA } from "./fila";
 import { CLASSES_NA_FILA, classeDoLead, type Classe, type HorarioPreferido } from "./qualificacao";
+import { entradaNaLive } from "./live";
 import { fimDaJanelaDeContato, prazoDaPrimeiraTentativa, type Expediente } from "./turno";
 import type { Lead, LeadEvent, LeadStatus } from "./types";
 
@@ -45,20 +51,34 @@ export interface ItemDaFilaLive {
   minutosParaPrazo: number;
   contato: ResumoContato;
   horarioPreferido?: HorarioPreferido;
-  /** O lead entrou (ou foi reaberto) quando. */
+  /** O episódio começou quando: a entrada na live (a inscrição, para quem já era lead) ou o último reaberto. */
   desde: string;
   escaladoEm?: string;
   atendimentoAvisadoEm?: string;
 }
 
-/** O relógio recomeça no `reaberto` (lead que voltou), como na Fila de sempre. */
-function desdeReaberto(l: Lead, eventos: LeadEvent[]): string {
+/**
+ * Onde começa o episódio da Fila da live: a entrada NA LIVE (`entradaNaLive` — quem
+ * já era lead de outra campanha começa na inscrição) ou o último `reaberto` depois
+ * dela (lead que voltou), como na Fila de sempre.
+ */
+export function inicioDoEpisodioDaLive(l: Pick<Lead, "createdAt" | "inscritoLiveEm">, eventos: LeadEvent[]): string {
+  const entrada = entradaNaLive(l);
   const reaberto = eventos
     .filter((e) => e.action === "reaberto")
     .map((e) => e.createdAt)
     .sort()
     .at(-1);
-  return reaberto && reaberto > l.createdAt ? reaberto : l.createdAt;
+  return reaberto && Date.parse(reaberto) > Date.parse(entrada) ? reaberto : entrada;
+}
+
+/**
+ * O histórico que vale para a cadência do episódio: tudo, menos as tentativas de
+ * antes dele (a conversa da campanha antiga continua no histórico, fora da conta).
+ */
+export function eventosDoEpisodioDaLive(eventos: LeadEvent[], desde: string): LeadEvent[] {
+  const t = Date.parse(desde);
+  return eventos.filter((e) => e.action !== "tentativa" || Date.parse(quando(e)) >= t);
 }
 
 /** A etapa e o prazo de UM lead A/B em contato; null = nada a fazer na Fila da live. */
@@ -69,10 +89,12 @@ export function etapaDaLive(
 ): { etapa: EtapaDaLive; prazo: string; contato: ResumoContato; desde: string } | null {
   const classe = classeDoLead(l);
   if (!classe || !CLASSES_NA_FILA.includes(classe) || l.deletedAt) return null;
-  const desde = desdeReaberto(l, eventos);
-  const contato = resumoContato(eventos);
+  const desde = inicioDoEpisodioDaLive(l, eventos);
+  const contato = resumoContato(eventosDoEpisodioDaLive(eventos, desde));
 
-  if (l.status === "lead") {
+  // Ninguém tentou NESTE episódio: 1ª tentativa — também quem já era lead e está
+  // "Em contato" pelas tentativas da campanha antiga.
+  if (l.status === "lead" || (l.status === "em_contato" && contato.tentativas === 0)) {
     const prazo = prazoDaPrimeiraTentativa({ createdAt: desde, classe, horarioPreferido: l.horarioPreferido }, cfg);
     return prazo ? { etapa: "primeira", prazo, contato, desde } : null;
   }

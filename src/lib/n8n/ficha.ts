@@ -3,9 +3,13 @@
  * briefing (snake_case); os valores das respostas vêm na CHAVE do vocabulário
  * (estável para o fluxo decidir) e o texto para mensagem vai em `rotulos`.
  * Tentativas, prazo e estados saem das mesmas funções da tela.
+ *
+ * `tentativas` é o histórico inteiro; `tentativa_1_em`…`tentativa_3_em` e
+ * `resultado_contato` são do EPISÓDIO da live (`inicioDoEpisodioDaLive`): quem já
+ * era lead de outra campanha começa do zero na inscrição.
  */
 import { tentativasDoLead } from "../contato";
-import { etapaDaLive } from "../fila-live";
+import { etapaDaLive, eventosDoEpisodioDaLive, inicioDoEpisodioDaLive } from "../fila-live";
 import {
   BENS,
   FAIXAS_PARCELA,
@@ -28,9 +32,11 @@ import type { Lead, LeadEvent } from "../types";
 
 export function fichaParaN8n(lead: Lead, eventos: LeadEvent[], cfg: Expediente, agora: string, painelUrl?: string) {
   const tentativas = tentativasDoLead(eventos);
+  // A cadência da live conta do episódio (a inscrição, ou o último reaberto): as antigas ficam só no histórico.
+  const doEpisodio = tentativasDoLead(eventosDoEpisodioDaLive(eventos, inicioDoEpisodioDaLive(lead, eventos)));
   const live = etapaDaLive(lead, eventos, cfg);
   const reuniao = statusReuniao(lead);
-  const ultimoResultado = [...tentativas].reverse().find((t) => t.resultado)?.resultado;
+  const ultimoResultado = [...doEpisodio].reverse().find((t) => t.resultado)?.resultado;
   const atendimento = statusAtendimento(lead);
   return {
     id: lead.id,
@@ -38,6 +44,8 @@ export function fichaParaN8n(lead: Lead, eventos: LeadEvent[], cfg: Expediente, 
     whatsapp: lead.phone ? normalizarTelefone(lead.phone) : null,
     email: lead.email ?? null,
     inscrito_em: lead.createdAt,
+    // A inscrição na live: igual a `inscrito_em` no cadastro novo; quem já era lead, a data em que se inscreveu.
+    inscrito_live_em: lead.inscritoLiveEm ?? null,
     classe: classeDoLead(lead) ?? null,
     classe_painel: lead.classe ?? null,
     classe_n8n: lead.classeN8n ?? null,
@@ -75,9 +83,9 @@ export function fichaParaN8n(lead: Lead, eventos: LeadEvent[], cfg: Expediente, 
       notas: t.nota ?? null,
       por: t.por,
     })),
-    tentativa_1_em: tentativas[0]?.em ?? null,
-    tentativa_2_em: tentativas[1]?.em ?? null,
-    tentativa_3_em: tentativas[2]?.em ?? null,
+    tentativa_1_em: doEpisodio[0]?.em ?? null,
+    tentativa_2_em: doEpisodio[1]?.em ?? null,
+    tentativa_3_em: doEpisodio[2]?.em ?? null,
     resultado_contato: ultimoResultado ?? null,
     msg1_enviada_em: lead.msg1EnviadaEm ?? null,
     msg1_status: lead.msg1Status ?? null,

@@ -14,11 +14,13 @@ import { comClasse } from "../classe-server";
 import { resumoContato } from "../contato";
 import { montarFilaDaLive } from "../fila-live";
 import { gravarFicha } from "../leads/gravar-ficha";
+import { payloadDaReinscricao, registrarInscricaoNaLive } from "../leads/inscricao-live";
 import { aplicarStatus } from "../leads/mudar-status";
 import { recusaPorOptOut, registrarContato } from "../leads/registrar-contato";
 import { idLeadLp, idLeadWhatsapp } from "../lead-id";
 import { idsDoUtm } from "../atribuicao";
 import { isLostStatus, podeTransitar, statusLabel } from "../lead-status";
+import { tocadoHaPouco, ultimaEntrada } from "../live";
 import { everBooked } from "../metrics";
 import { mesmoTelefone, normalizarTelefone } from "../phone";
 import { CLASSES_NA_FILA, type Classe } from "../qualificacao";
@@ -51,14 +53,20 @@ export async function buscarPorChave(chave: string): Promise<Lead | null> {
 /**
  * O lead que é esta pessoa, pelo WhatsApp. Havendo mais de um cadastro com o
  * mesmo número (duplicado antigo — mesclar é decisão de gente, em Leads →
- * Revisar), vale o que carrega mais história, e no empate o mais antigo.
+ * Revisar), vale o inscrito na live (o da inscrição mais recente: é nele que a
+ * live conta e a ficha foi gravada), depois o que carrega mais história, e no
+ * empate o mais antigo.
  */
 export function pessoaDoWhatsapp(whatsapp: string, leads: Lead[]): Lead | undefined {
   const peso = (l: Lead) => [l.firstContactAt, l.bookedAt, l.attendedAt, l.closedAt].filter(Boolean).length;
-  return leads
-    .filter((l) => l.brand === DEFAULT_BRAND && !l.deletedAt && l.phone && mesmoTelefone(l.phone, whatsapp))
-    .sort((a, b) => peso(b) - peso(a) || a.createdAt.localeCompare(b.createdAt))[0];
+  return cadastrosDoWhatsapp(whatsapp, leads).sort(
+    (a, b) =>
+      (b.inscritoLiveEm ?? "").localeCompare(a.inscritoLiveEm ?? "") || peso(b) - peso(a) || a.createdAt.localeCompare(b.createdAt),
+  )[0];
 }
+
+const cadastrosDoWhatsapp = (whatsapp: string, leads: Lead[]) =>
+  leads.filter((l) => l.brand === DEFAULT_BRAND && !l.deletedAt && l.phone && mesmoTelefone(l.phone, whatsapp));
 
 async function fichaDe(leadId: string): Promise<FichaN8n | null> {
   const [lead, eventos, cfg] = await Promise.all([getLead(leadId), listLeadEvents({ leadId, limit: 0 }), expedienteAtual()]);
@@ -73,6 +81,11 @@ export async function fichaDoLead(lead: Lead): Promise<FichaN8n | null> {
 
 export interface ResultadoInscricao {
   criado: boolean;
+  /**
+   * A pessoa já era lead ANTES desta inscrição (de outra campanha, ou uma 2ª
+   * inscrição) — não a mesma inscrição que a página mandou ao painel segundos antes.
+   */
+  reinscricao: boolean;
   ficha: FichaN8n;
 }
 
@@ -80,6 +93,11 @@ export interface ResultadoInscricao {
  * Cria ou atualiza o lead pela chave do WhatsApp. A mesma pessoa inscrita duas
  * vezes atualiza a ficha — nunca vira um 2º lead. Tudo dentro da trava da
  * pessoa: a LP (/api/track) e o n8n chegando juntos não criam dois.
+ *
+ * Toda chamada é uma inscrição na live (o fluxo da live é quem usa a API): o lead
+ * novo nasce com `inscritoLiveEm`; quem já era lead de outra campanha ganha a data
+ * desta inscrição (`registrarInscricaoNaLive`) e passa a contar na live por ela —
+ * `createdAt`, a origem e a atribuição antigas ficam.
  */
 export async function inscrever(i: Inscricao): Promise<ResultadoInscricao> {
   return comTravaDaPessoa(i.whatsapp, async () => {
@@ -88,6 +106,8 @@ export async function inscrever(i: Inscricao): Promise<ResultadoInscricao> {
     const doEvento = i.eventId ? await getLead(idLeadLp(i.eventId)) : null;
     const existente =
       (doEvento && !doEvento.deletedAt && (!doEvento.phone || mesmoTelefone(doEvento.phone, i.whatsapp)) ? doEvento : null) ??
+      // Com dois cadastros do número, o que a página acabou de tocar (a mesma inscrição): senão os dois contariam na live.
+      tocadoHaPouco(cadastrosDoWhatsapp(i.whatsapp, leads), Date.parse(agora), MESMA_INSCRICAO_MIN * 60_000) ??
       pessoaDoWhatsapp(i.whatsapp, leads);
 
     if (!existente) {
@@ -98,6 +118,7 @@ export async function inscrever(i: Inscricao): Promise<ResultadoInscricao> {
         id,
         brand: DEFAULT_BRAND,
         createdAt: i.inscritoEm ?? agora,
+        inscritoLiveEm: i.inscritoEm ?? agora,
         name: i.nome ?? "Lead sem nome",
         email: i.email,
         phone: i.whatsapp,
@@ -123,7 +144,7 @@ export async function inscrever(i: Inscricao): Promise<ResultadoInscricao> {
         payload: { origem: "n8n" },
         createdAt: agora,
       });
-      return { criado: true, ficha: (await fichaDe(id))! };
+      return { criado: true, reinscricao: false, ficha: (await fichaDe(id))! };
     }
 
     // Já existe: preenche o contato que faltava (nunca sobrescreve) e grava a ficha.
@@ -134,8 +155,12 @@ export async function inscrever(i: Inscricao): Promise<ResultadoInscricao> {
       phone: i.whatsapp,
       ...i.utm,
     });
+    // A inscrição na live de quem já era lead: vale a data desta (a 1ª dentro do período).
+    const { marcou, cfg } = await registrarInscricaoNaLive(existente.id, i.inscritoEm ?? agora);
+    // A mesma inscrição que a página acabou de mandar (o cadastro ou a inscrição na live de há pouco).
     const mesmaInscricao =
-      Date.parse(agora) - Date.parse(existente.createdAt) < MESMA_INSCRICAO_MIN * 60_000 && !existente.classeN8n;
+      Date.parse(agora) - Date.parse(ultimaEntrada(existente)) < MESMA_INSCRICAO_MIN * 60_000 && !existente.classeN8n;
+    const reinscricao = Date.parse(agora) - Date.parse(existente.createdAt) >= MESMA_INSCRICAO_MIN * 60_000;
     if (!mesmaInscricao) {
       await addLeadEvent({
         id: newEventId(),
@@ -144,7 +169,11 @@ export async function inscrever(i: Inscricao): Promise<ResultadoInscricao> {
         leadName: existente.name,
         actor: ATOR_N8N,
         action: "reenvio",
-        payload: { pelo: "telefone", origem: "n8n" },
+        payload: {
+          pelo: "telefone",
+          origem: "n8n",
+          ...(marcou ? payloadDaReinscricao(cfg, existente.createdAt) : {}),
+        },
         createdAt: agora,
       });
       // Quem estava perdido e se inscreveu DE NOVO quer conversa: volta para a fila.
@@ -166,7 +195,7 @@ export async function inscrever(i: Inscricao): Promise<ResultadoInscricao> {
     }
     const atual = (await getLead(existente.id)) ?? existente;
     await gravarFicha(atual, await comClasse(atual, i.ficha), ATOR_N8N);
-    return { criado: false, ficha: (await fichaDe(existente.id))! };
+    return { criado: false, reinscricao, ficha: (await fichaDe(existente.id))! };
   });
 }
 

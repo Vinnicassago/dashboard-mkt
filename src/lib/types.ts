@@ -486,6 +486,14 @@ export interface Lead {
   reuniaoConfirmadaEm?: string;
   /** Pediu para remarcar e ainda não há data nova. Limpo quando a data nova é gravada. */
   reuniaoRemarcarEm?: string;
+  /**
+   * Quando se inscreveu na live (migração 0024): a entrada pela API do n8n ou pela
+   * página com as respostas. Quem já era lead de outra campanha ganha a data da
+   * inscrição sem mexer em `createdAt` (a origem e a atribuição antigas ficam); a
+   * 2ª inscrição dentro do período não muda nada (`marcarInscricaoNaLive`). A live
+   * conta por `inscritoLiveEm ?? createdAt` (`entradaNaLive`, `lib/live.ts`).
+   */
+  inscritoLiveEm?: string;
 
   // ---- Robô de WhatsApp (migração 0023). Só o sync do robô grava (`updateLeadsRobo`). ----
   // Campos PLANOS de propósito (a cópia rasa do `getLead` local não vazaria um objeto).

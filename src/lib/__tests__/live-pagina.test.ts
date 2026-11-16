@@ -66,6 +66,8 @@ describe("página de inscrição → painel, com as respostas", () => {
       classe: "A",
     });
     expect(lead?.classeN8n).toBeUndefined();
+    // Com as respostas é a página da live: o cadastro novo nasce inscrito nela.
+    expect(lead?.inscritoLiveEm).toBe(lead?.createdAt);
     const eventos = await store.listLeadEvents({ leadId: leadId!, limit: 0 });
     const fichas = eventos.filter((e) => e.action === "ficha");
     expect(fichas.map((e) => e.payload?.fato).sort()).toEqual(["classe", "respostas"]);
@@ -114,7 +116,22 @@ describe("página de inscrição → painel, com as respostas", () => {
     const { leadId } = await enviar({ eventId: "evt-pagina-antiga", name: "Teste antigo", phone: "11 98888-0105" });
     const lead = await store.getLead(leadId!);
     expect(lead?.classe).toBeUndefined();
+    expect(lead?.inscritoLiveEm).toBeUndefined(); // não é inscrição na live
     const eventos = await store.listLeadEvents({ leadId: leadId!, limit: 0 });
     expect(eventos.some((e) => e.action === "ficha")).toBe(false);
+  });
+
+  it("quem já era lead e manda a página da live com as respostas ganha a data da inscrição; a 2ª não muda", async () => {
+    await store.addLead({ id: "LEAD-LP-outubro", brand: "consorcio", createdAt: "2026-10-27T15:00:00.000Z", name: "Teste outubro", phone: "11 98888-0106", status: "lead" });
+    const { leadId } = await enviar({ eventId: "evt-pagina-reinscricao", name: "Teste outubro", phone: "11 98888-0106", ...classeA });
+    expect(leadId).toBe("LEAD-LP-outubro");
+    const lead = (await store.getLead(leadId!))!;
+    expect(lead.createdAt).toBe("2026-10-27T15:00:00.000Z");
+    expect(Date.now() - Date.parse(lead.inscritoLiveEm!)).toBeLessThan(60_000);
+    const [reenvio] = (await store.listLeadEvents({ leadId: leadId!, limit: 0 })).filter((e) => e.action === "reenvio");
+    expect(reenvio.payload).toMatchObject({ pelo: "telefone", inscricaoLive: "Live 01/12", leadDesde: "2026-10-27T15:00:00.000Z" });
+
+    await enviar({ eventId: "evt-pagina-reinscricao-2", name: "Teste outubro", phone: "11 98888-0106", ...classeA });
+    expect((await store.getLead(leadId!))!.inscritoLiveEm).toBe(lead.inscritoLiveEm);
   });
 });

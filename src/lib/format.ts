@@ -101,6 +101,11 @@ export function formatDateMonth(iso: string): string {
     .replace(".", "");
 }
 
+/** "23/07" — o dia de um instante em Brasília (o servidor roda em UTC; a linha do tempo hidrata igual). */
+export function formatDiaBrasilia(iso: string): string {
+  return new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit" }).format(new Date(iso));
+}
+
 /** 23 jul 2026, 14:30 — sempre no horário de Brasília (o servidor roda em UTC). */
 /** "23/07 20:15" — data e hora curtas (Brasília), para tabelas densas. */
 export function formatDateTimeCurta(iso: string): string {

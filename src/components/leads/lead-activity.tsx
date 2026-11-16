@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { useComPeriodo } from "@/components/layout/use-periodo";
 import { statusMeta } from "@/components/tables/lead-status";
 import type { LeadEvent } from "@/lib/types";
-import { formatDateTime, formatDateTimeCurta } from "@/lib/format";
+import { formatDateTime, formatDateTimeCurta, formatDiaBrasilia } from "@/lib/format";
 import { CANAL_LABEL, type CanalContato } from "@/lib/contato";
 import { nomeDoUtmContent } from "@/lib/atribuicao";
 import { FATOS_DA_FICHA, RESULTADOS_CONTATO, lerOpcao, type FatoDaFicha } from "@/lib/qualificacao";
@@ -78,6 +78,19 @@ export function DescricaoEvento({ e }: { e: LeadEvent }) {
       <span className="text-muted-foreground">
         A mesma inscrição chegou também pela {e.actor === "n8n" ? "automação (n8n)" : "landing page"} — o cadastro não
         foi duplicado
+      </span>
+    );
+  }
+  if (e.action === "reenvio" && e.payload?.inscricaoLive) {
+    // Quem já era lead de outra campanha e se inscreveu na live (a data da inscrição foi gravada).
+    const nome = e.payload.inscricaoLive;
+    const novo = [e.payload.telefoneNovo, e.payload.emailNovo].filter(Boolean).join(" · ");
+    return (
+      <span className="text-muted-foreground">
+        Inscreveu-se na {nome.charAt(0).toLowerCase() + nome.slice(1)}
+        {e.payload.leadDesde ? ` (já era lead desde ${formatDiaBrasilia(e.payload.leadDesde)})` : ""}
+        {novo ? ` com contato diferente: ${novo}` : ""}
+        {e.payload.origemNova ? ` · veio por ${nomeDoUtmContent(e.payload.origemNova)}` : ""}
       </span>
     );
   }

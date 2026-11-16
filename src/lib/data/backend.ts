@@ -436,6 +436,14 @@ export interface DataBackend {
   setLeadStatus(id: string, status: LeadStatus, patch?: LeadStatusPatch): Promise<void>;
   /** Corrige a data de entrada (reparo de leads zerados por reenvio). */
   setLeadCreatedAt(id: string, createdAt: string): Promise<void>;
+  /**
+   * Grava a data da inscrição na live (`inscritoLiveEm`, 0024) SÓ se estiver vazia
+   * ou for anterior a `antesDe` (o início do período da live: a de outra live, ou
+   * de um teste antes da captação) — numa escrita só, condicional. A 2ª inscrição
+   * dentro do período não muda nada (vale a 1ª). Não toca `createdAt` nem nada
+   * mais. Devolve se gravou.
+   */
+  marcarInscricaoNaLive(id: string, em: string, antesDe: string): Promise<boolean>;
   /** Exclusão reversível: o lead some das listas e métricas, a linha fica. */
   softDeleteLead(id: string, info: { at: string; by: string; reason: string }): Promise<void>;
   restoreLead(id: string): Promise<void>;

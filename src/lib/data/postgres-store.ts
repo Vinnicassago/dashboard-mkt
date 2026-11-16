@@ -105,7 +105,7 @@ const POST_COLS = ["id", "brand", "published_at", "type", "caption", "permalink"
 const CREATIVE_COLS = ["ad_id", "brand", "name", "format", "creative_id", "thumbnail_url", "video_plays", "thru_plays", "instagram_media_id", "instagram_permalink"];
 const AD_COLS = ["brand", "date", "ad_id", "campaign", "campaign_id", "adset", "adset_id", "objective", "spend", "impressions", "reach", "frequency", "clicks", "leads"];
 const LP_COLS = ["brand", "date", "visits", "clicks", "form_submits"];
-const LEAD_COLS = ["id", "brand", "created_at", "name", "email", "phone", "utm_source", "utm_campaign", "utm_content", "utm_medium", "utm_term", "fbclid", "ad_id", "adset_id", "campaign_id", "status", "meeting_at", "meeting_for", "first_contact_at", "lost_reason_detail", "value", "booked_at", "attended_at", "closed_at", "lost_at", "robo_session_id", "fbc", "fbp", "ga_client_id", "ga_session_id", "deleted_at", "deleted_by", "deleted_reason", "bem", "faixa_valor", "finalidade", "faixa_parcela", "prazo_compra", "classe", "classe_n8n", "aceite_mensagens", "msg1_enviada_em", "msg1_status", "horario_preferido", "atendimento_avisado_em", "escalado_em", "comunidade_em", "diagnostico", "reuniao_confirmada_em", "reuniao_remarcar_em", "robo_visto_em", "robo_recebido_em", "robo_saudacao_em", "robo_respondeu_em", "robo_ultima_msg_cliente_em", "robo_ultima_interacao_em", "robo_etapa", "robo_cobrancas", "robo_ultima_cobranca_em", "robo_convite_em", "robo_aceitou_em", "robo_sem_whatsapp_em", "robo_encerrado_em", "robo_opt_out_em", "robo_pausado"];
+const LEAD_COLS = ["id", "brand", "created_at", "name", "email", "phone", "utm_source", "utm_campaign", "utm_content", "utm_medium", "utm_term", "fbclid", "ad_id", "adset_id", "campaign_id", "status", "meeting_at", "meeting_for", "first_contact_at", "lost_reason_detail", "value", "booked_at", "attended_at", "closed_at", "lost_at", "robo_session_id", "fbc", "fbp", "ga_client_id", "ga_session_id", "deleted_at", "deleted_by", "deleted_reason", "bem", "faixa_valor", "finalidade", "faixa_parcela", "prazo_compra", "classe", "classe_n8n", "aceite_mensagens", "msg1_enviada_em", "msg1_status", "horario_preferido", "atendimento_avisado_em", "escalado_em", "comunidade_em", "diagnostico", "reuniao_confirmada_em", "reuniao_remarcar_em", "inscrito_live_em", "robo_visto_em", "robo_recebido_em", "robo_saudacao_em", "robo_respondeu_em", "robo_ultima_msg_cliente_em", "robo_ultima_interacao_em", "robo_etapa", "robo_cobrancas", "robo_ultima_cobranca_em", "robo_convite_em", "robo_aceitou_em", "robo_sem_whatsapp_em", "robo_encerrado_em", "robo_opt_out_em", "robo_pausado"];
 const GOAL_COLS = ["brand", "metric", "period", "target", "lower_is_better"];
 const META_COLS = ["id", "brand", "metrica", "periodo", "alvo", "vigente_desde", "provisoria", "origem", "entradas", "criada_em", "criada_por"];
 const EVENT_COLS = ["id", "lead_id", "brand", "lead_name", "actor", "action", "from_status", "to_status", "payload", "occurred_at", "created_at"];
@@ -568,6 +568,16 @@ export const postgresBackend: DataBackend = {
     params.push(id);
     await run(`update leads set ${sets.join(", ")} where id = $${params.length}`, params);
     await touch();
+  },
+
+  async marcarInscricaoNaLive(id: string, em: string, antesDe: string) {
+    // Condicional numa escrita só: duas inscrições juntas não trocam a 1ª data.
+    const rows = await q(
+      "update leads set inscrito_live_em = $2 where id = $1 and (inscrito_live_em is null or inscrito_live_em < $3) returning id",
+      [id, em, antesDe],
+    );
+    if (rows.length) await touch(false);
+    return rows.length > 0;
   },
 
   async softDeleteLead(id: string, info: { at: string; by: string; reason: string }) {

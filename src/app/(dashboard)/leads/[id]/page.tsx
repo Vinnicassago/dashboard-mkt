@@ -27,7 +27,7 @@ import {
   statusReuniao,
 } from "@/lib/qualificacao";
 import { etapaDoLead, FILA_ETAPAS, reunioesPorTelefone } from "@/lib/fila";
-import { ETAPA_DA_LIVE, etapaDaLive } from "@/lib/fila-live";
+import { ETAPA_DA_LIVE, etapaDaLive, eventosDoEpisodioDaLive, inicioDoEpisodioDaLive } from "@/lib/fila-live";
 import { expedienteAtual } from "@/lib/atendimento-server";
 import { gruposDuplicados, pareceTeste, problemasDeContato } from "@/lib/identidade";
 import { ETAPA_MAXIMA_LABEL, etapaMaxima } from "@/lib/lead-status";
@@ -171,7 +171,8 @@ export default async function FichaDoLead({
   ].sort((a, b) => Date.parse(b.em) - Date.parse(a.em));
 
   const contato = resumoContato(proprios);
-  const tentativas = tentativasDoLead(proprios);
+  // O card Atendimento é a cadência da live: as tentativas do EPISÓDIO (como a Fila e o n8n); as antigas ficam na linha do tempo.
+  const tentativas = tentativasDoLead(eventosDoEpisodioDaLive(proprios, inicioDoEpisodioDaLive(lead, proprios)));
   const ultimoResultado = [...tentativas].reverse().find((t) => t.resultado)?.resultado;
   const reuniao = statusReuniao(lead);
   // A linha para o Brunno só faz sentido com a reunião marcada e pela frente (E5-05).
@@ -625,6 +626,7 @@ export default async function FichaDoLead({
             <CardContent>
               <dl className="divide-y">
                 <Linha rotulo="Entrada">{data(lead.createdAt)}</Linha>
+                {lead.inscritoLiveEm ? <Linha rotulo="Inscrição na live">{data(lead.inscritoLiveEm)}</Linha> : null}
                 <Linha rotulo="1º contato">{data(lead.firstContactAt)}</Linha>
                 <Linha rotulo="Agendou">{data(lead.bookedAt)}</Linha>
                 <Linha rotulo="Reunião marcada para">

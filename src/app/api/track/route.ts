@@ -8,6 +8,8 @@ import { MESMA_INSCRICAO_MIN } from "@/lib/n8n/servico";
 import { lerRespostasDoFormulario } from "@/lib/n8n/entrada";
 import { comClasse } from "@/lib/classe-server";
 import { gravarFicha } from "@/lib/leads/gravar-ficha";
+import { payloadDaReinscricao, registrarInscricaoNaLive } from "@/lib/leads/inscricao-live";
+import { tocadoHaPouco, ultimaEntrada } from "@/lib/live";
 import type { LeadFichaPatch } from "@/lib/data/backend";
 import { acharMesmaPessoa } from "@/lib/identidade";
 import { idsDoUtm } from "@/lib/atribuicao";
@@ -190,6 +192,9 @@ export async function POST(request: Request) {
   const email = (body.email ?? "").trim() || undefined;
   const phone = (body.phone ?? "").trim() || undefined;
   const respostas = respostasDaPagina(body);
+  // Com as respostas, é a página da live: uma inscrição na live (o cadastro novo
+  // nasce com ela; quem já era lead ganha a data desta, sem mexer na entrada).
+  const inscricaoNaLive = Object.keys(respostas).length > 0;
 
   // A identificação e a gravação rodam na TRAVA DA PESSOA (telefone, senão
   // e-mail): a página manda o mesmo cadastro ao painel e ao n8n ao mesmo tempo, e
@@ -213,16 +218,25 @@ export async function POST(request: Request) {
     // pessoa contavam em dobro no custo por lead e caíam duas vezes na fila (D2).
     let jaCadastrado: Lead | undefined;
     if (resolucao.tipo !== "reenvio") {
-      jaCadastrado = acharMesmaPessoa({ phone, email }, await listLeads(DEFAULT_BRAND), DEFAULT_BRAND);
+      const todos = await listLeads(DEFAULT_BRAND);
+      jaCadastrado = acharMesmaPessoa({ phone, email }, todos, DEFAULT_BRAND);
+      // A inscrição na live com dois cadastros do número: vale o que o n8n acabou de inscrever
+      // (a mesma inscrição) — senão cada caminho marcaria um e a pessoa contaria duas vezes.
+      if (jaCadastrado && inscricaoNaLive && phone) {
+        const doNumero = todos.filter((l) => !l.deletedAt && l.phone && mesmoTelefone(l.phone, phone));
+        jaCadastrado = tocadoHaPouco(doNumero, Date.now(), MESMA_INSCRICAO_MIN * 60_000) ?? jaCadastrado;
+      }
       if (jaCadastrado) leadId = jaCadastrado.id;
     }
 
     // Envio de formulário é EVENTO (conta reenvios); lead é PESSOA.
     await bumpLpDaily(date, { formSubmits: 1 });
+    const agora = new Date().toISOString();
     const { created } = await addLead({
       id: leadId,
       brand: DEFAULT_BRAND,
-      createdAt: new Date().toISOString(),
+      createdAt: agora,
+      inscritoLiveEm: inscricaoNaLive ? agora : undefined,
       name,
       email,
       phone,
@@ -249,6 +263,11 @@ export async function POST(request: Request) {
     // No reenvio, o contato que chegou diferente do gravado fica no histórico
     // (o lead não é sobrescrito — quem atende decide qual vale).
     const anterior = jaCadastrado ?? candidatos.get(leadId);
+    // Quem já era lead e se inscreveu na live: a data desta inscrição (a 1ª do período vale).
+    // Só com o WhatsApp do cadastro: achado pelo e-mail com OUTRO número, a pessoa da live é
+    // a desse número (o n8n cria por ele) — marcar os dois contaria a pessoa duas vezes.
+    const mesmoWhatsapp = !phone || !anterior?.phone || mesmoTelefone(phone, anterior.phone);
+    const live = !created && inscricaoNaLive && mesmoWhatsapp ? await registrarInscricaoNaLive(leadId, agora) : null;
     const payload: Record<string, string> = {};
     if (!created && anterior) {
       if (phone && anterior.phone && !mesmoTelefone(phone, anterior.phone)) payload.telefoneNovo = phone;
@@ -263,8 +282,9 @@ export async function POST(request: Request) {
     }
     // O mesmo cadastro que o n8n (ou um clique duplo) gravou há pouco: não é um reenvio do formulário.
     const mesmaInscricao =
-      !created && anterior && Date.now() - Date.parse(anterior.createdAt) < MESMA_INSCRICAO_MIN * 60_000;
+      !created && anterior && Date.now() - Date.parse(ultimaEntrada(anterior)) < MESMA_INSCRICAO_MIN * 60_000;
     if (mesmaInscricao) payload.mesmaInscricao = "sim";
+    else if (live?.marcou && anterior) Object.assign(payload, payloadDaReinscricao(live.cfg, anterior.createdAt));
 
     await addLeadEvent({
       id: newEventId(),

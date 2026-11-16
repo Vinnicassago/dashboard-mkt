@@ -506,6 +506,26 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   com as chaves da API do n8n (`lerRespostasDoFormulario`, sem a classe — da página ela é
   ignorada); vazio não apaga, opção fora da lista é ignorada sem perder o lead, e a ficha passa
   pela mesma `gravarFicha` + `comClasse`. Classifica sem depender do n8n (`docs/api-n8n.md` §5).
+- **Reinscrição** (nov/26, migração 0024): toda inscrição na live (API do n8n; `/api/track` com as
+  respostas) grava `inscritoLiveEm` — o lead novo nasce com ele; quem já era lead ganha a data da
+  inscrição por `marcarInscricaoNaLive` (`leads/inscricao-live.ts`: só se vazio ou de antes de
+  `inicioDaLive`; a 2ª no período não muda) e `createdAt`, origem e atribuição ficam. A live conta
+  por `entradaNaLive` (= `inscritoLiveEm ?? createdAt`): `ehInscritoDaLive`, o painel (período,
+  prazo da 1ª tentativa e janela de 48 h só com as tentativas DEPOIS dela — `primeiraTentativaNaLive`;
+  agendou/realizou/vendeu só os desta inscrição — `fatoNaLive`: o marco depois dela ou, com o marco
+  antigo, a mudança de status depois dela), os criativos da live e a Fila da live
+  (`inicioDoEpisodioDaLive` = a entrada na live ou o último `reaberto`; `eventosDoEpisodioDaLive`: as
+  tentativas de antes ficam no histórico, fora da cadência — o A/B reinscrito "Em contato" volta como
+  "1ª tentativa"; `registrarContato` numera a cadência do lead com classe pelo MESMO episódio, e o card
+  Atendimento da ficha também). A ficha do n8n traz `inscrito_live_em` e as `tentativa_N_em` do
+  episódio; o `POST` traz `reinscricao` (o lead existia há 30 min ou mais). "A mesma inscrição pelo
+  outro caminho" mede pela `ultimaEntrada` (o cadastro ou a inscrição); com dois cadastros do número,
+  os dois caminhos ficam no que o outro acabou de tocar (`tocadoHaPouco`) e `pessoaDoWhatsapp` prefere
+  o inscrito na live; a página achada só pelo e-mail com OUTRO número não marca (a pessoa da live é a
+  do número). O reenvio que É a reinscrição leva `inscricaoLive`/`leadDesde` ("Inscreveu-se na live
+  01/12 (já era lead desde DD/MM)"). O 0024 repara o que chegou antes do código, só pelo histórico da
+  janela 16/11–17/11 12h UTC (o mesmo resultado a cada boot): o reenvio do n8n ou o da página seguido
+  da ficha (+ o texto no payload do reenvio) e, para quem entrou já pela live, a própria entrada.
 - **CAPI da live** (E2-19, `eventosDaFicha` em `leads/gravar-ficha.ts`): `LeadQualificado` (a
   classe vira A ou B pela 1ª vez, `ehQualificado`) e `EntrouNaComunidade` (`comunidadeEm`),
   personalizados, ids `qualificado-<lead>`/`comunidade-<lead>`, pela caixa de saída ANTES do

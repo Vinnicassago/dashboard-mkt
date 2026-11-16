@@ -448,6 +448,21 @@ export const supabaseBackend: DataBackend = {
     await touch();
   },
 
+  async marcarInscricaoNaLive(id: string, em: string, antesDe: string) {
+    // Condicional numa escrita só. O instante vai entre aspas: ":" e "." são reservados no filtro `or`.
+    const antes = new Date(antesDe).toISOString();
+    const { data, error } = await supabase()
+      .from("leads")
+      .update({ inscrito_live_em: new Date(em).toISOString() })
+      .eq("id", id)
+      .or(`inscrito_live_em.is.null,inscrito_live_em.lt."${antes}"`)
+      .select("id");
+    check(error, "marcar inscrição na live");
+    const gravou = (data?.length ?? 0) > 0;
+    if (gravou) await touch(false);
+    return gravou;
+  },
+
   async softDeleteLead(id: string, info: { at: string; by: string; reason: string }) {
     const { error } = await supabase()
       .from("leads")

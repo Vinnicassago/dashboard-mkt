@@ -476,6 +476,18 @@ export const localBackend: DataBackend = {
     });
   },
 
+  async marcarInscricaoNaLive(id: string, em: string, antesDe: string) {
+    let gravou = false;
+    commit((data) => {
+      const lead = data.leads.find((l) => l.id === id);
+      if (!lead) return;
+      if (lead.inscritoLiveEm && Date.parse(lead.inscritoLiveEm) >= Date.parse(antesDe)) return;
+      lead.inscritoLiveEm = new Date(em).toISOString();
+      gravou = true;
+    });
+    return gravou;
+  },
+
   async softDeleteLead(id: string, info: { at: string; by: string; reason: string }) {
     commit((data) => {
       const lead = data.leads.find((l) => l.id === id);

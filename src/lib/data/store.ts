@@ -111,6 +111,8 @@ export const setLeadStatus = (id: string, status: LeadStatus, patch?: LeadStatus
 
 export const setLeadCreatedAt = (id: string, createdAt: string) =>
   backend().setLeadCreatedAt(id, createdAt);
+export const marcarInscricaoNaLive = (id: string, em: string, antesDe: string) =>
+  backend().marcarInscricaoNaLive(id, em, antesDe);
 
 export const softDeleteLead = (id: string, info: { at: string; by: string; reason: string }) =>
   backend().softDeleteLead(id, info);

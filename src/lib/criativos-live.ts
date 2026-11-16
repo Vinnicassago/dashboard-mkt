@@ -15,7 +15,7 @@ import { atribuidor } from "./atribuicao";
 import { casaToken } from "./regra-de-marca";
 import { classeDoLead } from "./qualificacao";
 import { segundaDaSemana } from "./semana";
-import { ehInscritoDaLive, linhaDaCampanha, type CampanhaDaLive } from "./live";
+import { diaDaEntradaNaLive, ehInscritoDaLive, linhaDaCampanha, type CampanhaDaLive } from "./live";
 import type { AdDaily, DashboardData, Lead } from "./types";
 
 /** Julgável a partir daqui (os dois, juntos). */
@@ -126,7 +126,8 @@ export function criativosDaLive(
   const atribuir = atribuidor(data.creatives);
   const anuncioDaLive = new Set(rows.map((r) => r.adId));
   let naoAtribuidos = 0;
-  const inscritos = data.leads.filter((l) => ehInscritoDaLive(l, cfg) && dentro(l.createdAt.slice(0, 10), range.de, range.ate));
+  // Pela entrada NA LIVE (quem já era lead conta pela inscrição; o anúncio é o da 1ª entrada, então costuma cair em "não atribuídos").
+  const inscritos = data.leads.filter((l) => ehInscritoDaLive(l, cfg) && dentro(diaDaEntradaNaLive(l), range.de, range.ate));
   for (const l of inscritos) {
     const a = atribuir(l);
     if (!a.adId || !anuncioDaLive.has(a.adId)) {
@@ -256,7 +257,7 @@ function criativosDaSemana(
       cfg.carro.conjuntos.some((t) => casaToken(r.adset, r.adsetId, t));
     porChave.set(k, a);
   }
-  const daSemana = inscritos.filter((l) => dentro(l.createdAt.slice(0, 10), semana.de, semana.ate));
+  const daSemana = inscritos.filter((l) => dentro(diaDaEntradaNaLive(l), semana.de, semana.ate));
   return [...porChave.entries()].map(([chave, a]) => {
     const leads = daSemana.filter((l) => {
       const id = atribuir(l).adId;

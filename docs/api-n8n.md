@@ -38,6 +38,14 @@ aconteceu", `true` vale "agora".
 Cria o lead ou, se o WhatsApp já existe, atualiza a ficha. **201** = criado,
 **200** = atualizado.
 
+Toda chamada é uma **inscrição na live**. Quem já era lead de outra campanha (o
+WhatsApp já existia) passa a contar como inscrição da live na data desta chamada
+(`inscrito_live_em`): entra em Inscrições, Qualificados e Atendimento do painel da
+live e na Fila da live como "1ª tentativa". A entrada antiga (`inscrito_em`), a
+origem e a atribuição da outra campanha não mudam. Uma 2ª inscrição dentro do
+período da live não muda a data (vale a 1ª); uma data de antes do período (outra
+live, um teste) é trocada pela nova.
+
 ```json
 {
   "nome": "Maria Souza",
@@ -62,7 +70,8 @@ Cria o lead ou, se o WhatsApp já existe, atualiza a ficha. **201** = criado,
 ```
 
 Só `whatsapp` é obrigatório. `event_id` (o mesmo do Pixel/`/api/track`) junta a
-ficha ao cadastro que a página já mandou. O painel **calcula a classe** pelas
+ficha ao cadastro que a página já mandou. `inscrito_em` é a hora da inscrição (sem
+ele, a hora da chamada). O painel **calcula a classe** pelas
 respostas; a que o n8n manda fica ao lado, e as duas diferentes viram aviso.
 
 Resposta (o mesmo formato em todas as rotas):
@@ -75,6 +84,9 @@ Resposta (o mesmo formato em todas as rotas):
     "id": "LEAD-WA-5511999990000",
     "nome": "Maria Souza",
     "whatsapp": "5511999990000",
+    "inscrito_em": "2026-11-16T22:05:00.000Z",
+    "inscrito_live_em": "2026-11-16T22:05:00.000Z",
+    "reinscricao": false,
     "classe": "A", "classe_painel": "A", "classe_n8n": "A", "classe_diverge": false,
     "bem": "imovel", "valor": "300k_500k", "parcela": "1500_3000", "prazo": "ate_1_ano",
     "rotulos": { "bem": "Imóvel", "status_atendimento": "Novo" },
@@ -93,7 +105,21 @@ Resposta (o mesmo formato em todas as rotas):
 ```
 
 `prazo_tentativa` é o prazo da próxima ação (A: 1 hora do turno, ou o início do
-horário escolhido + 1 h; B: o fim do turno). C e X: `na_fila: false`.
+horário escolhido + 1 h; B: o fim do turno), contado da inscrição na live. C e X:
+`na_fila: false`.
+
+- `inscrito_em`: quando a pessoa virou lead (a 1ª entrada, de qualquer campanha).
+- `inscrito_live_em`: quando se inscreveu na live — no cadastro novo, igual a
+  `inscrito_em`; de quem já era lead, a data da 1ª inscrição no período. `null` =
+  não se inscreveu na live.
+- `reinscricao` (só no `POST`): `true` quando o lead já existia 30 min ou mais antes
+  desta chamada — quem era lead de outra campanha (mesmo que a página tenha mandado
+  esta inscrição ao painel segundos antes) ou uma nova inscrição de quem já era da
+  live. `false` no cadastro novo e enquanto o cadastro tem menos de 30 min (a página
+  e o n8n mandando a mesma inscrição).
+- `tentativas` traz o histórico inteiro; `tentativa_1_em`…`tentativa_3_em` e
+  `resultado_contato` contam só desde a inscrição na live (ou desde a última vez
+  que o lead foi reaberto): as tentativas da campanha antiga não entram na cadência.
 
 ## 2. Fatos do fluxo — `PATCH /api/n8n/leads/{whatsapp}`
 
@@ -211,7 +237,8 @@ A Fila da live: A e B esperando tentativa, do prazo mais antigo para o mais novo
 
 `etapa_fila`: `primeira` (1ª tentativa) · `cadencia` (próxima tentativa) ·
 `encerrar` (48 h sem contato válido → gravar "Sem resposta") · `retornar` (falou
-e não houve desfecho).
+e não houve desfecho). `tentativas` e `ultima_tentativa_em` contam desde a
+inscrição na live: quem já era lead e se inscreveu volta como `primeira`, com 0.
 
 ---
 
@@ -250,6 +277,11 @@ window.dashTrackLead({
 Num `<form data-track="lead-form">` comum, basta os campos se chamarem `bem`,
 `valor`, `finalidade`, `parcela`, `prazo` e `aceite_mensagens`. A classe NÃO vem
 da página (o painel calcula); resposta fora da lista é ignorada sem perder o lead.
+
+Com as respostas, o envio é uma inscrição na live, como o `POST` acima: quem já
+era lead ganha `inscrito_live_em` na hora do envio. A página e o n8n chegando
+juntos contam UMA inscrição — o reenvio de quem acabou de se inscrever pelo outro
+caminho não vira uma 2ª.
 
 **Eventos na Meta (E2-19).** O Pixel da página manda só o `Lead`, com o mesmo
 `eventId` do `dashTrackLead` (o painel manda o mesmo `Lead` pela Conversions API e

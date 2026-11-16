@@ -2,8 +2,10 @@
  * A aba "Live 01/12" da Bússola — tudo o que ela mostra sai daqui. Puro: a
  * página só carrega e renderiza.
  *
- * Escopo: os INSCRITOS da live (`ehInscritoDaLive`) que entraram no período
- * escolhido (a coorte). Verba por linha é sempre do começo da linha até hoje —
+ * Escopo: os INSCRITOS da live (`ehInscritoDaLive`) que entraram NA LIVE no
+ * período escolhido (a coorte, por `entradaNaLive`: quem já era lead de outra
+ * campanha conta pela data da inscrição, e as tentativas de antes dela ficam fora
+ * do prazo e da janela de 48 h). Verba por linha é sempre do começo da linha até hoje —
  * verba é da campanha, não do recorte.
  *
  * As regras de confiança valem aqui também: custo com denominador zero vira
@@ -17,7 +19,7 @@ import { MIN_REUNIOES } from "./trust";
 import { everBooked } from "./metrics";
 import { formatCurrency0, formatInt } from "./format";
 import { fimDaJanelaDeContato, prazoDaPrimeiraTentativa, type Expediente } from "./turno";
-import { ehDoCarro, ehInscritoDaLive, linhaDaCampanha, type CampanhaDaLive, type IdDaLinha } from "./live";
+import { diaDaEntradaNaLive, ehDoCarro, ehInscritoDaLive, entradaNaLive, linhaDaCampanha, type CampanhaDaLive, type IdDaLinha } from "./live";
 import type { AdDaily, DashboardData, Lead, LeadEvent } from "./types";
 
 export interface EntradaPainelLive {
@@ -128,6 +130,33 @@ const diasEntre = (de: string, ate: string) => Math.round((Date.parse(`${ate}T00
 const somaDias = (dia: string, n: number) => new Date(Date.parse(`${dia}T00:00:00Z`) + n * DIA_MS).toISOString().slice(0, 10);
 const dentro = (dia: string, de: string, ate: string) => dia >= de && dia <= ate;
 
+/**
+ * A 1ª tentativa DESTA inscrição: o marco `firstContactAt` quando é dela; quem já
+ * era lead (o marco é da campanha antiga) conta pela 1ª tentativa desde a entrada
+ * na live — as de antes ficam no histórico e fora da conta.
+ */
+function primeiraTentativaNaLive(l: Lead, eventos: LeadEvent[]): string | undefined {
+  const desde = Date.parse(entradaNaLive(l));
+  if (l.firstContactAt && Date.parse(l.firstContactAt) >= desde) return l.firstContactAt;
+  return tentativasDoLead(eventos).find((t) => Date.parse(t.em) >= desde)?.em;
+}
+
+const ST_AGENDOU = ["agendado", "no_show", "reuniao_realizada", "cliente"];
+const ST_REALIZOU = ["reuniao_realizada", "cliente"];
+
+/**
+ * O fato (agendou, realizou, fechou) é DESTA inscrição? O marco gravado quando é de
+ * depois da entrada na live. Quem já era lead e tinha reunião da campanha antiga só
+ * conta a de depois da inscrição — o marco não é regravado, então vale a mudança de
+ * status depois dela. Sem o marco (registro antigo), o status, como sempre.
+ */
+function fatoNaLive(l: Lead, eventos: LeadEvent[], marco: string | undefined, status: string[]): boolean {
+  if (!marco) return status.includes(l.status);
+  const desde = Date.parse(entradaNaLive(l));
+  if (Date.parse(marco) >= desde) return true;
+  return eventos.some((e) => e.toStatus != null && status.includes(e.toStatus) && Date.parse(e.createdAt) >= desde);
+}
+
 /** Ritmo de uma contagem contra o esperado de hoje: no ritmo ≥ 100%, perto ≥ 80%, atrás abaixo. */
 function ritmoDe(valor: number | null, esperado: number | null): Ritmo {
   if (valor == null || esperado == null || esperado <= 0) return "sem_ritmo";
@@ -145,7 +174,7 @@ function ritmoDaVerba(gasto: number, esperado: number): Ritmo {
 export function montarPainelLive(e: EntradaPainelLive): PainelLive {
   const { data, cfg, expediente, range, hoje, agora } = e;
   const porLead = eventosPorLead(e.eventos);
-  const inscritos = data.leads.filter((l) => ehInscritoDaLive(l, cfg) && dentro(l.createdAt.slice(0, 10), range.de, range.ate));
+  const inscritos = data.leads.filter((l) => ehInscritoDaLive(l, cfg) && dentro(diaDaEntradaNaLive(l), range.de, range.ate));
   const classe = (l: Lead) => classeDoLead(l);
   const qualificados = inscritos.filter((l) => classe(l) === "A" || classe(l) === "B");
 
@@ -155,9 +184,12 @@ export function montarPainelLive(e: EntradaPainelLive): PainelLive {
   const fracao = totalCaptacao > 0 ? decorridos / totalCaptacao : 0;
   const esperado = (meta: number) => Math.round(meta * fracao * 10) / 10;
 
-  const agendaram = inscritos.filter((l) => l.bookedAt || ["agendado", "no_show", "reuniao_realizada", "cliente"].includes(l.status));
-  const realizaram = inscritos.filter((l) => l.attendedAt || l.status === "reuniao_realizada" || l.status === "cliente");
-  const clientes = inscritos.filter((l) => l.closedAt || l.status === "cliente");
+  const doLead = (l: Lead) => porLead.get(l.id) ?? [];
+  const agendouNaLive = (l: Lead) => fatoNaLive(l, doLead(l), l.bookedAt, ST_AGENDOU);
+  const realizouNaLive = (l: Lead) => fatoNaLive(l, doLead(l), l.attendedAt, ST_REALIZOU);
+  const agendaram = inscritos.filter(agendouNaLive);
+  const realizaram = inscritos.filter(realizouNaLive);
+  const clientes = inscritos.filter((l) => fatoNaLive(l, doLead(l), l.closedAt, ["cliente"]));
   const valorDosClientes = clientes.reduce((s, l) => s + (l.value ?? 0), 0);
   const m = cfg.manuais;
   // Uma venda, um número: o digitado vale; sem ele, os clientes registrados na ficha (E5-05).
@@ -208,11 +240,12 @@ export function montarPainelLive(e: EntradaPainelLive): PainelLive {
     let base = 0;
     let ok = 0;
     for (const l of daClasse(c)) {
-      const prazo = prazoDaPrimeiraTentativa({ createdAt: l.createdAt, classe: c, horarioPreferido: l.horarioPreferido }, expediente);
+      const prazo = prazoDaPrimeiraTentativa({ createdAt: entradaNaLive(l), classe: c, horarioPreferido: l.horarioPreferido }, expediente);
       if (!prazo) continue;
-      if (l.firstContactAt) {
+      const primeira = primeiraTentativaNaLive(l, porLead.get(l.id) ?? []);
+      if (primeira) {
         base += 1;
-        if (l.firstContactAt <= prazo) ok += 1;
+        if (Date.parse(primeira) <= Date.parse(prazo)) ok += 1;
       } else if (Date.parse(prazo) < ms) {
         base += 1;
       }
@@ -226,9 +259,14 @@ export function montarPainelLive(e: EntradaPainelLive): PainelLive {
   let base48 = 0;
   let validos48 = 0;
   for (const l of qualificados) {
-    const fim = fimDaJanelaDeContato(l.createdAt, expediente);
+    const entrada = entradaNaLive(l);
+    const fim = fimDaJanelaDeContato(entrada, expediente);
+    // Só as tentativas desta inscrição: a conversa da campanha antiga não é contato da live.
     const valido = tentativasDoLead(porLead.get(l.id) ?? []).some(
-      (t) => (t.resultado ? RESULTADOS_VALIDOS.includes(t.resultado) : t.falou) && t.em <= fim,
+      (t) =>
+        (t.resultado ? RESULTADOS_VALIDOS.includes(t.resultado) : t.falou) &&
+        Date.parse(t.em) >= Date.parse(entrada) &&
+        Date.parse(t.em) <= Date.parse(fim),
     );
     if (valido) {
       base48 += 1;
@@ -250,14 +288,18 @@ export function montarPainelLive(e: EntradaPainelLive): PainelLive {
     taxa("c48", "Contato válido em 48 h", validos48, base48, cfg.atendimento.contatoValido48h, "A e B que falaram em até 48 h da inscrição"),
   ];
 
+  // Sem tentativa DESTA inscrição: quem já era lead pode estar "Em contato" pelas tentativas antigas.
   const aSemTentativa = daClasse("A").filter((l) => {
-    if (l.status !== "lead") return false;
-    const prazo = prazoDaPrimeiraTentativa({ createdAt: l.createdAt, classe: "A", horarioPreferido: l.horarioPreferido }, expediente);
+    if (l.status !== "lead" && l.status !== "em_contato") return false;
+    if (primeiraTentativaNaLive(l, porLead.get(l.id) ?? [])) return false;
+    const prazo = prazoDaPrimeiraTentativa({ createdAt: entradaNaLive(l), classe: "A", horarioPreferido: l.horarioPreferido }, expediente);
     return Boolean(prazo && Date.parse(prazo) < ms);
   }).length;
 
   const reunioes: Record<StatusReuniao, number> = { agendada: 0, confirmada: 0, realizada: 0, nao_compareceu: 0, remarcar: 0 };
   for (const l of inscritos) {
+    // A reunião da campanha antiga de quem se reinscreveu não é reunião da live.
+    if (l.bookedAt && Date.parse(l.bookedAt) < Date.parse(entradaNaLive(l)) && !agendouNaLive(l)) continue;
     const s = statusReuniao(l);
     if (s) reunioes[s] += 1;
   }
@@ -382,9 +424,11 @@ export function montarPainelLive(e: EntradaPainelLive): PainelLive {
       vendas,
       valorEmCartas: m.vendasQtd != null ? (m.vendasValor ?? null) : clientes.length ? valorDosClientes : null,
       propostasEmAberto: inscritos.filter(
-        (l) => l.status === "reuniao_realizada" && resultadoDaReuniao(porLead.get(l.id) ?? [])?.resultado === "proposta",
+        (l) => l.status === "reuniao_realizada" && realizouNaLive(l) && resultadoDaReuniao(porLead.get(l.id) ?? [])?.resultado === "proposta",
       ).length,
-      disseramNao: inscritos.filter((l) => l.attendedAt && (l.status === "sem_interesse" || l.status === "desistencia")).length,
+      disseramNao: inscritos.filter(
+        (l) => l.attendedAt && realizouNaLive(l) && (l.status === "sem_interesse" || l.status === "desistencia"),
+      ).length,
     },
     ligacoesPosLive: ligacoesDoPosLive(qualificados, porLead, cfg),
     diagnosticos: inscritos.filter((l) => l.diagnostico).length,
