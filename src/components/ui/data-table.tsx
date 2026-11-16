@@ -52,6 +52,7 @@ export function DataTable<T>({
   filhas,
   detalhe,
   expandidoInicial = [],
+  limite,
 }: {
   columns: Column<T>[];
   rows: T[];
@@ -74,12 +75,19 @@ export function DataTable<T>({
   detalhe?: (row: T) => React.ReactNode;
   /** Chaves (de `rowKey`) abertas de início. */
   expandidoInicial?: string[];
+  /**
+   * Quantas linhas desenhar (as do topo), DEPOIS de ordenar — Leads abre com 50 (T3). Sem
+   * `limite`, todas (Mídia, Posts, Histórico). O estado vazio olha as linhas inteiras; o
+   * "faltam N" é de quem passa o limite, fora da tabela.
+   */
+  limite?: number;
 }) {
   const [sortKey, setSortKey] = useState<string | undefined>(initialSortKey);
   const [sortDir, setSortDir] = useState<"asc" | "desc">(initialSortDir);
   const [abertas, setAbertas] = useState<ReadonlySet<string>>(() => new Set(expandidoInicial));
 
   const sorted = useMemo(() => ordenarLinhas(rows, columns, sortKey, sortDir), [rows, columns, sortKey, sortDir]);
+  const visiveis = useMemo(() => (limite == null ? sorted : sorted.slice(0, Math.max(0, limite))), [sorted, limite]);
 
   function toggle(key: string) {
     if (sortKey === key) {
@@ -205,7 +213,7 @@ export function DataTable<T>({
             </td>
           </TR>
         ) : (
-          sorted.map((row, i) => linha(row, rowKey(row, i), 0))
+          visiveis.map((row, i) => linha(row, rowKey(row, i), 0))
         )}
       </TBody>
     </Table>

@@ -11,6 +11,10 @@
  * nenhum, e um link que não funciona vira chamado de suporte.
  */
 
+/** A ressalva da máscara (T3): o ⓘ de Leads e o do Contato da ficha leem daqui — um texto, um lugar. */
+export const SOBRE_A_MASCARA =
+  "Telefone e e-mail aparecem mascarados para o papel Marketing (LGPD): quem liga é o comercial.";
+
 /** Dígitos de um telefone sem o DDI do Brasil, para o DDD aparecer na máscara. */
 function digitosSemDdi(phone: string): string {
   const d = phone.replace(/\D/g, "").replace(/^0+/, "");

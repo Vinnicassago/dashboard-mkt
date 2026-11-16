@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AlertTriangle, ArrowLeft, Mail, MessageCircle } from "lucide-react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Info } from "@/components/ui/info";
 import { StatusBadge } from "@/components/tables/lead-status";
 import { DeletedLeads } from "@/components/leads/leads-directory";
@@ -31,12 +31,12 @@ import { ETAPA_DA_LIVE, etapaDaLive } from "@/lib/fila-live";
 import { expedienteAtual } from "@/lib/atendimento-server";
 import { gruposDuplicados, pareceTeste, problemasDeContato } from "@/lib/identidade";
 import { ETAPA_MAXIMA_LABEL, etapaMaxima } from "@/lib/lead-status";
-import { mascararEmail, mascararNoTexto, mascararTelefone } from "@/lib/lgpd";
+import { SOBRE_A_MASCARA, mascararEmail, mascararNoTexto, mascararTelefone } from "@/lib/lgpd";
 import { everBooked } from "@/lib/metrics";
 import { origemDoLead } from "@/lib/origem";
 import { chaveTelefoneValida, normalizarTelefone, telefoneUtilizavel } from "@/lib/phone";
 import { comPeriodo } from "@/lib/range";
-import { formatCurrency, formatDateTime, formatarEspera } from "@/lib/format";
+import { formatCurrency, formatDateTime, formatDateTimeCurta, formatarEspera } from "@/lib/format";
 import { estadoDoRoboAgora } from "@/lib/robo/estado";
 import { ROBO_ETAPA_LABEL } from "@/lib/robo/etapa";
 import {
@@ -62,11 +62,27 @@ function Linha({ rotulo, children }: { rotulo: string; children: React.ReactNode
   );
 }
 
-const data = (iso?: string) => (iso ? formatDateTime(iso) : "—");
+const data = (iso?: string) => (iso ? formatDateTimeCurta(iso) : "—");
 
 /** O ⓘ do card do robô: o que ele é e o que ele não é. */
 const SOBRE_O_ROBO =
   "O que o robô de WhatsApp fez com esta pessoa, lido do banco do robô a cada 15 min (sem a conversa). O robô não é tentativa: não entra na cadência nem no 1º contato.";
+
+/** Os ⓘ da ficha (T3, nov/26): o que saía embaixo dos títulos. Cada frase ≤ 25 palavras (`t3-ficha-tela.test.ts`). */
+const SOBRE_CHEGOU_A =
+  "Etapa máxima: até onde chegou, pelos marcos gravados uma vez. O status pode voltar; o fato, não.";
+const SOBRE_A_QUALIFICACAO =
+  "As respostas do formulário. A classe é a do painel, calculada das respostas; sem respostas completas, vale a que o n8n mandou.";
+/** Só para quem edita: salvar as respostas não é inofensivo (classe → Fila, Meta e live). */
+const SOBRE_SALVAR_AS_RESPOSTAS =
+  "Salvar recalcula a classe: A e B entram na Fila da live e avisam a Meta; C e X saem do contato da Fila. Com bem, valor ou finalidade, o lead pode passar a contar como inscrito da live.";
+const SOBRE_O_ATENDIMENTO =
+  "Cada tentativa vem do histórico, com o resultado e as notas da ligação: nada é contado à parte. As três primeiras aparecem aqui; as outras, na linha do tempo.";
+const SOBRE_OS_MARCOS = "Gravados uma vez, quando aconteceram: o status pode mudar, o fato não.";
+const SOBRE_A_ORIGEM =
+  "Campanha › conjunto › anúncio, pela junção única lead → anúncio: vence o id gravado na entrada; depois, o do utm_content.";
+const SOBRE_A_LINHA_DO_TEMPO =
+  "Cada entrada, tentativa, mudança e anotação, a mais recente primeiro. Tracejado = envio à Meta (CAPI); “Enviado à Meta ✓” só com a Meta confirmando.";
 
 /**
  * Contato novo digitado num reenvio, e o contato cru que motivos antigos de
@@ -93,7 +109,8 @@ function mascararEvento(e: LeadEvent): LeadEvent {
  * ações da Fila. Não é página de menu: abre pelo nome em Leads, na Fila e no
  * histórico (e pelo link do aviso de lead novo). O período viaja no link de
  * volta. Para o papel Marketing, telefone e e-mail aparecem mascarados e sem
- * link (LGPD).
+ * link (LGPD). Sem descrição embaixo dos títulos: o método e a ressalva estão no ⓘ
+ * de cada card (T3).
  */
 export default async function FichaDoLead({
   params,
@@ -183,7 +200,7 @@ export default async function FichaDoLead({
   // As linhas do card pelo EPISÓDIO (11.3, a régua de `situacaoDoRobo`): o fato UMA
   // VEZ de antes do `reaberto` é da conversa antiga — aparece marcado, nunca como o de agora.
   const fatoDoRobo = (iso: string | undefined, vazio = "—") =>
-    !iso ? vazio : fatoDoEpisodio(iso, reabertoEm) ? formatDateTime(iso) : `${formatDateTime(iso)} · antes de reabrir`;
+    !iso ? vazio : fatoDoEpisodio(iso, reabertoEm) ? formatDateTimeCurta(iso) : `${formatDateTimeCurta(iso)} · antes de reabrir`;
   // "Antes do robô", "sem telefone" e "o robô não recebeu" são uma linha só. O
   // "ainda" só para quem está no recorte e dentro dos 15 min — fora dele (com
   // classe, encerrado, cliente) o robô pode nunca receber.
@@ -213,6 +230,30 @@ export default async function FichaDoLead({
   const telefone = lead.phone ? (mascarar ? mascararTelefone(lead.phone) : lead.phone) : undefined;
   const email = lead.email ? (mascarar ? mascararEmail(lead.email) : lead.email) : undefined;
 
+  // Qualificação (T3): a divergência de classe vira "≠ n8n (X)" no título e o porquê no ⓘ.
+  const divergeClasse = classeDiverge(lead);
+  const editaQualificacao = canEdit && !lead.deletedAt;
+  const dicaDaQualificacao = [
+    SOBRE_A_QUALIFICACAO,
+    editaQualificacao ? SOBRE_SALVAR_AS_RESPOSTAS : null,
+    divergeClasse
+      ? `O n8n mandou ${lead.classeN8n}; o painel calcula ${lead.classe} com as mesmas respostas. A Fila usa a do painel: confira a tabela de parcela em Configurações → Atendimento e classe e o fluxo do n8n.`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  // Vazio = nenhuma resposta e nenhuma classe (o lead de conversão que não passou pelo formulário da live).
+  const qualificacaoVazia =
+    !classeDoLead(lead) &&
+    lead.aceiteMensagens == null &&
+    [lead.bem, lead.faixaValor, lead.finalidade, lead.faixaParcela, lead.prazoCompra, lead.horarioPreferido].every((v) => !v);
+  // Automação sem nenhum fato do n8n: uma linha só, o título.
+  const automacaoVazia =
+    !lead.msg1EnviadaEm && !lead.msg1Status && !lead.atendimentoAvisadoEm && !lead.escaladoEm && !lead.comunidadeEm;
+  const perfilDoDiagnostico = lead.diagnostico?.perfil?.trim() ?? "";
+  // Até 6 palavras, o perfil é a resposta do título; mais, é texto do n8n e fica no corpo.
+  const perfilNoTitulo = perfilDoDiagnostico !== "" && perfilDoDiagnostico.split(/\s+/).length <= 6;
+
   return (
     <div className="space-y-6">
       <Link
@@ -227,38 +268,35 @@ export default async function FichaDoLead({
         <div className="flex flex-wrap items-center gap-3">
           <h2 className="text-xl font-semibold tracking-tight">{lead.name}</h2>
           <StatusBadge status={lead.status} />
-          <span
-            className="text-xs text-muted-foreground"
-            title="Etapa máxima: até onde chegou, pelos marcos gravados uma vez — o status pode voltar, o fato não"
-          >
+          <span className="inline-flex items-center gap-0.5 text-xs text-muted-foreground">
             chegou a: {ETAPA_MAXIMA_LABEL[etapaMaxima(lead)]}
+            <Info texto={SOBRE_CHEGOU_A} rotulo="Sobre “chegou a”" className="-my-1" />
           </span>
         </div>
+        {/* Dois blocos: com a Fila da live e uma trilha longa, uma linha só passava de 25 palavras. */}
         <p className="text-sm text-muted-foreground">
           Entrou em {formatDateTime(lead.createdAt)} · origem {origem.trilha}
-          {naFila ? (
-            <>
-              {" "}
-              · na{" "}
-              <Link
-                href={comRange(`/fila?etapa=${naFila.nome}#${naFila.nome}`)}
-                className="text-primary underline-offset-4 hover:underline"
-              >
-                Fila de contato
-              </Link>{" "}
-              como “{FILA_ETAPAS[naFila.nome].label}”
-            </>
-          ) : naFilaLive ? (
-            <>
-              {" "}
-              · na{" "}
-              <Link href={comRange("/fila#live")} className="text-primary underline-offset-4 hover:underline">
-                Fila da live
-              </Link>{" "}
-              como “{ETAPA_DA_LIVE[naFilaLive.etapa].label}”, prazo {formatDateTime(naFilaLive.prazo)}
-            </>
-          ) : null}
         </p>
+        {naFila ? (
+          <p className="text-sm text-muted-foreground">
+            Na{" "}
+            <Link
+              href={comRange(`/fila?etapa=${naFila.nome}#${naFila.nome}`)}
+              className="text-primary underline-offset-4 hover:underline"
+            >
+              Fila de contato
+            </Link>{" "}
+            como “{FILA_ETAPAS[naFila.nome].label}”
+          </p>
+        ) : naFilaLive ? (
+          <p className="text-sm text-muted-foreground">
+            Na{" "}
+            <Link href={comRange("/fila#live")} className="text-primary underline-offset-4 hover:underline">
+              Fila da live
+            </Link>{" "}
+            como “{ETAPA_DA_LIVE[naFilaLive.etapa].label}”, prazo {formatDateTimeCurta(naFilaLive.prazo)}
+          </p>
+        ) : null}
       </div>
 
       {lead.deletedAt ? (
@@ -308,7 +346,8 @@ export default async function FichaDoLead({
                       </Link>
                     </span>
                   ))}
-                  . Dá para mesclar em Leads → Revisar.
+                  {/* Só quem mescla (`leads:delete`) lê a instrução: os outros não têm o botão. */}
+                  .{canDelete ? " Dá para mesclar em Leads → Revisar." : ""}
                 </li>
               ) : null}
             </ul>
@@ -320,10 +359,10 @@ export default async function FichaDoLead({
         <div className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>Contato</CardTitle>
-              {mascarar ? (
-                <CardDescription>Mascarado para o papel Marketing (LGPD) — quem liga é o comercial.</CardDescription>
-              ) : null}
+              <CardTitle className="flex items-center gap-0.5" data-titulo>
+                <span className="min-w-0">Contato</span>
+                {mascarar ? <Info texto={SOBRE_A_MASCARA} rotulo="Sobre o contato mascarado" className="-my-1" /> : null}
+              </CardTitle>
             </CardHeader>
             <CardContent>
               <dl className="divide-y">
@@ -374,49 +413,44 @@ export default async function FichaDoLead({
           </Card>
 
           <Card>
-            <CardHeader>
-              <CardTitle className="flex flex-wrap items-center gap-2">
-                Qualificação
-                <ClasseBadge classe={classeDoLead(lead)} origem={lead.classe ? undefined : lead.classeN8n ? "n8n" : undefined} />
+            <CardHeader className={qualificacaoVazia && !editaQualificacao ? "pb-5" : undefined}>
+              <CardTitle className="flex flex-wrap items-center gap-x-1.5 gap-y-1" data-titulo>
+                <span className="min-w-0">{qualificacaoVazia ? "Qualificação · sem respostas" : "Qualificação"}</span>
+                {qualificacaoVazia ? null : (
+                  <ClasseBadge classe={classeDoLead(lead)} origem={lead.classe ? undefined : lead.classeN8n ? "n8n" : undefined} />
+                )}
+                {divergeClasse ? (
+                  <span className="text-[11px] font-medium text-[var(--status-fora-text)]">≠ n8n ({lead.classeN8n})</span>
+                ) : null}
+                <Info texto={dicaDaQualificacao} rotulo="Sobre a qualificação" className="-my-1" />
               </CardTitle>
-              <CardDescription>
-                As respostas do formulário. A classe é a do painel (calculada das respostas); sem respostas
-                completas, vale a que o n8n mandou.
-              </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-3">
-              {classeDiverge(lead) ? (
-                <p className="flex items-start gap-2 rounded-lg border border-[var(--warning)]/50 bg-[var(--warning)]/10 p-2.5 text-xs">
-                  <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-[var(--warning-text)]" />
-                  <span>
-                    O n8n classificou como <strong>{lead.classeN8n}</strong> e o painel calcula{" "}
-                    <strong>{lead.classe}</strong> com as mesmas respostas. A Fila usa a do painel — confira a
-                    tabela de parcela em Configurações → Atendimento e o fluxo do n8n.
-                  </span>
-                </p>
-              ) : null}
-              <FichaQualificacao
-                id={lead.id}
-                canEdit={canEdit && !lead.deletedAt}
-                atuais={{
-                  bem: lead.bem,
-                  faixaValor: lead.faixaValor,
-                  finalidade: lead.finalidade,
-                  faixaParcela: lead.faixaParcela,
-                  prazoCompra: lead.prazoCompra,
-                  horarioPreferido: lead.horarioPreferido,
-                  aceiteMensagens: lead.aceiteMensagens,
-                }}
-              />
-            </CardContent>
+            {qualificacaoVazia && !editaQualificacao ? null : (
+              <CardContent>
+                <FichaQualificacao
+                  id={lead.id}
+                  canEdit={editaQualificacao}
+                  semRespostas={qualificacaoVazia}
+                  atuais={{
+                    bem: lead.bem,
+                    faixaValor: lead.faixaValor,
+                    finalidade: lead.finalidade,
+                    faixaParcela: lead.faixaParcela,
+                    prazoCompra: lead.prazoCompra,
+                    horarioPreferido: lead.horarioPreferido,
+                    aceiteMensagens: lead.aceiteMensagens,
+                  }}
+                />
+              </CardContent>
+            )}
           </Card>
 
           <Card>
             <CardHeader>
-              <CardTitle>Atendimento</CardTitle>
-              <CardDescription>
-                Cada tentativa com o resultado e as notas da ligação, do histórico — nada é contado à parte.
-              </CardDescription>
+              <CardTitle className="flex items-center gap-0.5" data-titulo>
+                <span className="min-w-0">Atendimento</span>
+                <Info texto={SOBRE_O_ATENDIMENTO} rotulo="Sobre o atendimento" className="-my-1" />
+              </CardTitle>
             </CardHeader>
             <CardContent>
               <dl className="divide-y">
@@ -427,9 +461,13 @@ export default async function FichaDoLead({
                     <Linha key={i} rotulo={`${i + 1}ª tentativa`}>
                       {t ? (
                         <>
-                          {formatDateTime(t.em)}
+                          {formatDateTimeCurta(t.em)}
                           {t.resultado ? ` · ${RESULTADOS_CONTATO[t.resultado]}` : t.falou ? " · falou" : " · sem resposta"}
-                          {t.nota ? <span className="block text-xs text-muted-foreground whitespace-pre-line">{t.nota}</span> : null}
+                          {t.nota ? (
+                            <span className="block text-xs text-muted-foreground whitespace-pre-line" data-medir-texto-ignorar="true">
+                              {t.nota}
+                            </span>
+                          ) : null}
                         </>
                       ) : (
                         "—"
@@ -443,9 +481,9 @@ export default async function FichaDoLead({
                 </Linha>
                 <Linha rotulo="Reunião">
                   {reuniao ? STATUS_REUNIAO[reuniao] : "—"}
-                  {lead.meetingFor ? ` · ${formatDateTime(lead.meetingFor)}` : ""}
+                  {lead.meetingFor ? ` · ${formatDateTimeCurta(lead.meetingFor)}` : ""}
                   {reuniao === "confirmada" && lead.reuniaoConfirmadaEm ? (
-                    <span className="block text-xs text-muted-foreground">confirmada em {formatDateTime(lead.reuniaoConfirmadaEm)}</span>
+                    <span className="block text-xs text-muted-foreground">confirmada em {formatDateTimeCurta(lead.reuniaoConfirmadaEm)}</span>
                   ) : null}
                 </Linha>
               </dl>
@@ -455,7 +493,7 @@ export default async function FichaDoLead({
                 vespera={vespera}
                 resultado={
                   resultadoReuniao
-                    ? { resultado: resultadoReuniao.resultado, quando: formatDateTime(resultadoReuniao.em) }
+                    ? { resultado: resultadoReuniao.resultado, quando: formatDateTimeCurta(resultadoReuniao.em) }
                     : undefined
                 }
                 canEdit={canEdit && !lead.deletedAt}
@@ -464,31 +502,32 @@ export default async function FichaDoLead({
           </Card>
 
           <Card>
-            <CardHeader>
-              <CardTitle>Automação (n8n)</CardTitle>
-              <CardDescription>O que o fluxo do n8n registrou: mensagem, avisos e comunidade.</CardDescription>
+            <CardHeader className={automacaoVazia ? "pb-5" : undefined}>
+              <CardTitle data-titulo>{automacaoVazia ? "Automação (n8n) · nada registrado" : "Automação (n8n)"}</CardTitle>
             </CardHeader>
-            <CardContent>
-              <dl className="divide-y">
-                <Linha rotulo="Mensagem automática">
-                  {lead.msg1EnviadaEm ? formatDateTime(lead.msg1EnviadaEm) : "não enviada"}
-                  {lead.msg1Status ? ` · ${(STATUS_MSG1 as Record<string, string>)[lead.msg1Status] ?? lead.msg1Status}` : ""}
-                </Linha>
-                <Linha rotulo="Atendimento avisado">{data(lead.atendimentoAvisadoEm)}</Linha>
-                <Linha rotulo="Escalado">{data(lead.escaladoEm)}</Linha>
-                <Linha rotulo="Clicou na comunidade">
-                  {lead.comunidadeEm ? `sim · ${formatDateTime(lead.comunidadeEm)}` : "não"}
-                </Linha>
-              </dl>
-            </CardContent>
+            {automacaoVazia ? null : (
+              <CardContent>
+                <dl className="divide-y">
+                  <Linha rotulo="Mensagem automática">
+                    {lead.msg1EnviadaEm ? formatDateTimeCurta(lead.msg1EnviadaEm) : "não enviada"}
+                    {lead.msg1Status ? ` · ${(STATUS_MSG1 as Record<string, string>)[lead.msg1Status] ?? lead.msg1Status}` : ""}
+                  </Linha>
+                  <Linha rotulo="Atendimento avisado">{data(lead.atendimentoAvisadoEm)}</Linha>
+                  <Linha rotulo="Escalado">{data(lead.escaladoEm)}</Linha>
+                  <Linha rotulo="Clicou na comunidade">
+                    {lead.comunidadeEm ? `sim · ${formatDateTimeCurta(lead.comunidadeEm)}` : "não"}
+                  </Linha>
+                </dl>
+              </CardContent>
+            )}
           </Card>
 
           {robo.ligado ? (
             <Card id="robo" className="scroll-mt-24">
               <CardHeader className={roboUmaLinha ? "pb-5" : undefined}>
-                <CardTitle className="flex flex-wrap items-center gap-x-1">
-                  <span>Robô (WhatsApp) · {roboTitulo}</span>
-                  <Info texto={SOBRE_O_ROBO} rotulo="Sobre o robô de WhatsApp" />
+                <CardTitle className="flex flex-wrap items-center gap-x-0.5" data-titulo>
+                  <span className="min-w-0">Robô (WhatsApp) · {roboTitulo}</span>
+                  <Info texto={SOBRE_O_ROBO} rotulo="Sobre o robô de WhatsApp" className="-my-1" />
                 </CardTitle>
               </CardHeader>
               {roboUmaLinha ? null : (
@@ -499,7 +538,7 @@ export default async function FichaDoLead({
                     <Linha rotulo="Última mensagem do cliente">{data(lead.roboUltimaMsgClienteEm)}</Linha>
                     <Linha rotulo="Cobranças">
                       {lead.roboCobrancas
-                        ? `${lead.roboCobrancas}${lead.roboUltimaCobrancaEm ? ` · a última em ${formatDateTime(lead.roboUltimaCobrancaEm)}` : ""}`
+                        ? `${lead.roboCobrancas}${lead.roboUltimaCobrancaEm ? ` · a última em ${formatDateTimeCurta(lead.roboUltimaCobrancaEm)}` : ""}`
                         : "nenhuma"}
                     </Linha>
                     <Linha rotulo="Convite enviado">{fatoDoRobo(lead.roboConviteEm)}</Linha>
@@ -508,9 +547,9 @@ export default async function FichaDoLead({
                       {/* O aceite DESTE episódio, sem reunião: o mesmo fato que põe em "Aceitou o convite". */}
                       {situacao.aceitouEm && !agendouDepoisDoAceite(lead, situacao.aceitouEm) ? " · conferir no Calendly" : ""}
                     </Linha>
-                    {lead.roboSemWhatsappEm ? <Linha rotulo="Sem WhatsApp">{formatDateTime(lead.roboSemWhatsappEm)}</Linha> : null}
+                    {lead.roboSemWhatsappEm ? <Linha rotulo="Sem WhatsApp">{formatDateTimeCurta(lead.roboSemWhatsappEm)}</Linha> : null}
                     {lead.roboOptOutEm ? (
-                      <Linha rotulo="Pediu para não receber mensagens">{formatDateTime(lead.roboOptOutEm)}</Linha>
+                      <Linha rotulo="Pediu para não receber mensagens">{formatDateTimeCurta(lead.roboOptOutEm)}</Linha>
                     ) : null}
                     {lead.roboEncerradoEm || lead.roboPausado ? (
                       <Linha rotulo="Encerrado pelo robô">
@@ -519,7 +558,7 @@ export default async function FichaDoLead({
                       </Linha>
                     ) : null}
                     <Linha rotulo="Última leitura">
-                      {robo.sync.ultimoOk ? formatDateTime(robo.sync.ultimoOk) : "nunca"}
+                      {robo.sync.ultimoOk ? formatDateTimeCurta(robo.sync.ultimoOk) : "nunca"}
                       {robo.sync.falha ? " · falhando" : ""}
                     </Linha>
                   </dl>
@@ -531,13 +570,29 @@ export default async function FichaDoLead({
           {lead.diagnostico ? (
             <Card>
               <CardHeader>
-                <CardTitle>Diagnóstico</CardTitle>
-                <CardDescription>
-                  {lead.diagnostico.feitoEm ? `Feito em ${formatDateTime(lead.diagnostico.feitoEm)}. ` : ""}
-                  {lead.diagnostico.perfil ? `Perfil: ${lead.diagnostico.perfil}` : "Sem perfil final."}
-                </CardDescription>
+                <CardTitle data-titulo>
+                  {perfilNoTitulo
+                    ? `Diagnóstico · ${perfilDoDiagnostico}`
+                    : perfilDoDiagnostico
+                      ? "Diagnóstico"
+                      : "Diagnóstico · sem perfil final"}
+                </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
+                {lead.diagnostico.feitoEm || (perfilDoDiagnostico && !perfilNoTitulo) ? (
+                  <dl className="divide-y">
+                    {lead.diagnostico.feitoEm ? (
+                      <Linha rotulo="Feito em">{formatDateTimeCurta(lead.diagnostico.feitoEm)}</Linha>
+                    ) : null}
+                    {perfilDoDiagnostico && !perfilNoTitulo ? (
+                      <Linha rotulo="Perfil">
+                        <span className="whitespace-pre-line" data-medir-texto-ignorar="true">
+                          {perfilDoDiagnostico}
+                        </span>
+                      </Linha>
+                    ) : null}
+                  </dl>
+                ) : null}
                 {lead.diagnostico.alertas?.length ? (
                   <p className="flex items-start gap-2 rounded-lg border border-[var(--warning)]/50 bg-[var(--warning)]/10 p-2.5 text-xs">
                     <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-[var(--warning-text)]" />
@@ -550,7 +605,9 @@ export default async function FichaDoLead({
                       <p className="text-xs text-muted-foreground">
                         {i + 1}. {r.pergunta ?? `Pergunta ${i + 1}`}
                       </p>
-                      <p className="whitespace-pre-line">{r.resposta}</p>
+                      <p className="whitespace-pre-line" data-medir-texto-ignorar="true">
+                        {r.resposta}
+                      </p>
                     </li>
                   ))}
                 </ol>
@@ -560,10 +617,10 @@ export default async function FichaDoLead({
 
           <Card>
             <CardHeader>
-              <CardTitle>Marcos</CardTitle>
-              <CardDescription>
-                Gravados uma vez, quando aconteceram — o status pode mudar, o fato não.
-              </CardDescription>
+              <CardTitle className="flex items-center gap-0.5" data-titulo>
+                <span className="min-w-0">Marcos</span>
+                <Info texto={SOBRE_OS_MARCOS} rotulo="Sobre os marcos" className="-my-1" />
+              </CardTitle>
             </CardHeader>
             <CardContent>
               <dl className="divide-y">
@@ -571,17 +628,17 @@ export default async function FichaDoLead({
                 <Linha rotulo="1º contato">{data(lead.firstContactAt)}</Linha>
                 <Linha rotulo="Agendou">{data(lead.bookedAt)}</Linha>
                 <Linha rotulo="Reunião marcada para">
-                  {lead.meetingFor ? formatDateTime(lead.meetingFor) : everBooked(lead) ? "data não registrada" : "—"}
+                  {lead.meetingFor ? formatDateTimeCurta(lead.meetingFor) : everBooked(lead) ? "data não registrada" : "—"}
                 </Linha>
                 <Linha rotulo="Reunião realizada">{data(lead.attendedAt)}</Linha>
                 <Linha rotulo="Virou cliente">
                   {lead.closedAt
-                    ? `${formatDateTime(lead.closedAt)}${lead.value ? ` · ${formatCurrency(lead.value)}` : ""}`
+                    ? `${formatDateTimeCurta(lead.closedAt)}${lead.value ? ` · ${formatCurrency(lead.value)}` : ""}`
                     : "—"}
                 </Linha>
                 {lead.lostAt ? (
                   <Linha rotulo="Perdido em">
-                    {formatDateTime(lead.lostAt)}
+                    {formatDateTimeCurta(lead.lostAt)}
                     {lead.lostReasonDetail ? ` · ${lead.lostReasonDetail}` : ""}
                   </Linha>
                 ) : null}
@@ -591,11 +648,10 @@ export default async function FichaDoLead({
 
           <Card>
             <CardHeader>
-              <CardTitle>Origem</CardTitle>
-              <CardDescription>
-                Campanha › conjunto › anúncio, pela junção única lead → anúncio (o id gravado na
-                entrada vence; depois o utm_content).
-              </CardDescription>
+              <CardTitle className="flex items-center gap-0.5" data-titulo>
+                <span className="min-w-0">Origem</span>
+                <Info texto={SOBRE_A_ORIGEM} rotulo="Sobre a origem" className="-my-1" />
+              </CardTitle>
             </CardHeader>
             <CardContent>
               <dl className="divide-y">
@@ -617,7 +673,8 @@ export default async function FichaDoLead({
         </div>
 
         <div className="space-y-6">
-          {!lead.deletedAt ? (
+          {/* Só para quem registra (`leads:write`): para o Marketing era um card vazio. */}
+          {!lead.deletedAt && canEdit ? (
             <Card>
               <CardHeader>
                 <CardTitle>Registrar</CardTitle>
@@ -643,10 +700,10 @@ export default async function FichaDoLead({
 
           <Card>
             <CardHeader>
-              <CardTitle>Linha do tempo</CardTitle>
-              <CardDescription>
-                Cada entrada, tentativa, mudança e anotação — e o que foi enviado à Meta — a mais recente primeiro.
-              </CardDescription>
+              <CardTitle className="flex items-center gap-0.5" data-titulo>
+                <span className="min-w-0">Linha do tempo</span>
+                <Info texto={SOBRE_A_LINHA_DO_TEMPO} rotulo="Sobre a linha do tempo" className="-my-1" />
+              </CardTitle>
             </CardHeader>
             <CardContent>
               {linhaDoTempo.length === 0 ? (
@@ -657,7 +714,7 @@ export default async function FichaDoLead({
                     item.tipo === "meta" ? (
                       <li key={item.m.id} className="border-l-2 border-dashed pl-3 text-sm">
                         <p className="text-xs text-muted-foreground">
-                          {formatDateTime(item.em)} · Meta (CAPI)
+                          {formatDateTimeCurta(item.em)} · Meta (CAPI)
                           {item.mesclado ? ` · cadastro mesclado (${item.mesclado})` : ""}
                         </p>
                         <p
@@ -675,7 +732,7 @@ export default async function FichaDoLead({
                     ) : (
                       <li key={item.e.id} className="border-l-2 pl-3 text-sm">
                         <p className="text-xs text-muted-foreground">
-                          {formatDateTime(item.em)} · {item.e.actor}
+                          {formatDateTimeCurta(item.em)} · {item.e.actor}
                           {item.e.leadId !== lead.id
                             ? ` · cadastro mesclado (${mesclados.get(item.e.leadId) ?? item.e.leadName})`
                             : ""}

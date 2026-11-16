@@ -20,13 +20,17 @@ import {
   CHAVES_FILTRO_FICHA,
   FILTROS_DA_FICHA,
   FILTRO_VAZIO,
+  LINHAS_POR_VEZ,
   SINALIZADOR_LABEL,
   aplicarFiltroSemStatus,
   ehFiltroRobo,
   filtrosDaFichaDe,
   contarPorStatus,
+  linhasDaUrl,
+  mudaOFiltro,
   profundidadeDaEtapa,
   qtdDeLeads,
+  rotuloMostrarMais,
   type AbaStatus,
   type FiltroDeLeads,
   type LinhaDeLead,
@@ -370,9 +374,10 @@ function filtroDaUrl(p: URLSearchParams, roboLigado: boolean): FiltroDeLeads {
 /**
  * Grava o filtro na URL sem ida ao servidor (`replaceState` — o Next sincroniza
  * `useSearchParams`). O link fica compartilhável e o período (`range`) é
- * preservado; a busca não vai: é digitação, e costuma ser PII.
+ * preservado; a busca não vai: é digitação, e costuma ser PII. O `?linhas=` só
+ * acima de 50.
  */
-function urlComFiltro(f: FiltroDeLeads): string {
+function urlComFiltro(f: FiltroDeLeads, limite: number): string {
   const url = new URL(window.location.href);
   const p = url.searchParams;
   const set = (k: string, v: string | undefined) => (v ? p.set(k, v) : p.delete(k));
@@ -383,6 +388,7 @@ function urlComFiltro(f: FiltroDeLeads): string {
   set("robo", f.robo);
   set("sinal", f.sinalizadores.length ? f.sinalizadores.join(",") : undefined);
   for (const k of CHAVES_FILTRO_FICHA) set(k, f[k]);
+  set("linhas", limite > LINHAS_POR_VEZ ? String(limite) : undefined);
   return url.pathname + (p.toString() ? `?${p.toString()}` : "") + url.hash;
 }
 
@@ -419,22 +425,44 @@ export function LeadsDirectory({
   const [filtro, setFiltro] = useState<FiltroDeLeads>(() =>
     filtroDaUrl(new URLSearchParams(params.toString()), roboLigado),
   );
+  // Quantas linhas a tabela desenha (T3): 50, e +50 por "Mostrar mais". Acima de 50 vai à URL
+  // (`?linhas=`), pelo mesmo replaceState dos filtros: voltar da ficha pelo navegador reabre onde
+  // estava. Filtro, aba, busca ou período novos recomeçam curtos; ordenar, não (a ordenação é do
+  // DataTable e vale para a lista inteira).
+  const [limite, setLimite] = useState(() => linhasDaUrl(params.get("linhas")));
+  // O seletor do cabeçalho só troca o ?range= e a página continua montada (o App Router não
+  // remonta por query): período novo, lista curta. `key={rangeKey}` não serviria — o seletor
+  // preserva os outros parâmetros, e a remontagem leria o ?linhas= de volta.
+  const [periodoVisto, setPeriodoVisto] = useState(rangeKey);
+  if (periodoVisto !== rangeKey) {
+    setPeriodoVisto(rangeKey);
+    setLimite(LINHAS_POR_VEZ);
+  }
   const [exportando, startExport] = useTransition();
   const [msgExport, setMsgExport] = useState<{ ok: boolean; text: string } | null>(null);
 
   // Filtro → URL (sem servidor). Só os campos que valem a pena compartilhar.
   // A busca não vai para a URL: é digitação, e costuma ser PII.
   const semBusca = JSON.stringify({ ...filtro, busca: "" });
+  // A URL também muda por fora sem a página remontar (o voltar do navegador, o menu, o seletor
+  // de período): o efeito roda de novo e a URL volta a dizer o que a tela mostra — o estado
+  // vence. Sem laço: depois do replaceState, o alvo já é a URL e nada muda.
+  const qs = params.toString();
   useEffect(() => {
-    const alvo = urlComFiltro(JSON.parse(semBusca) as FiltroDeLeads);
+    const alvo = urlComFiltro(JSON.parse(semBusca) as FiltroDeLeads, limite);
     if (alvo !== window.location.pathname + window.location.search + window.location.hash) {
       // `null`, não o estado atual: é assim que o Next copia os internos dele e
       // sincroniza `useSearchParams` sem ir ao servidor.
       window.history.replaceState(null, "", alvo);
     }
-  }, [semBusca]);
+  }, [semBusca, limite, qs]);
 
-  const mudar = (patch: Partial<FiltroDeLeads>) => setFiltro((f) => ({ ...f, ...patch }));
+  const mudar = (patch: Partial<FiltroDeLeads>) => {
+    // A aba que já está ativa não é troca: a lista e o limite ficam.
+    if (!mudaOFiltro(filtro, patch)) return;
+    setFiltro((f) => ({ ...f, ...patch }));
+    setLimite(LINHAS_POR_VEZ);
+  };
 
   // Opções dos filtros saem das linhas: só se oferece o que existe.
   const campanhas = useMemo(
@@ -530,7 +558,7 @@ export function LeadsDirectory({
               type="button"
               onClick={exportar}
               disabled={exportando || filtradas.length === 0}
-              title="Exporta só o que o filtro mostra; a exportação fica registrada com quem exportou e o filtro"
+              title="Exporta todas as linhas do filtro e da busca, não só as da tela; fica registrado quem exportou e o filtro"
               className="inline-flex h-9 shrink-0 items-center gap-2 rounded-lg border px-3 text-sm font-medium text-muted-foreground hover:text-foreground disabled:opacity-50"
             >
               <Download className="size-4" />
@@ -662,7 +690,7 @@ export function LeadsDirectory({
         {temFiltro ? (
           <button
             type="button"
-            onClick={() => setFiltro(FILTRO_VAZIO)}
+            onClick={() => { setFiltro(FILTRO_VAZIO); setLimite(LINHAS_POR_VEZ); }}
             className="text-xs text-muted-foreground underline-offset-4 hover:underline"
           >
             Limpar filtros
@@ -700,13 +728,24 @@ export function LeadsDirectory({
       <DataTable
         columns={colunas}
         rows={filtradas}
+        limite={limite}
         initialSortKey="createdAt"
         initialSortDir="desc"
         rowKey={(r) => r.id}
         detalhe={(r) => <DetalheDoLead r={r} />}
         emptyTitle={rows.length === 0 ? "Nenhum lead no período" : "Nenhum lead com esses filtros"}
-        emptyHint={rows.length === 0 ? "Troque o período no cabeçalho." : "Limpe um filtro ou troque a aba."}
       />
+      {filtradas.length > limite ? (
+        <div className="flex justify-center" data-parte="mais-linhas">
+          <button
+            type="button"
+            onClick={() => setLimite((n) => n + LINHAS_POR_VEZ)}
+            className="inline-flex h-9 items-center rounded-lg border px-4 text-sm font-medium text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none"
+          >
+            {rotuloMostrarMais(filtradas.length - limite)}
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

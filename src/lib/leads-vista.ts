@@ -22,8 +22,9 @@ import {
   type FilaEtapa,
   type VoltaDaCadencia,
 } from "./fila";
-import { formatDateTime, formatDateTimeCurta, formatarEspera } from "./format";
+import { formatDateTime, formatDateTimeCurta, formatInt, formatarEspera } from "./format";
 import { gruposDuplicados, pareceTeste, problemasDeContato } from "./identidade";
+import { SOBRE_A_MASCARA } from "./lgpd";
 import {
   ETAPAS_MAXIMAS,
   ETAPA_MAXIMA_LABEL,
@@ -566,8 +567,11 @@ export interface FiltroDeLeads {
   /** Nome, e-mail ou telefone. */
   busca: string;
   // ---- ficha da live ----
-  /** "ab" = qualificados (A ou B); "sem" = sem classe (faltam respostas e o n8n não mandou). */
-  classe?: Classe | "ab" | "sem";
+  /**
+   * "ab" = qualificados (A ou B); "sem" = sem classe (faltam respostas e o n8n não mandou);
+   * "diverge" = a do painel ≠ a do n8n (`classeDiverge`) — o alerta `classe-diverge` aponta aqui.
+   */
+  classe?: Classe | "ab" | "sem" | "diverge";
   bem?: Bem;
   faixaValor?: FaixaValor;
   finalidade?: Finalidade;
@@ -586,7 +590,7 @@ export interface FiltroDeLeads {
  * tela, a URL, a exportação e `descreverFiltro`.
  */
 export const FILTROS_DA_FICHA = {
-  classe: { rotulo: "Classe", vocab: { ...CLASSES, ab: "A e B (qualificados)", sem: "Sem classe" } },
+  classe: { rotulo: "Classe", vocab: { ...CLASSES, ab: "A e B (qualificados)", sem: "Sem classe", diverge: "≠ n8n" } },
   bem: { rotulo: "Bem", vocab: BENS },
   faixaValor: { rotulo: "Valor", vocab: FAIXAS_VALOR },
   finalidade: { rotulo: "Finalidade", vocab: FINALIDADES },
@@ -614,10 +618,11 @@ function valorNaLinha(r: LinhaDeLead, k: FiltroDaFicha): string | undefined {
   }
 }
 
-/** A linha passa no filtro da ficha? Os dois grupos (A e B, nunca agendou) não são um valor só. */
+/** A linha passa no filtro da ficha? Os três grupos (A e B, ≠ n8n, nunca agendou) não são um valor só. */
 function casaFiltroDaFicha(r: LinhaDeLead, k: FiltroDaFicha, v: string): boolean {
   if (k === "classe" && v === "ab") return r.classe === "A" || r.classe === "B";
   if (k === "reuniao" && v === "nunca") return !r.jaAgendou;
+  if (k === "classe" && v === "diverge") return r.classeDiverge;
   return valorNaLinha(r, k) === v;
 }
 
@@ -851,3 +856,67 @@ export function montarCsvDeLeads(linhas: LinhaDeLead[]): string {
 export function profundidadeDaEtapa(e: EtapaMaxima): number {
   return ETAPAS_MAXIMAS.indexOf(e);
 }
+
+// ---------------------------------------------------------------- texto da tela (T3, nov/26)
+
+/** Quantas linhas a tabela de Leads desenha de início, e quantas cada "Mostrar mais" soma. */
+export const LINHAS_POR_VEZ = 50;
+
+/** O botão embaixo da tabela: quantas linhas do filtro ainda não estão na tela. */
+export function rotuloMostrarMais(faltam: number): string {
+  return `Mostrar mais · faltam ${formatInt(faltam)}`;
+}
+
+/**
+ * O patch muda o filtro? Clicar na aba que já está ativa (ou repetir um valor) não é troca:
+ * a lista fica como está, com o limite de linhas (só filtro, aba ou busca NOVOS voltam a 50).
+ */
+export function mudaOFiltro(f: FiltroDeLeads, patch: Partial<FiltroDeLeads>): boolean {
+  return (Object.keys(patch) as (keyof FiltroDeLeads)[]).some((k) => {
+    const antes = f[k];
+    const depois = patch[k];
+    return Array.isArray(antes) && Array.isArray(depois) ? antes.join("\n") !== depois.join("\n") : antes !== depois;
+  });
+}
+
+/**
+ * O `?linhas=` de Leads (só existe acima de 50, gravado pelo mesmo `replaceState` dos
+ * filtros): arredondado para cima ao múltiplo de 50. Sem ele, ou inválido, 50. Um número, sem
+ * PII; o servidor não o lê (a exportação nunca recebe limite).
+ */
+export function linhasDaUrl(v: string | null | undefined): number {
+  const n = Number(v);
+  return Number.isFinite(n) && n > LINHAS_POR_VEZ ? Math.ceil(n / LINHAS_POR_VEZ) * LINHAS_POR_VEZ : LINHAS_POR_VEZ;
+}
+
+/**
+ * O ⓘ do título "Leads (N)" — o que era a frase de abertura e a descrição embaixo do
+ * título. Por papel: o Marketing lê a máscara (no lugar do WhatsApp); quem exporta lê o CSV.
+ * Cada frase ≤ 25 palavras (`t3-leads-tela.test.ts`).
+ */
+export function sobreALista(opts: { mascarar: boolean; exporta: boolean }): string {
+  return [
+    "Cada pessoa que entrou no período do cabeçalho (pela data de entrada), com status, até onde chegou, o atendimento agora e a origem.",
+    `A tabela abre com as ${LINHAS_POR_VEZ} entradas mais recentes; a busca, as abas e a ordenação valem para a lista inteira.`,
+    opts.mascarar ? SOBRE_A_MASCARA : "O telefone abre o WhatsApp.",
+    ...(opts.exporta
+      ? ["O CSV leva todas as linhas do filtro e da busca, não só as da tela; a exportação fica registrada."]
+      : []),
+  ].join(" ");
+}
+
+/** Os ⓘ dos recolhidos e das seções do Revisar (eram a cauda do `<summary>` e o `<p>` sob o h3). */
+export const DICAS_DE_LEADS = {
+  revisar:
+    "Possíveis testes, a mesma pessoa em dois cadastros, desistência sem reunião e contato com problema. Nada muda sozinho: o administrador decide cada caso.",
+  excluidos: "Fora das listas e dos números; o histórico fica e o administrador pode restaurar.",
+  historico: "Quem criou, reenviou, mudou o status ou excluiu cada lead: os 200 registros mais recentes.",
+  testes:
+    "Contam como lead e, quando marcados como “Contato inválido”, como perda da mídia. Confirmando, o cadastro é excluído (dá para restaurar).",
+  duplicados:
+    "Mesmo telefone ou e-mail. Mesclar mantém um cadastro, traz o contato e os marcos que faltavam e exclui os outros (reversível): a pessoa passa a contar uma vez.",
+  desistencias:
+    "Desistência é de quem marcou reunião. Sem reunião, a perda é de qualidade (mídia), não de decisão (oferta), e o funil mostra a quebra errada.",
+  contatos:
+    "Não dá para ligar ou escrever como está. Vale tentar pelo outro canal antes de encerrar como “Contato inválido”.",
+} as const;

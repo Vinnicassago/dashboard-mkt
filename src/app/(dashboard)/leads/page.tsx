@@ -1,9 +1,9 @@
-import Link from "next/link";
 import { DeletedLeads, LeadsDirectory, type DeletedLeadRow } from "@/components/leads/leads-directory";
 import { LeadActivity } from "@/components/leads/lead-activity";
 import { Revisar, type RevisarDados, type RevisarLead } from "@/components/leads/revisar";
 import { RolarParaAncora } from "@/components/ui/rolar-para-ancora";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Info } from "@/components/ui/info";
 import { getData, listDeletedLeads, listLeadEvents } from "@/lib/data/store";
 import { activeBrandSlug } from "@/lib/active-brand";
 import { rotuladorDeOrigem } from "@/lib/origem";
@@ -11,11 +11,10 @@ import { estadoDoRoboAgora } from "@/lib/robo/estado";
 import { can } from "@/lib/auth/guard";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { paraRevisar } from "@/lib/identidade";
-import { montarLinhasDeLeads } from "@/lib/leads-vista";
+import { DICAS_DE_LEADS, montarLinhasDeLeads, sobreALista } from "@/lib/leads-vista";
 import { expedienteAtual } from "@/lib/atendimento-server";
 import { mascararContato, mascararEmail, mascararNoTexto, mascararTelefone } from "@/lib/lgpd";
 import { pageRange } from "@/lib/page-range";
-import { comPeriodo, rangeLabel } from "@/lib/range";
 import type { Lead, LeadEvent } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -51,7 +50,8 @@ function mascararEvento(e: LeadEvent): LeadEvent {
  *
  * A tabela não calcula nada: cada linha sai de `montarLinhasDeLeads` (puro),
  * que lê as mesmas fontes da Fila e do Funil. O período (`?range=`) filtra
- * pela ENTRADA do lead — a coorte; sem ele, a campanha inteira.
+ * pela ENTRADA do lead — a coorte; sem ele, a campanha inteira. Abre com 50 linhas
+ * (`LINHAS_POR_VEZ`); o texto que explicava a lista está no ⓘ do título (T3).
  */
 export default async function LeadsPage({ searchParams }: { searchParams: Promise<{ range?: string }> }) {
   const { range: rangeParam } = await searchParams;
@@ -116,28 +116,13 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   return (
     <div className="space-y-6">
       <RolarParaAncora />
-      <p className="max-w-3xl text-sm text-muted-foreground">
-        A ficha de cada pessoa que a campanha trouxe, para consultar e registrar o que
-        aconteceu. Quem está esperando contato fica na{" "}
-        <Link href={comPeriodo("/fila", rangeKey)} className="text-primary underline-offset-4 hover:underline">
-          Fila de contato
-        </Link>
-        , na ordem de quem ligar primeiro.
-      </p>
 
       <Card id="leads" className="scroll-mt-24">
         <CardHeader>
-          <CardTitle>Leads ({rows.length})</CardTitle>
-          <CardDescription>
-            {rangeKey === "all"
-              ? "Todos os leads da campanha"
-              : `Leads que entraram em ${rangeLabel(rangeKey)} (o período do cabeçalho)`}
-            , com status, até onde chegaram, tentativas, o atendimento agora e a origem.
-            {mascarar
-              ? " Telefone e e-mail aparecem mascarados para o papel Marketing."
-              : " Clique no telefone para abrir o WhatsApp."}
-            {canEdit ? " A exportação em CSV leva só o que o filtro mostra e fica registrada." : ""}
-          </CardDescription>
+          <CardTitle className="flex items-center gap-0.5" data-titulo>
+            <span className="min-w-0">Leads ({rows.length})</span>
+            <Info texto={sobreALista({ mascarar, exporta: canEdit })} rotulo="Sobre a lista de leads" className="-my-1" />
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <LeadsDirectory
@@ -156,14 +141,11 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
       {nRevisar > 0 && (canEdit || canDelete) ? (
         <Card id="revisar" className="scroll-mt-24">
           <details>
-            <summary className="cursor-pointer p-5 text-sm font-semibold select-none">
-              Revisar ({nRevisar}){" "}
-              <span className="font-normal text-muted-foreground">
-                · possíveis testes, a mesma pessoa duas vezes, desistência sem reunião e contato
-                com problema
-              </span>
-            </summary>
+            <summary className="cursor-pointer p-5 text-sm font-semibold select-none">Revisar ({nRevisar})</summary>
             <CardContent>
+              <div className="flex justify-end">
+                <Info texto={DICAS_DE_LEADS.revisar} rotulo="Sobre o Revisar" />
+              </div>
               <Revisar dados={revisar} podeAgir={canDelete} />
             </CardContent>
           </details>
@@ -174,13 +156,11 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
       {deletedRows.length ? (
         <Card id="excluidos" className="scroll-mt-24">
           <details>
-            <summary className="cursor-pointer p-5 text-sm font-semibold select-none">
-              Excluídos ({deletedRows.length}){" "}
-              <span className="font-normal text-muted-foreground">
-                · fora das listas e dos números; dá para restaurar
-              </span>
-            </summary>
+            <summary className="cursor-pointer p-5 text-sm font-semibold select-none">Excluídos ({deletedRows.length})</summary>
             <CardContent>
+              <div className="flex justify-end">
+                <Info texto={DICAS_DE_LEADS.excluidos} rotulo="Sobre os excluídos" />
+              </div>
               <DeletedLeads rows={deletedRows} canRestore={canDelete} />
             </CardContent>
           </details>
@@ -190,13 +170,11 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
       {/* Auditoria é consulta, não leitura diária: fica recolhida. */}
       <Card id="historico" className="scroll-mt-24">
         <details>
-          <summary className="cursor-pointer p-5 text-sm font-semibold select-none">
-            Histórico de alterações{" "}
-            <span className="font-normal text-muted-foreground">
-              · quem criou, reenviou, mudou o status ou excluiu cada lead
-            </span>
-          </summary>
+          <summary className="cursor-pointer p-5 text-sm font-semibold select-none">Histórico de alterações</summary>
           <CardContent>
+            <div className="flex justify-end">
+              <Info texto={DICAS_DE_LEADS.historico} rotulo="Sobre o histórico de alterações" />
+            </div>
             <LeadActivity events={events} />
           </CardContent>
         </details>

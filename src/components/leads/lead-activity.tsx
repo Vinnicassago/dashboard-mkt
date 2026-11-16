@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { useComPeriodo } from "@/components/layout/use-periodo";
 import { statusMeta } from "@/components/tables/lead-status";
 import type { LeadEvent } from "@/lib/types";
-import { formatDateTime } from "@/lib/format";
+import { formatDateTime, formatDateTimeCurta } from "@/lib/format";
 import { CANAL_LABEL, type CanalContato } from "@/lib/contato";
 import { nomeDoUtmContent } from "@/lib/atribuicao";
 import { FATOS_DA_FICHA, RESULTADOS_CONTATO, lerOpcao, type FatoDaFicha } from "@/lib/qualificacao";
@@ -16,7 +16,11 @@ import { FATOS_DA_FICHA, RESULTADOS_CONTATO, lerOpcao, type FatoDaFicha } from "
 /** O que aconteceu, em uma linha — usado no histórico de Pessoas e na ficha. */
 export function DescricaoEvento({ e }: { e: LeadEvent }) {
   if (e.action === "nota") {
-    return <span className="whitespace-pre-line">{e.payload?.texto}</span>;
+    return (
+      <span className="whitespace-pre-line" data-medir-texto-ignorar="true">
+        {e.payload?.texto}
+      </span>
+    );
   }
   if (e.action === "mesclado") {
     return (
@@ -37,11 +41,15 @@ export function DescricaoEvento({ e }: { e: LeadEvent }) {
           : e.payload?.falou === "sim"
             ? "falou com a pessoa"
             : "sem resposta"}
-        {e.payload?.proxima ? ` · próxima ${formatDateTime(e.payload.proxima)}` : ""}
+        {e.payload?.proxima ? ` · próxima ${formatDateTimeCurta(e.payload.proxima)}` : ""}
         {e.occurredAt && Math.abs(Date.parse(e.occurredAt) - Date.parse(e.createdAt)) > 15 * 60_000
-          ? ` · feita em ${formatDateTime(e.occurredAt)}`
+          ? ` · feita em ${formatDateTimeCurta(e.occurredAt)}`
           : ""}
-        {e.payload?.nota ? <span className="mt-0.5 block whitespace-pre-line text-foreground">{e.payload.nota}</span> : null}
+        {e.payload?.nota ? (
+          <span className="mt-0.5 block whitespace-pre-line text-foreground" data-medir-texto-ignorar="true">
+            {e.payload.nota}
+          </span>
+        ) : null}
       </span>
     );
   }
@@ -117,7 +125,7 @@ export function DescricaoEvento({ e }: { e: LeadEvent }) {
       ) : null}
       {e.payload?.correcao ? <span className="text-xs text-muted-foreground">correção: {e.payload.correcao}</span> : null}
       {e.payload?.reuniao ? (
-        <span className="text-xs text-muted-foreground">reunião {formatDateTime(e.payload.reuniao)}</span>
+        <span className="text-xs text-muted-foreground">reunião {formatDateTimeCurta(e.payload.reuniao)}</span>
       ) : null}
       {e.payload?.motivo ? <span className="text-xs text-muted-foreground">{e.payload.motivo}</span> : null}
     </span>

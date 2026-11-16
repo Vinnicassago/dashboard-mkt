@@ -31,6 +31,20 @@ Build de produção:
 npm run build && npm start
 ```
 
+### Medir o texto de uma tela
+
+Ferramenta de quem desenvolve. Rode `npm run dev`, abra a página como ela abre (sem `#`, nada
+aberto), cole `scripts/medir-texto.js` no console (F12) e dê Enter: sai a rolagem em telas, as
+palavras fora de tabela, as frases longas (7+ palavras) e o pior trecho, mais uma linha pronta para
+a nota de entrega. `medirTexto({ comparar: true })` confere com a régua dos testes (`src/test/tela.ts`).
+
+Cole só o arquivo deste repositório, no commit que está no ar — nunca uma cópia que chegou por chat,
+e-mail ou link: o console de um painel com dados de pessoas não é lugar de código de terceiros. Fora
+do localhost (produção), o console leva só contagens e a página não é contornada nem rolada, já na
+colagem. No localhost sai também o começo do pior trecho e das frases longas (6 palavras, algarismo
+como `#`), nunca da ficha nem de linha de pessoa, e nas telas de pessoas só o de títulos; confira antes
+de colar a saída fora daqui.
+
 ## Estrutura
 
 ```
@@ -63,6 +77,8 @@ src/
     data/
       seed.ts               # dataset de exemplo (determinístico)
       store.ts              # camada de dados (JSON local) — PONTO DE PLUGUE do Supabase
+scripts/
+  medir-texto.js            # régua de texto da tela, para colar no console (T5)
 ```
 
 ## Dados
@@ -331,7 +347,7 @@ Migration: `supabase/migrations/0011_lead_status_reasons.sql`. Ela renomeia
 
 A tela **Leads** lista todos os contatos da campanha (nome, telefone, e-mail),
 com busca, filtro por status, status editável, link de WhatsApp/e-mail e
-**exportação em CSV** para o time comercial.
+**exportação em CSV** para o time comercial. A tabela abre com as 50 entradas mais recentes e "Mostrar mais"; a busca, as abas, a ordenação e a exportação valem para a lista inteira.
 
 Logo abaixo há o **Histórico de alterações** (log de auditoria): cada criação e
 cada mudança de status registra **quem** fez, **de/para** qual status e **quando**.

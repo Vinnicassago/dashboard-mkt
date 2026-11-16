@@ -16,6 +16,10 @@ export const RESULTADOS_DA_REUNIAO = {
 } as const;
 export type ResultadoDaReuniao = keyof typeof RESULTADOS_DA_REUNIAO;
 
+/** O ⓘ do "Resultado da reunião" na ficha (T3): vender e "não quis" são status, não este resultado. */
+export const SOBRE_O_RESULTADO_DA_REUNIAO =
+  "Vendeu: registre “Cliente” com o valor da carta. Não quis: “Não tem interesse”, com o motivo numa anotação.";
+
 /** O último resultado registrado — o mais recente vale (a pessoa pode pensar e depois pedir a proposta). */
 export function resultadoDaReuniao(eventos: LeadEvent[]): { resultado: ResultadoDaReuniao; em: string } | undefined {
   let ultimo: { resultado: ResultadoDaReuniao; em: string } | undefined;

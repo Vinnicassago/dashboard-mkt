@@ -44,7 +44,21 @@ const CAMPOS = [
  * para quem pode alterar leads, corrigíveis ali mesmo (a classe do painel é
  * recalculada no servidor).
  */
-export function FichaQualificacao({ id, atuais, canEdit }: { id: string; atuais: RespostasAtuais; canEdit: boolean }) {
+export function FichaQualificacao({
+  id,
+  atuais,
+  canEdit,
+  semRespostas = false,
+}: {
+  id: string;
+  atuais: RespostasAtuais;
+  canEdit: boolean;
+  /**
+   * Nenhuma resposta e nenhuma classe: o título da ficha já diz; aqui só o botão de hoje (o mesmo
+   * rótulo — salvar classifica o lead, e isso não merece um chamado novo).
+   */
+  semRespostas?: boolean;
+}) {
   const router = useRouter();
   const [editando, setEditando] = useState(false);
   const [pending, start] = useTransition();
@@ -66,6 +80,26 @@ export function FichaQualificacao({ id, atuais, canEdit }: { id: string; atuais:
         router.refresh();
       }
     });
+  }
+
+  // Sem nenhuma resposta (o título já diz "sem respostas"): só o botão de hoje, que abre o MESMO formulário.
+  if (semRespostas && !editando) {
+    if (!canEdit) return null;
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setEditando(true)}
+          className="inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-xs font-medium text-muted-foreground hover:text-foreground"
+        >
+          <Pencil className="size-3.5" />
+          Corrigir respostas
+        </button>
+        {msg ? (
+          <p className={cn("text-xs", msg.ok ? "text-muted-foreground" : "text-[var(--danger-text)]")}>{msg.text}</p>
+        ) : null}
+      </div>
+    );
   }
 
   return (

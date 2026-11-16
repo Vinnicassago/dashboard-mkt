@@ -4,7 +4,8 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { registrarResultadoDaReuniao } from "@/app/(dashboard)/leads/actions";
 import { CopiarResumo } from "@/components/live/live-forms";
-import { RESULTADOS_DA_REUNIAO, type ResultadoDaReuniao } from "@/lib/reuniao";
+import { Info } from "@/components/ui/info";
+import { RESULTADOS_DA_REUNIAO, SOBRE_O_RESULTADO_DA_REUNIAO, type ResultadoDaReuniao } from "@/lib/reuniao";
 import { cn } from "@/lib/utils";
 
 /**
@@ -54,6 +55,12 @@ export function ReuniaoNaFicha({
             <span className="font-normal text-muted-foreground">
               {resultado ? `${RESULTADOS_DA_REUNIAO[resultado.resultado]} (${resultado.quando})` : "ainda não registrado"}
             </span>
+            {canEdit ? (
+              <>
+                {" "}
+                <Info texto={SOBRE_O_RESULTADO_DA_REUNIAO} rotulo="Sobre o resultado da reunião" className="-my-1" />
+              </>
+            ) : null}
           </p>
           {canEdit ? (
             <div className="flex flex-wrap gap-2">
@@ -73,9 +80,6 @@ export function ReuniaoNaFicha({
               ))}
             </div>
           ) : null}
-          <p className="text-xs text-muted-foreground">
-            Vendeu: registre “Cliente” com o valor da carta. Não quis: “Não tem interesse” (o motivo vai numa anotação).
-          </p>
           {msg ? (
             <p className={cn("text-xs", msg.ok ? "text-muted-foreground" : "text-[var(--danger-text)]")}>{msg.text}</p>
           ) : null}

@@ -11,6 +11,8 @@ import {
 } from "@/app/(dashboard)/leads/actions";
 import { useComPeriodo } from "@/components/layout/use-periodo";
 import { StatusBadge } from "@/components/tables/lead-status";
+import { Info } from "@/components/ui/info";
+import { DICAS_DE_LEADS } from "@/lib/leads-vista";
 import { statusLabel } from "@/lib/lead-status";
 import { formatDateTime } from "@/lib/format";
 import type { LeadStatus } from "@/lib/types";
@@ -48,13 +50,14 @@ function Contato({ l }: { l: RevisarLead }) {
   return <span className="text-muted-foreground">{partes || "sem contato"}</span>;
 }
 
-function Secao({ titulo, explica, children }: { titulo: string; explica: string; children: React.ReactNode }) {
+/** Uma seção do Revisar: o título com a contagem e o ⓘ ao lado (T3: nada embaixo do título). */
+function Secao({ titulo, dica, rotulo, children }: { titulo: string; dica: string; rotulo: string; children: React.ReactNode }) {
   return (
     <section className="space-y-2">
-      <div>
-        <h3 className="text-sm font-semibold">{titulo}</h3>
-        <p className="text-xs text-muted-foreground">{explica}</p>
-      </div>
+      <h3 className="flex items-center gap-0.5 text-sm font-semibold" data-titulo>
+        <span className="min-w-0">{titulo}</span>
+        <Info texto={dica} rotulo={rotulo} className="-my-1" />
+      </h3>
       {children}
     </section>
   );
@@ -112,7 +115,7 @@ function GrupoDuplicado({
         </button>
         {grupo.conflito ? (
           <span className="text-xs text-[var(--warning-text)]">
-            Os status discordam — confira qual vale antes de mesclar (o que fica é o do cadastro escolhido).
+            Status diferentes: vale o do cadastro que fica.
           </span>
         ) : null}
       </div>
@@ -144,7 +147,8 @@ export function Revisar({ dados, podeAgir }: { dados: RevisarDados; podeAgir: bo
       {dados.testes.length ? (
         <Secao
           titulo={`Parecem teste (${dados.testes.length})`}
-          explica="Contam como lead e, quando marcados como “Contato inválido”, como perda da mídia. Confirmando, o cadastro é excluído (dá para restaurar)."
+          dica={DICAS_DE_LEADS.testes}
+          rotulo="Sobre os possíveis testes"
         >
           <ul className="divide-y rounded-lg border">
             {dados.testes.map((t) => (
@@ -178,7 +182,8 @@ export function Revisar({ dados, podeAgir }: { dados: RevisarDados; podeAgir: bo
       {dados.duplicados.length ? (
         <Secao
           titulo={`Mesma pessoa em mais de um cadastro (${dados.duplicados.length})`}
-          explica="Mesmo telefone ou e-mail. Mesclar mantém um cadastro, traz o contato e os marcos que faltavam e exclui os outros (reversível) — a pessoa passa a contar uma vez."
+          dica={DICAS_DE_LEADS.duplicados}
+          rotulo="Sobre os cadastros repetidos"
         >
           <ul className="divide-y rounded-lg border">
             {dados.duplicados.map((g) =>
@@ -197,7 +202,8 @@ export function Revisar({ dados, podeAgir }: { dados: RevisarDados; podeAgir: bo
       {dados.desistencias.length ? (
         <Secao
           titulo={`“Desistência” de quem nunca agendou (${dados.desistencias.length})`}
-          explica="Desistência é de quem marcou reunião. Sem reunião, a perda é de qualidade (mídia), não de decisão (oferta) — e o funil mostra a quebra errada."
+          dica={DICAS_DE_LEADS.desistencias}
+          rotulo="Sobre a desistência sem reunião"
         >
           <ul className="divide-y rounded-lg border">
             {dados.desistencias.map((l) => (
@@ -230,7 +236,8 @@ export function Revisar({ dados, podeAgir }: { dados: RevisarDados; podeAgir: bo
       {dados.contatos.length ? (
         <Secao
           titulo={`Contato com problema (${dados.contatos.length})`}
-          explica="Não dá para ligar ou escrever como está. Vale tentar pelo outro canal antes de encerrar como “Contato inválido”."
+          dica={DICAS_DE_LEADS.contatos}
+          rotulo="Sobre o contato com problema"
         >
           <ul className="divide-y rounded-lg border">
             {dados.contatos.map((l) => (

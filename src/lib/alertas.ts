@@ -177,7 +177,7 @@ export function alertaDeClasse(leads: Pick<Lead, "classe" | "classeN8n" | "statu
       nivel: "aviso",
       titulo: `${n} ${n === 1 ? "lead tem" : "leads têm"} a classe do n8n diferente da do painel`,
       detalhe:
-        "O painel calcula a classe pelas respostas e pela tabela de parcela; o n8n manda a dele. A Fila segue a do painel, mas a mensagem e o aviso ao atendimento saíram pela do n8n. Confira a tabela de parcela e o fluxo — a coluna Classe de Leads marca quem diverge (≠ n8n).",
+        "O painel calcula a classe pelas respostas e pela tabela de parcela; o n8n manda a dele. A Fila segue a do painel, mas a mensagem e o aviso ao atendimento saíram pela do n8n. Confira a tabela de parcela e o fluxo; em Leads, no período Campanha, o filtro Classe: ≠ n8n lista quem diverge.",
       cta: { label: "Ver a tabela de parcela", href: "/configuracoes/atendimento#tabela-parcela" },
     },
   ];
