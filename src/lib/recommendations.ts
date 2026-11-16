@@ -139,7 +139,9 @@ function buildOrganicContentRecommendations(
         id: "retention-drop",
         severity: "media",
         title: "Retenção dos reels caindo",
-        linha: `Revise o gancho dos reels: retenção ${formatPercent(cur)} contra ${formatPercent(prev)}`,
+        // De → para: o número antigo vem primeiro, para a linha dizer que caiu (o
+        // "no período anterior" mora no ⓘ).
+        linha: `Revise o gancho: retenção dos reels de ${formatPercent(prev)} para ${formatPercent(cur)}`,
         detail: `Retenção média ${formatPercent(cur)} vs ${formatPercent(prev)} no período anterior. Revise o gancho dos primeiros 2 segundos — entre direto no número ou na afirmação polêmica.`,
       });
     } else if (cur == null || prev == null) {
@@ -152,7 +154,7 @@ function buildOrganicContentRecommendations(
           id: "retention-drop",
           severity: "media",
           title: "Tempo assistido dos reels caindo",
-          linha: `Revise o gancho: reels com ${curTxt} s contra ${prevTxt} s`,
+          linha: `Revise o gancho: tempo assistido de ${prevTxt} para ${curTxt} s`,
           detail: `Tempo médio assistido: ${curTxt} s contra ${prevTxt} s no período anterior. Preencha a duração dos reels em Conteúdo → Registros para acompanhar a retenção % real (meta: 40%).`,
         });
       }

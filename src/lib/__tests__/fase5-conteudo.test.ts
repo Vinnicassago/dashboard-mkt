@@ -508,14 +508,15 @@ describe("as ações da grade (§2.5, F5-D8, F5-D31, F5-D32, F5-D34)", () => {
       F.post("IG-RET-1", "2026-11-09", "12:00", "reel", "Reel novo\nAssista.", { durationSec: 20, avgWatchTime: 5 }),
       F.post("IG-RET-0", "2026-11-03", "12:00", "reel", "Reel anterior\nAssista.", { durationSec: 20, avgWatchTime: 10 }),
     ]);
-    expect(naRegra(ret, "7d", "retention-drop")).toBe(`Revise o gancho dos reels: retenção ${formatPercent(0.25)} contra ${formatPercent(0.5)}`);
-    // Tempo assistido (sem duração): o pior caso, 12,3 s contra 45,6 s.
-    expect(naRegra(F.piorCasoDeTexto(), F.CHAVE_DO_PIOR_CASO, "retention-drop")).toBe("Revise o gancho: reels com 12,3 s contra 45,6 s");
+    // De → para: o número antigo primeiro, para a linha dizer sozinha que caiu.
+    expect(naRegra(ret, "7d", "retention-drop")).toBe(`Revise o gancho: retenção dos reels de ${formatPercent(0.5)} para ${formatPercent(0.25)}`);
+    // Tempo assistido (sem duração): o pior caso, de 45,6 s para 12,3 s.
+    expect(naRegra(F.piorCasoDeTexto(), F.CHAVE_DO_PIOR_CASO, "retention-drop")).toBe("Revise o gancho: tempo assistido de 45,6 para 12,3 s");
     const tempo = comPosts([
       F.post("IG-TMP-1", "2026-11-09", "12:00", "reel", "Reel novo\nAssista.", { avgWatchTime: 6 }),
       F.post("IG-TMP-0", "2026-11-03", "12:00", "reel", "Reel anterior\nAssista.", { avgWatchTime: 12 }),
     ]);
-    expect(naRegra(tempo, "7d", "retention-drop")).toBe(`Revise o gancho: reels com ${formatDecimal(6, 1)} s contra ${formatDecimal(12, 1)} s`);
+    expect(naRegra(tempo, "7d", "retention-drop")).toBe(`Revise o gancho: tempo assistido de ${formatDecimal(12, 1)} para ${formatDecimal(6, 1)} s`);
     // Reels longos: acima de 25 s (média) e de 30 s (alta).
     expect(naRegra(comPosts([F.post("IG-28S", "2026-11-09", "12:00", "reel", "Reel de 28 s\nAssista.", { durationSec: 28 })]), "7d", "reels-too-long")).toBe(
       "Encurte os reels: 1 acima de 25s",
