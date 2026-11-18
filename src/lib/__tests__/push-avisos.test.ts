@@ -19,6 +19,7 @@ import {
   type AvisoPush,
 } from "@/lib/push/aviso";
 import { estadoDosAvisosPush } from "@/lib/configuracoes";
+import { MENSAGEM_LEAD_NOVO } from "@/lib/push/mensagem";
 
 // ---------------------------------------------------------------- dublês
 
@@ -190,6 +191,63 @@ describe("estadoDosAvisosPush (Integrações)", () => {
     });
     expect(saíram).toMatchObject({ estado: "ativo", rotulo: "1 aparelho ligado" });
     expect(saíram.detalhe).toContain("1 de 3 entregues (2 aparelhos saíram: desligaram no navegador)");
+  });
+});
+
+// ---------------------------------------------------------------- o service worker
+
+describe("public/sw.js: o aviso de lead também atualiza as abas abertas", () => {
+  type Ouvinte = (e: unknown) => void;
+  /** O sw.js de verdade, rodando com um `self` de mentira. */
+  const carregarSw = () => {
+    const ouvintes: Record<string, Ouvinte> = {};
+    const mostradas: Array<{ titulo: string; opcoes: Record<string, unknown> }> = [];
+    const mensagens: unknown[] = [];
+    const aba = { postMessage: (m: unknown) => mensagens.push(m) };
+    const falso = {
+      addEventListener: (tipo: string, fn: Ouvinte) => {
+        ouvintes[tipo] = fn;
+      },
+      skipWaiting: () => {},
+      location: { origin: "https://painel.exemplo" },
+      registration: {
+        showNotification: async (titulo: string, opcoes: Record<string, unknown>) => {
+          mostradas.push({ titulo, opcoes });
+        },
+      },
+      clients: { matchAll: async () => [aba, aba], claim: async () => {} },
+    };
+    new Function("self", fs.readFileSync(path.join(process.cwd(), "public", "sw.js"), "utf8"))(falso);
+    const push = async (aviso: AvisoPush) => {
+      let espera: Promise<unknown> = Promise.resolve();
+      ouvintes.push({
+        data: { json: () => aviso, text: () => JSON.stringify(aviso) },
+        waitUntil: (p: Promise<unknown>) => {
+          espera = p;
+        },
+      });
+      await espera;
+    };
+    return { push, mostradas, mensagens };
+  };
+
+  it("lead: mostra a notificação e manda a MESMA mensagem que a tela escuta, a cada aba", async () => {
+    const sw = carregarSw();
+    await sw.push(avisoDoLead(LEAD, "lead_novo", { robo: false }));
+    expect(sw.mostradas).toEqual([
+      {
+        titulo: "Lead novo: Maria",
+        opcoes: expect.objectContaining({ tag: "lead:LEAD-LP-abc123", renotify: true, data: { url: "/leads/LEAD-LP-abc123" } }),
+      },
+    ]);
+    expect(sw.mensagens).toEqual([{ tipo: MENSAGEM_LEAD_NOVO }, { tipo: MENSAGEM_LEAD_NOVO }]);
+  });
+
+  it("o aviso de teste (ao ligar o sino) só mostra a notificação", async () => {
+    const sw = carregarSw();
+    await sw.push({ titulo: "Avisos de lead novo ligados", corpo: "x", url: "/fila", tag: "teste" });
+    expect(sw.mostradas).toHaveLength(1);
+    expect(sw.mensagens).toEqual([]);
   });
 });
 

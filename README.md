@@ -465,7 +465,9 @@ Migration no Supabase: `supabase/migrations/0006_lead_events.sql`.
 Cada pessoa liga o **sino do cabeçalho** no próprio navegador — computador ou
 celular — e recebe uma notificação do sistema a cada **lead novo** (pela landing
 page ou pela API do n8n) e a cada **lead perdido que voltou**, na hora, mesmo com o
-painel fechado. Tocar no aviso abre a ficha do lead.
+painel fechado. Tocar no aviso abre a ficha do lead. Com o painel aberto nesse
+navegador, a tela também se atualiza sozinha e o lead aparece sem recarregar (aba
+escondida: ao voltar a ela).
 
 1. Gere o par de chaves **uma vez** (não troque depois: trocar obriga cada aparelho a
    ligar de novo):

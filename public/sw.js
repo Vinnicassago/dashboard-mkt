@@ -19,15 +19,24 @@ self.addEventListener("push", (event) => {
   }
   const tag = typeof aviso.tag === "string" && aviso.tag ? aviso.tag : undefined;
   event.waitUntil(
-    self.registration.showNotification(aviso.titulo || "Lead novo", {
-      body: aviso.corpo || "",
-      tag,
-      // O mesmo lead de novo troca o aviso anterior, mas toca de novo.
-      renotify: Boolean(tag),
-      icon: "/favicon.ico",
-      lang: "pt-BR",
-      data: { url: typeof aviso.url === "string" ? aviso.url : "/fila" },
-    }),
+    (async () => {
+      await self.registration.showNotification(aviso.titulo || "Lead novo", {
+        body: aviso.corpo || "",
+        tag,
+        // O mesmo lead de novo troca o aviso anterior, mas toca de novo.
+        renotify: Boolean(tag),
+        icon: "/favicon.ico",
+        lang: "pt-BR",
+        data: { url: typeof aviso.url === "string" ? aviso.url : "/fila" },
+      });
+      // Aviso de LEAD (não o de teste): as abas do painel abertas se atualizam e o
+      // lead aparece sem recarregar (src/components/layout/atualizar-com-aviso.tsx).
+      // O texto é MENSAGEM_LEAD_NOVO de src/lib/push/mensagem.ts.
+      if (tag && tag.startsWith("lead:")) {
+        const janelas = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+        for (const janela of janelas) janela.postMessage({ tipo: "painel:lead-novo" });
+      }
+    })(),
   );
 });
 

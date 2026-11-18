@@ -11,6 +11,7 @@ import { hojeEmBrasilia } from "@/lib/range";
 import { NAO_CLASSIFICADO, integrationStatus } from "@/lib/meta/config";
 import { estadoDaFonte } from "@/lib/sincronizacao";
 import { AlertasProvider } from "@/components/layout/alertas";
+import { AtualizarComAviso } from "@/components/layout/atualizar-com-aviso";
 import { alertaDeClasse, alertaRoboSem1aMsg, type Alerta } from "@/lib/alertas";
 import { expirarCapiVencidos, getData, listCapiEnvios, listLeadEvents, listLeads } from "@/lib/data/store";
 import { leituraDoRoboParada, reabertosNoPainel, reabertosPorLead, semMensagemDoRobo } from "@/lib/robo/situacao";
@@ -185,6 +186,8 @@ export default async function DashboardLayout({
 
   return (
     <AlertasProvider globais={globais}>
+    {/* Com o sino ligado, o aviso de um lead atualiza a tela aberta. */}
+    {chavePush ? <AtualizarComAviso /> : null}
     <div className="flex min-h-screen">
       <Sidebar brand={brand} hrefDoInicio={hrefDoInicio} />
       <div className="flex min-w-0 flex-1 flex-col">

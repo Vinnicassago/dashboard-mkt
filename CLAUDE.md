@@ -318,7 +318,9 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   não (403 costuma ser a NOSSA chave). Com login, inscrição de usuário que não existe mais sai.
   O resumo do envio (só contagens) vai para Integrações. O service worker não tem `fetch` nem
   cache e só é registrado quando a pessoa liga; `sw.js` e o manifesto (iPhone: só na Tela de
-  Início) ficam fora do middleware.
+  Início) ficam fora do middleware. Aviso de LEAD (tag `lead:`, não o de teste) também manda
+  `MENSAGEM_LEAD_NOVO` (`push/mensagem.ts`; o `sw.js` repete o texto e o teste confere) às abas
+  abertas: `AtualizarComAviso` (layout) faz `router.refresh()` — aba escondida, ao voltar.
 - **Robô no painel** (Fase 1, nov/26, `lib/robo/*`): o painel NUNCA lê o banco do robô
   para desenhar uma tela — só o sync (`sincronizarRobo`: cron `/api/sync?source=robo` a
   cada 15 min, "Sincronizar agora" e a carona ao abrir a Fila, job de sistema) lê
