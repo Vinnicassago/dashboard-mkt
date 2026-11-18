@@ -34,6 +34,8 @@ import {
   sobreALista,
 } from "@/lib/leads-vista";
 import { SOBRE_A_MASCARA } from "@/lib/lgpd";
+import { aplicarEventoDiagnostico } from "@/lib/diagnostico-live";
+import { SOBRE_DEPOIS_DA_INSCRICAO, SOBRE_SEM_INSCRICAO } from "@/components/leads/depois-da-inscricao";
 import { blocos, componentesClient, contatosDe, inspecionar, palavras, type Fronteira } from "@/test/tela";
 import { AGORA, ROBO, brt, lead } from "@/test/fixtures-robo";
 import type { Lead } from "@/lib/types";
@@ -47,6 +49,7 @@ const h = vi.hoisted(() => ({
   user: { role: "comercial" } as null | { role: string },
   pode: { "leads:write": true, "leads:delete": true } as Record<string, boolean>,
   robo: null as unknown,
+  diagnosticos: [] as unknown[],
 }));
 
 vi.mock("next/navigation", () => ({
@@ -101,6 +104,9 @@ vi.mock("@/lib/data/store", async () => {
     listDeletedLeads: async () => h.excluidos,
     listLeadEvents: async () => [],
     getState: async () => null,
+    // Depois da inscrição (0025): o diagnóstico e o clique na comunidade.
+    listDiagnosticos: async () => h.diagnosticos,
+    listCliquesComunidade: async () => [],
   };
 });
 
@@ -112,6 +118,12 @@ vi.mock("@/lib/data/store", async () => {
  * botão; nenhuma prosa; o pior bloco, 3), arredondado para cima à dezena. O teto da spec é 100.
  */
 const ORCAMENTO_LEADS = 90;
+/**
+ * Com gente da live na lista (nov/26), o bloco "Live · N de M concluíram o diagnóstico" — o
+ * título, o rótulo do recolhido "Diagnóstico sem inscrição" e o filtro "Diagnóstico" (os números
+ * ficam em tabela): MEDIDO 93. O teto da spec, 100.
+ */
+const ORCAMENTO_LEADS_COM_LIVE = 100;
 
 const N = 60;
 const id = (i: number) => `t3-${String(i).padStart(2, "0")}`; // t3-01 = o mais antigo, t3-60 = o mais novo
@@ -176,6 +188,7 @@ beforeEach(() => {
   h.user = { role: "comercial" };
   h.pode = { "leads:write": true, "leads:delete": true };
   h.robo = ROBO;
+  h.diagnosticos = [];
 });
 
 // ---------------------------------------------------------------- 1. o corte do DataTable
@@ -367,6 +380,62 @@ describe("T3 · o texto de Leads mora no ⓘ", () => {
       ...[false, true].flatMap((mascarar) => [false, true].map((exporta) => sobreALista({ mascarar, exporta }))),
     ];
     for (const tx of textos) for (const f of frases(tx)) expect(nPalavras(f), f).toBeLessThanOrEqual(25);
+  });
+});
+
+// ---------------------------------------------------------------- depois da inscrição (nov/26)
+
+describe("Depois da inscrição: o bloco da live em Leads", () => {
+  /** Três inscritos da live (a ficha, no período da live), um diagnóstico concluído e um sem inscrição. */
+  function comLive() {
+    const vivos = [0, 1, 2].map((i) =>
+      lead(`live-${i}`, {
+        createdAt: "2026-11-20T13:00:00.000Z",
+        bem: "imovel",
+        ...(i === 0 ? { comunidadeEm: "2026-11-20T13:05:00.000Z" } : {}),
+      }),
+    );
+    h.leads = [...base60(), ...vivos];
+    const evento = (tentativa: string, telefone: string) => ({
+      tentativa,
+      etapa: "resultado" as const,
+      telefone,
+      respondidas: 9,
+      total: 9,
+      respostas: [{ n: 1, pergunta: "Onde está o dinheiro", resposta: "CDB" }],
+      perfil: "Construtor de patrimônio",
+    });
+    h.diagnosticos = [
+      aplicarEventoDiagnostico(undefined, evento("t-live", vivos[0].phone!), "2026-11-20T14:00:00.000Z"),
+      aplicarEventoDiagnostico(undefined, evento("t-sem", "5541999990404"), "2026-11-20T14:00:00.000Z"),
+    ];
+  }
+
+  it("o título responde, o resumo e o 'sem inscrição' são tabela; a página fica no orçamento e sem frase > 25", async () => {
+    comLive();
+    const html = await renderizar();
+    const t = texto(html);
+    expect(t).toContain("Live · 1 de 3 concluíram o diagnóstico");
+    expect(t).toContain("Diagnóstico sem inscrição");
+    const h2 = semOpcoesNaoEscolhidas(html);
+    expect(palavras(h2).length).toBeLessThanOrEqual(ORCAMENTO_LEADS_COM_LIVE);
+    expect(Math.max(...blocos(h2).map((b) => b.length))).toBeLessThanOrEqual(25);
+    for (const tx of [SOBRE_DEPOIS_DA_INSCRICAO, SOBRE_SEM_INSCRICAO]) {
+      for (const f of frases(tx)) expect(nPalavras(f), f).toBeLessThanOrEqual(25);
+    }
+    // sem gente da live (a base de sempre), o bloco não aparece
+    h.leads = base60();
+    h.diagnosticos = [];
+    expect(texto(await renderizar())).not.toContain("concluíram o diagnóstico");
+  });
+
+  it("Marketing: o WhatsApp do diagnóstico sem inscrição vai mascarado, sem link", async () => {
+    comLive();
+    h.user = { role: "marketing" };
+    h.pode = {};
+    const html = await renderizar();
+    expect(html).not.toContain("5541999990404");
+    expect(html).not.toContain("wa.me/5541999990404");
   });
 });
 

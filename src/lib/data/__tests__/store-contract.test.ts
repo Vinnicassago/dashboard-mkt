@@ -10,7 +10,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { DataBackend } from "../backend";
-import type { AdDaily, AiAnalysis, Creative, Lead, LeadEvent } from "../../types";
+import type { AdDaily, AiAnalysis, Creative, EventoDiagnostico, Lead, LeadEvent } from "../../types";
 
 const ad = (brand: string, date: string, adId: string, spend: number): AdDaily => ({
   brand,
@@ -797,6 +797,73 @@ function contrato(nome: string, abrir: () => Promise<{ backend: DataBackend; fec
       expect((await b.listCapiEnvios({ brand, status: "enviado", limit: 0 })).map((e) => e.id)).toEqual([vivo]);
       expect(await b.expirarCapiVencidos({ eventoAntesDe: "2031-06-01T00:00:00.000Z", motivo: "x", atualizadoEm: "2031-06-01T00:00:00.000Z" })).toBeGreaterThanOrEqual(0);
       expect((await b.listCapiEnvios({ brand, status: "enviado", limit: 0 })).map((e) => e.id)).toEqual([vivo]);
+    });
+
+    it("diagnóstico (0025): o último evento vale; concluir é fato; o resultado é o do último resultado", async () => {
+      const tentativa = `t-${sfx}`.replace(/[^A-Za-z0-9_-]/g, "-");
+      const r = (n: number, resposta = `R${n}`) => ({ n, pergunta: `P${n}`, resposta });
+      const ev = (over: Partial<EventoDiagnostico>): EventoDiagnostico => ({
+        tentativa,
+        etapa: "resposta",
+        telefone: "5511987654321",
+        respondidas: 1,
+        total: 9,
+        respostas: [r(1)],
+        ...over,
+      });
+      const um = await b.registrarDiagnostico(ev({ etapa: "inicio", respondidas: 0, respostas: [] }), "2031-07-01T10:00:00.000Z");
+      expect(um).toMatchObject({ tentativa, etapa: "inicio", respondidas: 0, eventos: 1, chaveTelefone: "1187654321" });
+      await b.registrarDiagnostico(ev({ respondidas: 2, respostas: [r(1, "Mudei"), r(2)] }), "2031-07-01T10:01:00.000Z");
+      const fim = await b.registrarDiagnostico(
+        ev({
+          etapa: "resultado",
+          respondidas: 9,
+          respostas: [r(1, "Mudei"), r(2), { n: 6, pergunta: "V ou F", resposta: "Falso", acertou: true }],
+          perfil: "Construtor",
+          notas: { reserva: 85, lance: 40 },
+          conquistas: 7,
+          conquistasTotal: 12,
+          pageUrl: "https://diag.exemplo/",
+        }),
+        "2031-07-01T10:09:00.000Z",
+      );
+      expect(fim).toMatchObject({ etapa: "resultado", concluidoEm: "2031-07-01T10:09:00.000Z", perfil: "Construtor", conquistas: 7, eventos: 3 });
+      // o beacon da 9ª resposta chegando DEPOIS do resultado: o último evento vale, concluir fica
+      const tarde = await b.registrarDiagnostico(ev({ respondidas: 9, respostas: [r(1, "Mudei"), r(2)] }), "2031-07-01T10:09:01.000Z");
+      expect(tarde).toMatchObject({
+        etapa: "resposta",
+        respondidas: 9,
+        concluidoEm: "2031-07-01T10:09:00.000Z",
+        iniciadoEm: "2031-07-01T10:00:00.000Z",
+        atualizadoEm: "2031-07-01T10:09:01.000Z",
+        perfil: "Construtor",
+        notas: { reserva: 85, lance: 40 },
+        conquistasTotal: 12,
+        pageUrl: "https://diag.exemplo/",
+        eventos: 4,
+      });
+      expect(tarde.respostas).toEqual([r(1, "Mudei"), r(2)]);
+      // o que se lê é o que foi gravado (jsonb e datas voltam iguais)
+      const [lida] = await b.listDiagnosticos({ chaveTelefone: "1187654321" });
+      expect(lida).toEqual(tarde);
+      expect((await b.listDiagnosticos()).some((t) => t.tentativa === tentativa)).toBe(true);
+      expect(await b.listDiagnosticos({ chaveTelefone: "0000000000" })).toEqual([]);
+    });
+
+    it("clique na comunidade (0025): o 1º horário fica, conta os cliques, o lead achado não se perde", async () => {
+      const eventId = `ev-${sfx}`;
+      await b.registrarCliqueComunidade({ eventId, pageUrl: "https://lp/obrigado", em: "2031-07-02T10:00:00.000Z" });
+      await b.registrarCliqueComunidade({ eventId, leadId: `LEAD-LP-${eventId}`, em: "2031-07-02T10:05:00.000Z" });
+      const ultimo = await b.registrarCliqueComunidade({ eventId, em: "2031-07-02T10:07:00.000Z" });
+      expect(ultimo).toEqual({
+        eventId,
+        primeiroEm: "2031-07-02T10:00:00.000Z",
+        ultimoEm: "2031-07-02T10:07:00.000Z",
+        cliques: 3,
+        leadId: `LEAD-LP-${eventId}`,
+        pageUrl: "https://lp/obrigado",
+      });
+      expect((await b.listCliquesComunidade()).find((c) => c.eventId === eventId)).toEqual(ultimo);
     });
 
     it("registro de auditoria", async () => {

@@ -121,6 +121,16 @@ export interface Diagnostico {
   alertas?: string[];
   /** Quando foi feito (ISO). */
   feitoEm?: string;
+  /**
+   * "pagina" = gravado pela página do diagnóstico (`/api/track`, tipo `diagnostico`,
+   * ao concluir). Sem ele, veio do n8n — e a página não grava por cima (os alertas
+   * da véspera são do n8n).
+   */
+  origem?: "pagina";
+  /** O raio-x do resultado (reserva, lance, conhecimento, plano: 0 a 100). Só da página. */
+  notas?: Record<string, number>;
+  conquistas?: number;
+  conquistasTotal?: number;
 }
 
 /** Os fatos da ficha que viram linha no histórico (evento `ficha`, `payload.fato`). */

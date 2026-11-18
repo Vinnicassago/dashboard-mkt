@@ -9,6 +9,8 @@
  *   4. No envio do formulário, gera um event_id ÚNICO e dispara o mesmo evento
  *      pelo navegador (Pixel/GA4) e pelo servidor (CAPI) com esse id — é assim
  *      que a Meta deduplica e não conta o lead duas vezes.
+ *   5. window.dashTrackEvento(tipo, dados) manda os eventos de depois da
+ *      inscrição (hoje: "comunidade", da página de obrigado) pelo mesmo envio.
  *
  * Como instalar (antes do </body>, DEPOIS do Pixel):
  *   <script>
@@ -228,6 +230,34 @@
    */
   window.dashTrackLead = function (info) {
     return fireLead(info || {});
+  };
+
+  /* ---------------- eventos de depois da inscrição (nov/26) ---------------- */
+  // Os tipos que esta função manda. page_view, cta_click e lead continuam pelos
+  // caminhos de sempre (o lead precisa do Pixel junto, com o mesmo event_id).
+  var TIPOS_EXTRAS = ["comunidade", "diagnostico"];
+
+  /**
+   * Manda um evento dos tipos novos pelo MESMO envio dos outros (post(): ingestKey,
+   * pageUrl, atribuição, text/plain por sendBeacon, fila do consentimento).
+   * Na página de obrigado, no clique de "Entrar na comunidade", com o eventId do lead
+   * (o mesmo que a LP passou ao dashTrackLead):
+   *   window.dashTrackEvento("comunidade", { eventId: codigo });
+   * Devolve false (e não manda nada) para um tipo que não é desta função.
+   */
+  window.dashTrackEvento = function (tipo, dados) {
+    if (TIPOS_EXTRAS.indexOf(tipo) < 0) {
+      console.warn("[dash] dashTrackEvento: tipo não aceito (" + tipo + "). Use: " + TIPOS_EXTRAS.join(", ") + ".");
+      return false;
+    }
+    var payload = {};
+    var d = dados || {};
+    for (var k in d) {
+      if (Object.prototype.hasOwnProperty.call(d, k)) payload[k] = d[k];
+    }
+    payload.type = tipo;
+    post(payload);
+    return true;
   };
 
   /* ---------------- eventos ---------------- */

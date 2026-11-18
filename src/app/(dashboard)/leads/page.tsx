@@ -1,6 +1,9 @@
 import { DeletedLeads, LeadsDirectory, type DeletedLeadRow } from "@/components/leads/leads-directory";
 import { LeadActivity } from "@/components/leads/lead-activity";
 import { Revisar, type RevisarDados, type RevisarLead } from "@/components/leads/revisar";
+import { DepoisDaInscricao } from "@/components/leads/depois-da-inscricao";
+import { carregarDepoisDaInscricao } from "@/lib/diagnostico-server";
+import { diagnosticosSemInscricao, resumoDepoisDaInscricao } from "@/lib/diagnostico-live";
 import { RolarParaAncora } from "@/components/ui/rolar-para-ancora";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Info } from "@/components/ui/info";
@@ -64,11 +67,13 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   const agora = new Date().toISOString();
 
   // O robô pelo store (o sync grava os fatos no lead): o MESMO estado da Fila e da exportação.
-  const [todosEventos, robo, excluidos, expediente] = await Promise.all([
+  const [todosEventos, robo, excluidos, expediente, live] = await Promise.all([
     listLeadEvents({ brand, limit: 0 }),
     estadoDoRoboAgora(brand),
     listDeletedLeads(brand),
     expedienteAtual(),
+    // O clique na comunidade e o diagnóstico (só a marca da live tem).
+    carregarDepoisDaInscricao(brand),
   ]);
   // O histórico na tela mostra os 200 mais recentes; as linhas usam todos.
   const events = todosEventos.slice(0, 200).map((e) => (mascarar ? mascararEvento(e) : e));
@@ -82,8 +87,15 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   }));
   const origem = rotuladorDeOrigem(data);
 
-  const linhas = montarLinhasDeLeads(data, todosEventos, agora, { range, expediente, robo });
+  const linhas = montarLinhasDeLeads(data, todosEventos, agora, { range, expediente, robo, live });
   const rows = mascarar ? linhas.map(mascararContato) : linhas;
+  // Depois da inscrição: o resumo é das MESMAS linhas da tabela (o período pela entrada).
+  const resumoDaLive = resumoDepoisDaInscricao(linhas);
+  const semInscricao = live
+    ? diagnosticosSemInscricao(live.diagnosticos, data.leads, live.cfg, range).map((s) =>
+        mascarar ? { ...s, telefone: mascararTelefone(s.telefone) } : s,
+      )
+    : [];
 
   // Revisar só aparece para quem age (comercial/admin); a máscara aqui é a
   // mesma da tabela, para o contato não depender de quem enxerga o bloco.
@@ -116,6 +128,10 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   return (
     <div className="space-y-6">
       <RolarParaAncora />
+
+      {resumoDaLive.inscritos > 0 || semInscricao.length > 0 ? (
+        <DepoisDaInscricao resumo={resumoDaLive} semInscricao={semInscricao} mascarar={mascarar} />
+      ) : null}
 
       <Card id="leads" className="scroll-mt-24">
         <CardHeader>

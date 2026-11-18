@@ -266,6 +266,112 @@ O script captura UTMs e `fbclid` no primeiro acesso, guarda em cookie first-part
 (a origem precisa sobreviver até o envio do formulário), preenche campos ocultos
 `utm_*` e reporta visitas, cliques no CTA e leads.
 
+### Depois da inscrição: comunidade e diagnóstico (nov/26)
+
+Dois tipos de evento a mais no `/api/track`, com a **mesma** checagem de
+`ingestKey` e o mesmo formato dos outros: JSON enviado como `text/plain` (por
+`sendBeacon`, sem preflight). `page_view`, `cta_click` e `lead` não mudaram. A hora
+que vale é a de **chegada ao servidor**; a tela mostra em America/Sao_Paulo.
+Evento inválido = `400` com a lista `erros` (o nome do campo, nunca o valor) e
+**nada gravado**; corpo acima de 16 KB = `413`; certo = `204`.
+
+**`comunidade`** — a página de obrigado, no clique em "Entrar na comunidade". O
+`eventId` é o **mesmo** do evento `lead` (passe-o da LP para a página de obrigado,
+por exemplo na URL do redirecionamento):
+
+```json
+{ "type": "comunidade", "ingestKey": "...", "eventId": "k3x9qa", "pageUrl": "https://.../obrigado.html" }
+```
+
+Com o `lp-tracking.js` na página, use a função dos tipos novos (faz o mesmo envio
+do `post()` interno: chave, página, atribuição, fila do consentimento):
+
+```html
+<a href="https://chat.whatsapp.com/..." onclick="window.dashTrackEvento('comunidade', { eventId: codigo })">
+  Entrar na comunidade
+</a>
+```
+
+O painel guarda o **primeiro** clique por `eventId` (tabela `comunidade_cliques`) e,
+achando o lead (pelo `eventId` da entrada — também quando a pessoa já era lead e o
+reenvio caiu no cadastro antigo), grava o horário em `comunidadeEm`: é o mesmo fato
+que o n8n mandava como `clicou_comunidade` — a ficha, o painel da live ("Na
+comunidade") e a CAPI (`EntrouNaComunidade`) leem dali.
+
+**`diagnostico`** — o Diagnóstico do Próximo Patrimônio manda direto ao
+`/api/track` (sem o `lp-tracking.js`), em três momentos: `inicio` (senha certa),
+`resposta` (a cada pergunta respondida) e `resultado` (a tela final).
+
+```json
+{
+  "type": "diagnostico",
+  "ingestKey": "...",
+  "tentativa": "5d0c3c9e-1b7a-4c1e-9a51-2f0f4d3e8b10",
+  "etapa": "resposta",
+  "phone": "5511987654321",
+  "respondidas": 6,
+  "total": 9,
+  "respostas": [
+    { "n": 1, "pergunta": "Onde está a maior parte do dinheiro", "resposta": "CDB, Tesouro ou fundos" },
+    { "n": 6, "pergunta": "Consórcio é um tipo de empréstimo.", "resposta": "Falso", "acertou": true }
+  ],
+  "pageUrl": "https://..."
+}
+```
+
+No `resultado` vêm também:
+
+```json
+{ "perfil": "Construtor de patrimônio", "notas": { "reserva": 85, "lance": 40, "conhecimento": 65, "plano": 30 }, "conquistas": 7, "conquistas_total": 12 }
+```
+
+Envio sugerido (sem preflight, como o do script):
+
+```js
+navigator.sendBeacon(ENDPOINT, new Blob([JSON.stringify(evento)], { type: "text/plain;charset=UTF-8" }));
+```
+
+| Campo | Regra |
+| --- | --- |
+| `tentativa` | obrigatório; letras, números, `-` e `_`, até 100 caracteres (um uuid por tentativa) |
+| `etapa` | `inicio`, `resposta` ou `resultado` |
+| `phone` | WhatsApp com DDD (com ou sem 55, com ou sem o 9) |
+| `respondidas` | inteiro de 0 a 9 (sem ele, o tamanho de `respostas`); não passa de `total` |
+| `total` | inteiro de 1 a 9 (padrão 9) |
+| `respostas` | a lista **completa** até aquele momento, no máximo 9, sem repetir `n` (1 a 9); `pergunta` e `resposta` com até 200 caracteres; `acertou` (true/false) nas de verdadeiro ou falso (6, 7 e 8) |
+| `perfil` | até 200 caracteres (só vale no `resultado`) |
+| `notas` | `reserva`, `lance`, `conhecimento`, `plano`: de 0 a 100 |
+| `conquistas` | inteiro de 0 a `conquistas_total` (até 12; padrão 12) |
+
+Como o painel lê:
+
+- **O último evento de cada tentativa vale** (a lista de respostas vem inteira,
+  porque a pessoa pode voltar e mudar uma). Uma linha por tentativa, tabela
+  `diagnosticos`. Concluir é fato: o primeiro `resultado` grava `concluidoEm`, e um
+  beacon da 9ª resposta que chegue depois dele não desfaz.
+- **Ligação com o lead pelo telefone:** só dígitos, sem o 55 da frente quando sobram
+  mais de 11 dígitos, e compara DDD + os 8 últimos dígitos (com e sem o 9). Mais de um
+  lead com o número: o da campanha da live e, entre eles, o mais recente.
+- **Várias tentativas da mesma pessoa:** vale a mais avançada — concluída vence
+  incompleta; entre iguais, a mais recente.
+- Sem lead correspondente, o diagnóstico **não se perde**: aparece em Leads →
+  "Diagnóstico sem inscrição" e passa para o lead quando ele existir.
+- Ao concluir, o resultado vai também para a ficha do lead (`diagnostico`, o formato
+  que o n8n mandava; o que o n8n gravou não é sobrescrito).
+
+Em **Leads**: colunas "Comunidade" e "Diagnóstico", o filtro "Diagnóstico" (Não
+começou · Começou, não concluiu · Concluiu), o resumo do período (inscritos,
+clicaram na comunidade, começaram, concluíram e quantos chegaram a cada pergunta) e
+as colunas no CSV. Na **ficha**: a linha do tempo depois da inscrição, o resultado
+(perfil, raio-x, conquistas) e as respostas, com acerto ou erro.
+
+Se `LP_ALLOWED_ORIGIN` estiver preenchida, inclua o domínio da página do diagnóstico
+na lista (separada por vírgula).
+
+Migração: `supabase/migrations/0025_depois_da_inscricao.sql` — só tabelas novas
+(`comunidade_cliques` e `diagnosticos`). No Postgres do EasyPanel ela roda sozinha
+no boot (`src/lib/db/schema.ts`).
+
 ### 3. Conecte CAPI e GA4
 
 Preencha `META_DATASET_ID` + `META_CAPI_TOKEN` (Events Manager > Conversions API >

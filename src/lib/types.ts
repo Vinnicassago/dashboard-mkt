@@ -836,6 +836,91 @@ export interface CapiEnvio {
   atualizadoEm: string;
 }
 
+// ------------------------- Depois da inscrição na live ----------------
+
+/**
+ * Uma resposta do Diagnóstico do Próximo Patrimônio, como a página manda. As
+ * perguntas 6, 7 e 8 são de verdadeiro ou falso e trazem `acertou`.
+ */
+export interface RespostaDoDiagnostico {
+  /** O número da pergunta (1 a 9). */
+  n: number;
+  pergunta: string;
+  resposta: string;
+  acertou?: boolean;
+}
+
+/** As três etapas que a página do diagnóstico manda (`/api/track`, tipo `diagnostico`). */
+export type EtapaDoDiagnostico = "inicio" | "resposta" | "resultado";
+
+/** Um evento do diagnóstico, já conferido (`lerEventoDiagnostico`, `lib/diagnostico-live.ts`). */
+export interface EventoDiagnostico {
+  tentativa: string;
+  etapa: EtapaDoDiagnostico;
+  /** O WhatsApp que a pessoa digitou, só dígitos. */
+  telefone: string;
+  respondidas: number;
+  total: number;
+  /** A lista COMPLETA até este momento (a pessoa pode voltar e mudar uma resposta). */
+  respostas: RespostaDoDiagnostico[];
+  perfil?: string;
+  /** O raio-x: reserva, lance, conhecimento e plano, de 0 a 100. */
+  notas?: Record<string, number>;
+  conquistas?: number;
+  conquistasTotal?: number;
+  pageUrl?: string;
+}
+
+/**
+ * Uma tentativa do diagnóstico (tabela `diagnosticos`, migração 0025): o estado
+ * do ÚLTIMO evento que chegou (`aplicarEventoDiagnostico`). A pessoa pode fazer
+ * mais de uma; a tela mostra a mais avançada (`maisAvancada`). Não tem lead: a
+ * ligação é pelo telefone, na leitura (`ligarDiagnosticos`) — o diagnóstico que
+ * não acha inscrição fica na lista "Diagnóstico sem inscrição", nunca se perde.
+ */
+export interface DiagnosticoTentativa {
+  tentativa: string;
+  /** Só dígitos, como a pessoa digitou (o último evento). PII: só a ligação e a lista sem inscrição leem. */
+  telefone: string;
+  /** DDD + 8 últimos dígitos (`chaveDddMais8`): a chave da ligação com o lead. */
+  chaveTelefone: string | null;
+  /** A etapa do último evento. */
+  etapa: EtapaDoDiagnostico;
+  respondidas: number;
+  total: number;
+  respostas: RespostaDoDiagnostico[];
+  /** Do último `resultado` que chegou. */
+  perfil?: string;
+  notas?: Record<string, number>;
+  conquistas?: number;
+  conquistasTotal?: number;
+  pageUrl?: string;
+  /** Quando o 1º evento chegou ao servidor. */
+  iniciadoEm: string;
+  /** Quando o 1º `resultado` chegou ao servidor: concluída é fato (o beacon da 9ª resposta pode chegar depois). */
+  concluidoEm?: string;
+  /** Quando o último evento chegou. */
+  atualizadoEm: string;
+  /** Quantos eventos chegaram. */
+  eventos: number;
+}
+
+/**
+ * O clique em "Entrar na comunidade" da página de obrigado (tabela
+ * `comunidade_cliques`, migração 0025), pelo `eventId` do lead. Guardado mesmo
+ * quando o lead ainda não foi achado; com o lead, o 1º clique também vira
+ * `comunidadeEm` (o mesmo fato que o n8n mandava como `clicou_comunidade`).
+ */
+export interface CliqueComunidade {
+  eventId: string;
+  primeiroEm: string;
+  ultimoEm: string;
+  cliques: number;
+  /** O lead achado na hora do clique (vazio = ainda não havia lead com esse eventId). */
+  leadId?: string;
+  pageUrl?: string;
+}
+
 // ------------------------- Dataset ----------------------------------
 
 /** The full dataset the dashboard renders from. */

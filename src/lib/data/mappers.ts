@@ -22,7 +22,11 @@ import {
   type Diagnostico,
 } from "../qualificacao";
 import type {
+  CliqueComunidade,
   ConferenciaGasto,
+  DiagnosticoTentativa,
+  EtapaDoDiagnostico,
+  RespostaDoDiagnostico,
   AcaoEstado,
   AcaoEstadoValor,
   AdDaily,
@@ -472,6 +476,83 @@ export const fromConferencia = (c: ConferenciaGasto): Row => ({
   ultimo_sync: c.ultimoSync ?? null,
   criada_em: c.criadaEm,
   criada_por: c.criadaPor,
+});
+
+/** jsonb que chega como objeto (pg) ou texto (dado antigo, outro driver). */
+function jsonDe<T>(v: unknown): T | undefined {
+  if (v == null) return undefined;
+  if (typeof v !== "string") return v as T;
+  try {
+    return JSON.parse(v) as T;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Uma tentativa do diagnóstico (0025). */
+export const toDiagnosticoTentativa = (r: Row): DiagnosticoTentativa => {
+  const t: DiagnosticoTentativa = {
+    tentativa: s(r.tentativa),
+    telefone: s(r.telefone),
+    chaveTelefone: r.chave_telefone ? s(r.chave_telefone) : null,
+    etapa: s(r.etapa) as EtapaDoDiagnostico,
+    respondidas: n(r.respondidas),
+    total: n(r.total),
+    respostas: jsonDe<RespostaDoDiagnostico[]>(r.respostas) ?? [],
+    iniciadoEm: iso(r.iniciado_em),
+    atualizadoEm: iso(r.atualizado_em),
+    eventos: n(r.eventos),
+  };
+  if (r.perfil != null) t.perfil = s(r.perfil);
+  const notas = jsonDe<Record<string, number>>(r.notas);
+  if (notas) t.notas = notas;
+  if (r.conquistas != null) t.conquistas = n(r.conquistas);
+  if (r.conquistas_total != null) t.conquistasTotal = n(r.conquistas_total);
+  if (r.page_url != null) t.pageUrl = s(r.page_url);
+  if (r.concluido_em != null) t.concluidoEm = iso(r.concluido_em);
+  return t;
+};
+
+/** Para gravar: `respostas` e `notas` vão como TEXTO JSON (o `pg` faria de um array JS um array do Postgres). */
+export const fromDiagnosticoTentativa = (t: DiagnosticoTentativa): Row => ({
+  tentativa: t.tentativa,
+  telefone: t.telefone,
+  chave_telefone: t.chaveTelefone,
+  etapa: t.etapa,
+  respondidas: t.respondidas,
+  total: t.total,
+  respostas: JSON.stringify(t.respostas),
+  perfil: t.perfil ?? null,
+  notas: t.notas ? JSON.stringify(t.notas) : null,
+  conquistas: t.conquistas ?? null,
+  conquistas_total: t.conquistasTotal ?? null,
+  page_url: t.pageUrl ?? null,
+  iniciado_em: t.iniciadoEm,
+  concluido_em: t.concluidoEm ?? null,
+  atualizado_em: t.atualizadoEm,
+  eventos: t.eventos,
+});
+
+/** O clique em "Entrar na comunidade" (0025). */
+export const toCliqueComunidade = (r: Row): CliqueComunidade => {
+  const c: CliqueComunidade = {
+    eventId: s(r.event_id),
+    primeiroEm: iso(r.primeiro_em),
+    ultimoEm: iso(r.ultimo_em),
+    cliques: n(r.cliques),
+  };
+  if (r.lead_id != null) c.leadId = s(r.lead_id);
+  if (r.page_url != null) c.pageUrl = s(r.page_url);
+  return c;
+};
+
+export const fromCliqueComunidade = (c: CliqueComunidade): Row => ({
+  event_id: c.eventId,
+  primeiro_em: c.primeiroEm,
+  ultimo_em: c.ultimoEm,
+  cliques: c.cliques,
+  lead_id: c.leadId ?? null,
+  page_url: c.pageUrl ?? null,
 });
 
 export const toGoal = (r: Row): Goal => ({

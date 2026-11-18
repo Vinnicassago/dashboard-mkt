@@ -16,6 +16,7 @@ import { DONO_LABEL, type Dono } from "@/lib/dono";
 import { formatDateTime, formatDateTimeCurta } from "@/lib/format";
 import { normalizarTelefone, telefoneUtilizavel } from "@/lib/phone";
 import { FILTROS_DO_ROBO, FILTRO_ROBO_LABEL } from "@/lib/robo/situacao";
+import { textoDasConquistas, textoDoDiagnostico, textoDoRaioX } from "@/lib/diagnostico-live";
 import {
   CHAVES_FILTRO_FICHA,
   FILTROS_DA_FICHA,
@@ -193,8 +194,34 @@ function DetalheDoLead({ r }: { r: LinhaDeLead }) {
         <dt className="text-muted-foreground">Origem</dt>
         <dd className="font-medium">{r.origem.trilha}</dd>
       </div>
+      {r.diagnosticoResumo ? <DiagnosticoNaLinha d={r.diagnosticoResumo} /> : null}
     </dl>
   );
+}
+
+/** O diagnóstico na linha expandida: quando, o raio-x e as conquistas (as respostas estão na ficha). */
+function DiagnosticoNaLinha({ d }: { d: NonNullable<LinhaDeLead["diagnosticoResumo"]> }) {
+  const partes = [
+    `começou ${formatDateTimeCurta(d.iniciadoEm)}`,
+    d.concluidoEm ? `concluiu ${formatDateTimeCurta(d.concluidoEm)}` : `parou com ${d.respondidas} de ${d.total}`,
+    textoDoRaioX(d.notas),
+    d.conquistas !== undefined ? `${textoDasConquistas(d)} conquistas` : "",
+    d.tentativas > 1 ? `${d.tentativas} tentativas` : "",
+  ].filter(Boolean);
+  return (
+    <div className="flex min-w-0 items-baseline gap-1.5">
+      <dt className="text-muted-foreground">Diagnóstico</dt>
+      <dd className="font-medium">{partes.join(" · ")}</dd>
+    </div>
+  );
+}
+
+/** A ordem da coluna "Diagnóstico": concluiu, depois quem foi mais longe; quem não é da live por último. */
+function ordemDoDiagnostico(r: LinhaDeLead): number {
+  if (!r.daLive) return -2;
+  const d = r.diagnosticoResumo;
+  if (!d) return -1;
+  return d.situacao === "concluiu" ? 100 : d.respondidas;
 }
 
 /**
@@ -208,8 +235,10 @@ function montarColunas(opts: {
   comPeriodo: (href: string) => string;
   /** Robô desligado: a dica do "Atendimento" não fala de robô nem de resgate. */
   roboLigado: boolean;
+  /** Há gente da live na lista: as colunas "Comunidade" e "Diagnóstico" aparecem. */
+  comLive: boolean;
 }): Column<LinhaDeLead>[] {
-  const { canEdit, canDelete, mascarado, comPeriodo, roboLigado } = opts;
+  const { canEdit, canDelete, mascarado, comPeriodo, roboLigado, comLive } = opts;
   const cols: Column<LinhaDeLead>[] = [
     {
       key: "name",
@@ -267,6 +296,55 @@ function montarColunas(opts: {
         </span>
       ),
     },
+    ...(comLive
+      ? [
+          {
+            key: "comunidadeEm",
+            // Os hífens opcionais deixam o cabeçalho quebrar ("Comu-nidade"): a coluna fica da largura da data.
+            header: "Comu\u00adni\u00addade",
+            headerTitle: "O 1º clique em “Entrar na comunidade” na página de obrigado (hora de Brasília).",
+            sortable: true,
+            sortValue: (r: LinhaDeLead) => r.comunidadeEm ?? "",
+            render: (r: LinhaDeLead) => {
+              if (!r.comunidadeEm) return <span className="text-muted-foreground">—</span>;
+              const [dia, hora] = formatDateTimeCurta(r.comunidadeEm).split(" ");
+              return (
+                <span className="flex flex-col leading-tight whitespace-nowrap" title={formatDateTime(r.comunidadeEm)}>
+                  <span>{dia}</span>
+                  <span className="text-xs text-muted-foreground">{hora}</span>
+                </span>
+              );
+            },
+          },
+          {
+            key: "diagnostico",
+            header: "Diagnóstico",
+            headerTitle:
+              "Até onde foi no Diagnóstico do Próximo Patrimônio (a tentativa mais avançada). As respostas e o resultado estão na ficha.",
+            sortable: true,
+            sortValue: ordemDoDiagnostico,
+            className: "max-w-[124px]",
+            render: (r: LinhaDeLead) => {
+              const d = r.diagnosticoResumo;
+              if (!r.daLive) return <span className="text-muted-foreground">—</span>;
+              const titulo = d
+                ? [textoDoDiagnostico(d), textoDoRaioX(d.notas), d.conquistas !== undefined ? `${textoDasConquistas(d)} conquistas` : ""]
+                    .filter(Boolean)
+                    .join(" · ")
+                : undefined;
+              // Concluiu: o perfil numa 2ª linha (cortada; inteira na dica e na ficha).
+              return (
+                <span className={cn("flex min-w-0 flex-col leading-tight", !d && "text-muted-foreground")} title={titulo}>
+                  <span>{d?.situacao === "concluiu" ? "Concluiu" : textoDoDiagnostico(d)}</span>
+                  {d?.situacao === "concluiu" && d.perfil ? (
+                    <span className="truncate text-xs text-muted-foreground">{d.perfil}</span>
+                  ) : null}
+                </span>
+              );
+            },
+          },
+        ]
+      : []),
     {
       key: "etapaMaxima",
       header: "Etapa máxima",
@@ -314,18 +392,20 @@ function montarColunas(opts: {
         );
       },
     },
-    {
+    // Com as colunas da live, a Origem sai da tabela para ela caber a 1366 px: a trilha
+    // continua na linha expandida, nos filtros de campanha e conjunto, no CSV e na ficha.
+    ...(comLive ? [] : [{
       key: "origem",
       header: "Origem",
       headerTitle: "Campanha › conjunto › anúncio, pela junção única lead → anúncio (id gravado na entrada, depois o utm_content).",
       sortable: true,
-      sortValue: (r) => r.origem.trilha,
-      render: (r) => (
+      sortValue: (r: LinhaDeLead) => r.origem.trilha,
+      render: (r: LinhaDeLead) => (
         <span className="block max-w-[16ch] truncate text-muted-foreground" title={r.origem.trilha}>
           {r.origem.trilha}
         </span>
       ),
-    },
+    }]),
     ...(canDelete
       ? [
           {
@@ -496,9 +576,11 @@ export function LeadsDirectory({
     [semStatus, filtro.status],
   );
 
+  // As colunas da live só com gente da live na lista: a campanha antiga fica como era.
+  const comLive = useMemo(() => rows.some((r) => r.daLive), [rows]);
   const colunas = useMemo(
-    () => montarColunas({ canEdit, canDelete, mascarado: mascararContato, comPeriodo, roboLigado }),
-    [canEdit, canDelete, mascararContato, comPeriodo, roboLigado],
+    () => montarColunas({ canEdit, canDelete, mascarado: mascararContato, comPeriodo, roboLigado, comLive }),
+    [canEdit, canDelete, mascararContato, comPeriodo, roboLigado, comLive],
   );
 
   const temFiltro =
@@ -509,7 +591,9 @@ export function LeadsDirectory({
     CHAVES_FILTRO_FICHA.some((k) => filtro[k]);
   // Os filtros da ficha da live só aparecem quando há lead com ficha (classe, respostas, automação).
   const temFicha = useMemo(
-    () => rows.some((r) => r.classe || r.bem || r.comunidade || r.msg1 !== "nao") || CHAVES_FILTRO_FICHA.some((k) => filtro[k]),
+    () =>
+      rows.some((r) => r.classe || r.bem || r.comunidade || r.daLive || r.msg1 !== "nao") ||
+      CHAVES_FILTRO_FICHA.some((k) => filtro[k]),
     [rows, filtro],
   );
 

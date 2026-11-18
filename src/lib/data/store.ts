@@ -38,6 +38,7 @@ import type {
   AuditEntry,
   CapiEnvio,
   ConferenciaGasto,
+  EventoDiagnostico,
   Meta,
   ResumoSemanal,
   SyncRun,
@@ -125,6 +126,13 @@ export const addMeta = (meta: Meta) => backend().addMeta(meta);
 
 export const setCampaignBudget = (brand: string, budget: CampaignBudget) =>
   backend().setCampaignBudget(brand, budget);
+
+// ---- Depois da inscrição na live (0025): o clique na comunidade e o diagnóstico ----
+export const registrarDiagnostico = (ev: EventoDiagnostico, em: string) => backend().registrarDiagnostico(ev, em);
+export const listDiagnosticos = (opts?: { chaveTelefone?: string }) => backend().listDiagnosticos(opts);
+export const registrarCliqueComunidade = (c: { eventId: string; leadId?: string; pageUrl?: string; em: string }) =>
+  backend().registrarCliqueComunidade(c);
+export const listCliquesComunidade = () => backend().listCliquesComunidade();
 
 export const bumpLpDaily = (date: string, delta: LpDelta, brand: string = DEFAULT_BRAND) =>
   backend().bumpLpDaily(brand, date, delta);

@@ -33,12 +33,16 @@ import {
 import { toRole } from "../auth/roles";
 import { LOST_STATUSES, normalizeLeadStatus } from "../lead-status";
 import { DEFAULT_BRAND } from "../types";
+import { aplicarCliqueComunidade, aplicarEventoDiagnostico } from "../diagnostico-live";
 import type {
   AcaoEstado,
   AdDaily,
   AuditEntry,
   CapiEnvio,
+  CliqueComunidade,
   ConferenciaGasto,
+  DiagnosticoTentativa,
+  EventoDiagnostico,
   SyncRun,
   Creative,
   DashboardData,
@@ -83,6 +87,10 @@ interface LocalFile {
   capiEnvios: CapiEnvio[];
   /** Conferências do gasto com o Gerenciador — só se insere (E2-23). */
   conferencias: ConferenciaGasto[];
+  /** Diagnóstico do Próximo Patrimônio: uma por tentativa, o estado do último evento (0025). */
+  diagnosticos: DiagnosticoTentativa[];
+  /** Cliques em "Entrar na comunidade", um por eventId (0025). */
+  comunidadeCliques: CliqueComunidade[];
 }
 
 let cache: LocalFile | null = null;
@@ -189,6 +197,8 @@ function load(): LocalFile {
         if (!Array.isArray(parsed.resumosSemanais)) parsed.resumosSemanais = [];
         if (!Array.isArray(parsed.capiEnvios)) parsed.capiEnvios = [];
         if (!Array.isArray(parsed.conferencias)) parsed.conferencias = [];
+        if (!Array.isArray(parsed.diagnosticos)) parsed.diagnosticos = [];
+        if (!Array.isArray(parsed.comunidadeCliques)) parsed.comunidadeCliques = [];
         if (!Array.isArray(parsed.data.metas)) parsed.data.metas = [];
         migrateBrand(parsed.data);
         migrateLeadStatus(parsed);
@@ -212,6 +222,8 @@ function load(): LocalFile {
     resumosSemanais: [],
     capiEnvios: [],
     conferencias: [],
+    diagnosticos: [],
+    comunidadeCliques: [],
   };
   persist(fresh);
   return fresh;
@@ -288,6 +300,9 @@ export const localBackend: DataBackend = {
       resumosSemanais: file().resumosSemanais,
       capiEnvios: file().capiEnvios,
       conferencias: file().conferencias,
+      // O que as páginas da live mandaram não é exemplo: o reset não toca.
+      diagnosticos: file().diagnosticos,
+      comunidadeCliques: file().comunidadeCliques,
     };
     persist(cache);
     return seed;
@@ -683,6 +698,41 @@ export const localBackend: DataBackend = {
       .map((c) => ({ ...c }));
     const limit = opts.limit ?? 20;
     return limit > 0 ? lista.slice(0, limit) : lista;
+  },
+
+  // ---- Depois da inscrição na live (0025) ----
+
+  async registrarDiagnostico(ev: EventoDiagnostico, em: string) {
+    const f = file();
+    const atual = f.diagnosticos.find((t) => t.tentativa === ev.tentativa);
+    const nova = aplicarEventoDiagnostico(atual, ev, em);
+    f.diagnosticos = [nova, ...f.diagnosticos.filter((t) => t.tentativa !== ev.tentativa)];
+    persist(f);
+    cache = f;
+    return structuredClone(nova);
+  },
+
+  async listDiagnosticos(opts?: { chaveTelefone?: string }) {
+    return file()
+      .diagnosticos.filter((t) => !opts?.chaveTelefone || t.chaveTelefone === opts.chaveTelefone)
+      .sort((a, b) => b.atualizadoEm.localeCompare(a.atualizadoEm))
+      .map((t) => structuredClone(t));
+  },
+
+  async registrarCliqueComunidade(c: { eventId: string; leadId?: string; pageUrl?: string; em: string }) {
+    const f = file();
+    const atual = f.comunidadeCliques.find((x) => x.eventId === c.eventId);
+    const novo = aplicarCliqueComunidade(atual, c);
+    f.comunidadeCliques = [novo, ...f.comunidadeCliques.filter((x) => x.eventId !== c.eventId)];
+    persist(f);
+    cache = f;
+    return { ...novo };
+  },
+
+  async listCliquesComunidade() {
+    return file()
+      .comunidadeCliques.sort((a, b) => b.primeiroEm.localeCompare(a.primeiroEm))
+      .map((c) => ({ ...c }));
   },
 
   // ---- Bússola (Fase 5) ----

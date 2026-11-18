@@ -1,8 +1,34 @@
 import { NextResponse, after } from "next/server";
 import { randomUUID } from "node:crypto";
-import { addLead, addLeadEvent, bumpLpDaily, comTravaDaPessoa, getLead, listLeads, setLeadStatus } from "@/lib/data/store";
+import {
+  addLead,
+  addLeadEvent,
+  bumpLpDaily,
+  comTravaDaPessoa,
+  getLead,
+  listDiagnosticos,
+  listLeadEvents,
+  listLeads,
+  registrarCliqueComunidade,
+  registrarDiagnostico,
+  setLeadStatus,
+} from "@/lib/data/store";
 import { DEFAULT_BRAND, type Lead } from "@/lib/types";
 import { candidatosIdLead, resolverIdLead } from "@/lib/lead-id";
+import {
+  ATOR_DIAGNOSTICO,
+  ATOR_OBRIGADO,
+  CORPO_MAX_BYTES,
+  diagnosticoParaAFicha,
+  fichaAceitaDiagnosticoDaPagina,
+  indiceDeEventIds,
+  leadDoEventId,
+  leadDoTelefone,
+  lerEventoComunidade,
+  lerEventoDiagnostico,
+  maisAvancada,
+} from "@/lib/diagnostico-live";
+import { campanhaDaLive } from "@/lib/live-server";
 import { mesmoTelefone, normalizarTelefone } from "@/lib/phone";
 import { MESMA_INSCRICAO_MIN, pessoaDoWhatsapp } from "@/lib/n8n/servico";
 import { lerRespostasDoFormulario } from "@/lib/n8n/entrada";
@@ -49,7 +75,12 @@ export const dynamic = "force-dynamic";
  * RLS (service role only) — protect dashboard access, since it now shows PII.
  */
 
-type EventType = "page_view" | "cta_click" | "lead";
+/**
+ * `comunidade` (página de obrigado, pelo eventId do lead) e `diagnostico` (a
+ * página do diagnóstico, por tentativa) entraram em nov/26 — ver
+ * `lib/diagnostico-live.ts` e o README. Os três de antes não mudaram.
+ */
+type EventType = "page_view" | "cta_click" | "lead" | "comunidade" | "diagnostico";
 
 interface Attribution {
   utm_source?: string;
@@ -131,6 +162,56 @@ function clientIp(request: Request): string | undefined {
 let avisouSemChave = false;
 
 /**
+ * O erro de uma gravação que não derruba a resposta, no log SEM dado da pessoa:
+ * só o código (pg) ou o tipo do erro — a mensagem do banco pode citar valores.
+ */
+const semDado = (e: unknown) => (e as { code?: string })?.code ?? (e instanceof Error ? e.name : "erro");
+
+/**
+ * O lead de um clique em "Entrar na comunidade": o da entrada pela página com
+ * esse eventId (o `payload.eventId` do `created`/`reenvio` — quem já era lead
+ * cai no cadastro antigo), senão o id que o eventId gera. Nunca lança.
+ */
+async function leadDoClique(eventId: string): Promise<Lead | undefined> {
+  try {
+    const [leads, ...eventos] = await Promise.all([
+      listLeads(DEFAULT_BRAND),
+      listLeadEvents({ brand: DEFAULT_BRAND, action: "created", limit: 0 }),
+      listLeadEvents({ brand: DEFAULT_BRAND, action: "reenvio", limit: 0 }),
+      listLeadEvents({ brand: DEFAULT_BRAND, action: "mesclado", limit: 0 }),
+    ]);
+    return leadDoEventId(eventId, new Map(leads.map((l) => [l.id, l])), indiceDeEventIds(eventos.flat()));
+  } catch (e) {
+    console.warn("[track] comunidade: não consegui procurar o lead:", semDado(e));
+    return undefined;
+  }
+}
+
+/**
+ * Ao concluir, a tentativa mais avançada do número vai para a ficha do lead
+ * (`lead.diagnostico`, o formato que o n8n mandava): o painel da live conta os
+ * diagnósticos, a linha da véspera lê o perfil e o n8n recebe no GET da ficha. O
+ * que o n8n gravou não é apagado (`fichaAceitaDiagnosticoDaPagina`). Nunca lança:
+ * a tentativa já está gravada e a tela de Leads a liga ao lead na leitura.
+ */
+async function diagnosticoNaFicha(telefone: string, chave: string | null): Promise<void> {
+  if (!chave) return;
+  try {
+    const [leads, cfg, doNumero] = await Promise.all([
+      listLeads(DEFAULT_BRAND),
+      campanhaDaLive(),
+      listDiagnosticos({ chaveTelefone: chave }),
+    ]);
+    const lead = leadDoTelefone(telefone, leads, cfg);
+    const melhor = maisAvancada(doNumero);
+    if (!lead || !melhor?.concluidoEm || !fichaAceitaDiagnosticoDaPagina(lead.diagnostico)) return;
+    await gravarFicha(lead, { diagnostico: diagnosticoParaAFicha(melhor) }, ATOR_DIAGNOSTICO);
+  } catch (e) {
+    console.warn("[track] diagnóstico: não gravei na ficha:", semDado(e));
+  }
+}
+
+/**
  * O dia do `lp_daily` (visitas, cliques, envios): o de Brasília, o mesmo
  * calendário do lead (`diaDoLead`) — senão o envio das 22h caía num dia e o lead
  * no outro, e "envios → leads" divergia nas bordas. Vale a partir de 05/11/2026;
@@ -151,8 +232,10 @@ export async function POST(request: Request) {
   const headers = corsHeaders(request.headers.get("origin"));
 
   let body: TrackBody;
+  const texto = await request.text();
   try {
-    body = JSON.parse(await request.text()) as TrackBody;
+    body = JSON.parse(texto) as TrackBody;
+    if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("não é objeto");
   } catch {
     return NextResponse.json({ error: "JSON inválido." }, { status: 400, headers });
   }
@@ -169,8 +252,45 @@ export async function POST(request: Request) {
   }
 
   const type = body.type;
-  if (type !== "page_view" && type !== "cta_click" && type !== "lead") {
+  if (
+    type !== "page_view" &&
+    type !== "cta_click" &&
+    type !== "lead" &&
+    type !== "comunidade" &&
+    type !== "diagnostico"
+  ) {
     return NextResponse.json({ error: "Tipo de evento inválido." }, { status: 400, headers });
+  }
+
+  // ---- os tipos novos (nov/26): conferidos inteiros antes de gravar qualquer coisa ----
+  if (type === "comunidade" || type === "diagnostico") {
+    if (texto.length > CORPO_MAX_BYTES) {
+      return NextResponse.json({ error: "Evento grande demais." }, { status: 413, headers });
+    }
+    const corpo = body as unknown as Record<string, unknown>;
+    // A hora que vale é a que o evento CHEGOU ao servidor (nunca um relógio da página).
+    const em = new Date().toISOString();
+
+    if (type === "comunidade") {
+      const lido = lerEventoComunidade(corpo);
+      if (!lido.ok) return NextResponse.json({ error: "Evento inválido.", erros: lido.erros }, { status: 400, headers });
+      const lead = await leadDoClique(lido.valor.eventId);
+      await registrarCliqueComunidade({ ...lido.valor, leadId: lead?.id, em });
+      // O 1º clique é o fato da ficha (o mesmo `clicou_comunidade` do n8n): o painel da
+      // live conta "Na comunidade" e a Meta recebe `EntrouNaComunidade` (CAPI).
+      if (lead && !lead.comunidadeEm) {
+        await gravarFicha(lead, { comunidadeEm: em }, ATOR_OBRIGADO).catch((e) =>
+          console.warn("[track] comunidade: não gravei na ficha:", semDado(e)),
+        );
+      }
+      return new NextResponse(null, { status: 204, headers });
+    }
+
+    const lido = lerEventoDiagnostico(corpo);
+    if (!lido.ok) return NextResponse.json({ error: "Evento inválido.", erros: lido.erros }, { status: 400, headers });
+    const tentativa = await registrarDiagnostico(lido.valor, em);
+    if (lido.valor.etapa === "resultado") await diagnosticoNaFicha(tentativa.telefone, tentativa.chaveTelefone);
+    return new NextResponse(null, { status: 204, headers });
   }
 
   const date = today();
@@ -270,7 +390,9 @@ export async function POST(request: Request) {
     // a desse número (o n8n cria por ele) — marcar os dois contaria a pessoa duas vezes.
     const mesmoWhatsapp = !phone || !anterior?.phone || mesmoTelefone(phone, anterior.phone);
     const live = !created && inscricaoNaLive && mesmoWhatsapp ? await registrarInscricaoNaLive(leadId, agora) : null;
-    const payload: Record<string, string> = {};
+    // O eventId da entrada: é por ele que o clique na comunidade (página de obrigado) acha
+    // a pessoa — também quando o reenvio caiu num cadastro antigo, de outro id.
+    const payload: Record<string, string> = { eventId };
     if (!created && anterior) {
       if (phone && anterior.phone && !mesmoTelefone(phone, anterior.phone)) payload.telefoneNovo = phone;
       if (email && anterior.email && email.toLowerCase() !== anterior.email.toLowerCase()) payload.emailNovo = email;
@@ -296,7 +418,7 @@ export async function POST(request: Request) {
       actor: "Landing page",
       action: created ? "created" : "reenvio",
       toStatus: created ? "lead" : undefined,
-      payload: Object.keys(payload).length ? payload : undefined,
+      payload,
       createdAt: new Date().toISOString(),
     });
 

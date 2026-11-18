@@ -63,6 +63,21 @@ export function chaveTelefoneValida(phone?: string | null): string | null {
 }
 
 /**
+ * A chave do Diagnóstico do Próximo Patrimônio: DDD + os 8 últimos dígitos.
+ * Só dígitos; zeros à esquerda (o 0 de longa distância) saem; o 55 da frente sai
+ * quando sobram mais de 11 dígitos. Assim 5511987654321, (11) 98765-4321 e
+ * 11 8765-4321 caem na mesma chave — com e sem o nono dígito. Menos de 10
+ * dígitos (sem DDD) não tem chave: não liga a ninguém.
+ */
+export function chaveDddMais8(phone?: string | null): string | null {
+  if (!phone) return null;
+  let d = phone.replace(/\D/g, "").replace(/^0+/, "");
+  if (d.length > 11 && d.startsWith("55")) d = d.slice(2);
+  if (d.length < 10 || d.length > 11) return null;
+  return `${d.slice(0, 2)}${d.slice(-8)}`;
+}
+
+/**
  * Dá para abrir o WhatsApp (ou ligar) para este número? Só com telefone
  * UTILIZÁVEL — a mesma régua de `chaveTelefoneValida`, a do motivo "sem
  * telefone" do resgate. "123" ou "0" virariam um `wa.me` que não leva a lugar

@@ -5,9 +5,12 @@ import type {
   CapiEnvio,
   CapiEnvioStatus,
   CapiMotivoFim,
+  CliqueComunidade,
   ConferenciaGasto,
   Creative,
   DashboardData,
+  DiagnosticoTentativa,
+  EventoDiagnostico,
   Goal,
   IgAccountDaily,
   IgPost,
@@ -539,6 +542,19 @@ export interface DataBackend {
    * sem ele, os mais novos primeiro (por `criadoEm`). `limit` padrão 200; 0 = sem limite.
    */
   listCapiEnvios(opts: ListCapiEnviosOpts): Promise<CapiEnvio[]>;
+
+  // ---- Depois da inscrição na live (0025) ----
+  /**
+   * Um evento do diagnóstico na sua tentativa (`aplicarEventoDiagnostico`, a régua
+   * única: o último evento vale; `iniciadoEm` e `concluidoEm` ficam com o 1º).
+   * `em` = quando chegou ao servidor. Devolve a tentativa como ficou.
+   */
+  registrarDiagnostico(ev: EventoDiagnostico, em: string): Promise<DiagnosticoTentativa>;
+  /** As tentativas, as mais recentes primeiro; com `chaveTelefone`, só as desse número. */
+  listDiagnosticos(opts?: { chaveTelefone?: string }): Promise<DiagnosticoTentativa[]>;
+  /** Um clique em "Entrar na comunidade" (`aplicarCliqueComunidade`: o 1º horário fica). */
+  registrarCliqueComunidade(c: { eventId: string; leadId?: string; pageUrl?: string; em: string }): Promise<CliqueComunidade>;
+  listCliquesComunidade(): Promise<CliqueComunidade[]>;
 
   /** Accumulate landing-page counters for a brand's day (read-modify-write). */
   bumpLpDaily(brand: string, date: string, delta: LpDelta): Promise<void>;

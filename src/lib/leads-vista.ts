@@ -12,6 +12,17 @@
  */
 
 import { eventosPorLead, resumoContato, type ResumoContato } from "./contato";
+import {
+  SITUACAO_DO_DIAGNOSTICO,
+  cliquesPorLead,
+  indiceDeEventIds,
+  ligarDiagnosticos,
+  resumirDiagnostico,
+  textoDasConquistas,
+  type ResumoDoDiagnostico,
+  type SituacaoDoDiagnostico,
+} from "./diagnostico-live";
+import { ehInscritoDaLive, type CampanhaDaLive } from "./live";
 import { DONO_LABEL, type Dono } from "./dono";
 import {
   etapaDoLead,
@@ -78,7 +89,7 @@ import {
   type RoboNaFila,
   type SituacaoRobo,
 } from "./robo/situacao";
-import type { DashboardData, Lead, LeadEvent, LeadStatus } from "./types";
+import type { CliqueComunidade, DashboardData, DiagnosticoTentativa, Lead, LeadEvent, LeadStatus } from "./types";
 
 // ---------------------------------------------------------------- vocabulário
 
@@ -189,6 +200,18 @@ export interface LinhaDeLead {
   reuniao?: StatusReuniao;
   /** Clicou no link da comunidade. */
   comunidade: boolean;
+  /**
+   * O 1º clique em "Entrar na comunidade": o fato da ficha (`comunidadeEm`, gravado
+   * pela página de obrigado ou pelo n8n); sem ele, o clique guardado que chegou antes do lead.
+   */
+  comunidadeEm?: string;
+  // ---- depois da inscrição na live (`lib/diagnostico-live.ts`) ----
+  /** Inscrito da live (`ehInscritoDaLive`), ou já clicou na comunidade ou começou o diagnóstico. */
+  daLive: boolean;
+  /** A situação do diagnóstico (o filtro); só para quem é da live — os outros não foram convidados. */
+  diagnostico?: SituacaoDoDiagnostico;
+  /** A tentativa mais avançada, resumida (as 9 respostas moram na ficha). */
+  diagnosticoResumo?: ResumoDoDiagnostico;
   /** Mensagem automática: saiu, falhou (status "falhou") ou não há registro. */
   msg1: Msg1Situacao;
 }
@@ -472,10 +495,23 @@ export function montarLinhasDeLeads(
     expediente?: Expediente;
     /** O robô (`estadoDoRoboAgora`) — o MESMO da Fila. Ausente ou desligado = o texto de antes. */
     robo?: RoboNaFila;
+    /**
+     * Depois da inscrição na live: a régua da live (quem é inscrito), as tentativas do
+     * diagnóstico e os cliques na comunidade. Ausente = as colunas da live ficam vazias.
+     */
+    live?: { cfg: CampanhaDaLive; diagnosticos: DiagnosticoTentativa[]; cliques: CliqueComunidade[] };
   } = {},
 ): LinhaDeLead[] {
   const origem = origemDoLead(data);
   const porLead = eventosPorLead(eventos);
+  // A ligação olha a base INTEIRA (o lead escolhido pelo telefone pode ter entrado fora do período).
+  const daInscricao = opts.live;
+  const diagnosticos = daInscricao
+    ? ligarDiagnosticos(daInscricao.diagnosticos, data.leads, daInscricao.cfg).porLead
+    : new Map<string, DiagnosticoTentativa[]>();
+  const cliques = daInscricao
+    ? cliquesPorLead(daInscricao.cliques, new Map(data.leads.map((l) => [l.id, l])), indiceDeEventIds(eventos))
+    : new Map<string, string>();
   const robo = opts.robo?.ligado ? opts.robo : undefined;
   const ref = refDoRobo(robo, agora);
 
@@ -500,6 +536,12 @@ export function montarLinhasDeLeads(
     const reabertoEm = reabertoDe(proprios);
     const s = situacaoDoRobo(l, { agora, ref, ligado: Boolean(robo), reabertoEm, reabertoNoPainel: reabertoNoPainelDe(proprios) });
     const grupo = grupoDe.get(l.id);
+    // O 1º clique: o fato da ficha ou, se chegou antes do lead, o clique guardado — o que vier antes.
+    const cliqueGuardado = cliques.get(l.id);
+    const comunidadeEm =
+      l.comunidadeEm && cliqueGuardado ? (l.comunidadeEm < cliqueGuardado ? l.comunidadeEm : cliqueGuardado) : (l.comunidadeEm ?? cliqueGuardado);
+    const diagnosticoResumo = resumirDiagnostico(diagnosticos.get(l.id) ?? []);
+    const daLive = Boolean((daInscricao && ehInscritoDaLive(l, daInscricao.cfg)) || comunidadeEm || diagnosticoResumo);
     return {
       id: l.id,
       name: l.name,
@@ -536,7 +578,11 @@ export function montarLinhasDeLeads(
       prazoCompra: l.prazoCompra,
       atendimento: statusAtendimento(l),
       reuniao: statusReuniao(l),
-      comunidade: Boolean(l.comunidadeEm),
+      comunidade: Boolean(comunidadeEm),
+      ...(comunidadeEm ? { comunidadeEm } : {}),
+      daLive,
+      ...(daLive ? { diagnostico: diagnosticoResumo?.situacao ?? "nao" } : {}),
+      ...(diagnosticoResumo ? { diagnosticoResumo } : {}),
       msg1: msg1Situacao(l),
     };
   });
@@ -581,6 +627,8 @@ export interface FiltroDeLeads {
   /** "nunca" = nunca agendou (o fato, `everBooked`) — quem desistiu já agendou. */
   reuniao?: StatusReuniao | "nunca";
   comunidade?: "sim" | "nao";
+  /** Não começou · começou e não concluiu · concluiu (só quem é da live). */
+  diagnostico?: SituacaoDoDiagnostico;
   msg1?: Msg1Situacao;
 }
 
@@ -601,6 +649,7 @@ export const FILTROS_DA_FICHA = {
   atendimento: { rotulo: "Status do atendimento", vocab: STATUS_ATENDIMENTO },
   reuniao: { rotulo: "Reunião", vocab: { ...STATUS_REUNIAO, nunca: "Nunca agendou" } },
   comunidade: { rotulo: "Comunidade", vocab: { sim: "Clicou", nao: "Não clicou" } },
+  diagnostico: { rotulo: "Diagnóstico", vocab: SITUACAO_DO_DIAGNOSTICO },
   msg1: { rotulo: "Mensagem automática", vocab: MSG1_SITUACAO_LABEL },
 } as const satisfies Record<string, { rotulo: string; vocab: Record<string, string> }>;
 export type FiltroDaFicha = keyof typeof FILTROS_DA_FICHA;
@@ -817,7 +866,34 @@ export const CSV_CABECALHO = [
   "Status da reunião",
   "Comunidade",
   "Mensagem automática",
+  // Depois da inscrição na live (nov/26): o clique e o diagnóstico (a tentativa mais avançada).
+  "Clique na comunidade",
+  "Diagnóstico",
+  "Perguntas respondidas",
+  "Perfil",
+  "Reserva",
+  "Lance",
+  "Conhecimento",
+  "Plano",
+  "Conquistas",
 ] as const;
+
+/** As 9 colunas do clique e do diagnóstico (vazias para quem não é da live). */
+function colunasDaLiveNoCsv(r: LinhaDeLead): string[] {
+  const d = r.diagnosticoResumo;
+  const nota = (k: string) => (d?.notas?.[k] === undefined ? "" : String(Math.round(d.notas[k])));
+  return [
+    csvCell(r.comunidadeEm ? formatDateTime(r.comunidadeEm) : ""),
+    csvCell(r.diagnostico ? SITUACAO_DO_DIAGNOSTICO[r.diagnostico] : ""),
+    csvCell(d ? `${d.situacao === "concluiu" ? d.total : d.respondidas} de ${d.total}` : ""),
+    csvCell(d?.perfil ?? ""),
+    nota("reserva"),
+    nota("lance"),
+    nota("conhecimento"),
+    nota("plano"),
+    csvCell(d ? textoDasConquistas(d) : ""),
+  ];
+}
 
 /** CSV pt-BR (`;`, BOM, CRLF) das linhas recebidas — e só delas: o filtro vale. */
 export function montarCsvDeLeads(linhas: LinhaDeLead[]): string {
@@ -846,6 +922,7 @@ export function montarCsvDeLeads(linhas: LinhaDeLead[]): string {
       csvCell(r.reuniao ? STATUS_REUNIAO[r.reuniao] : ""),
       csvCell(r.comunidade ? "sim" : "não"),
       csvCell(MSG1_SITUACAO_LABEL[r.msg1]),
+      ...colunasDaLiveNoCsv(r),
     ].join(";"),
   );
   // BOM + CRLF: é assim que o Excel pt-BR abre acentos e colunas certos.

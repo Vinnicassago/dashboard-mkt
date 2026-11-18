@@ -30,12 +30,14 @@ import {
   type LeadRoboPatch,
 } from "./backend";
 import { toRole } from "../auth/roles";
+import { aplicarCliqueComunidade, aplicarEventoDiagnostico } from "../diagnostico-live";
 import type {
   AcaoEstado,
   AdDaily,
   AuditEntry,
   CapiEnvio,
   ConferenciaGasto,
+  EventoDiagnostico,
   SyncRun,
   Creative,
   DashboardData,
@@ -59,6 +61,10 @@ import {
   toAcaoEstado,
   toConferencia,
   fromConferencia,
+  toDiagnosticoTentativa,
+  fromDiagnosticoTentativa,
+  toCliqueComunidade,
+  fromCliqueComunidade,
   toCapiEnvio,
   fromCapiEnvio,
   capiPatchParaColunas,
@@ -696,6 +702,49 @@ export const supabaseBackend: DataBackend = {
   async addSyncRun(run: SyncRun) {
     const { error } = await supabase().from("sync_runs").insert(fromSyncRun(run));
     check(error, "add sync run");
+  },
+
+  // ---- Depois da inscrição na live (0025) ----
+  // Ler, aplicar a MESMA régua do JSON local e gravar (como `bumpLpDaily`): sem
+  // transação no REST. Dois beacons da mesma tentativa no mesmo instante podem
+  // perder um — o próximo evento traz a lista completa de novo.
+
+  async registrarDiagnostico(ev: EventoDiagnostico, em: string) {
+    const db = supabase();
+    const cur = await db.from("diagnosticos").select("*").eq("tentativa", ev.tentativa).maybeSingle();
+    check(cur.error, "get diagnostico");
+    const nova = aplicarEventoDiagnostico(cur.data ? toDiagnosticoTentativa(cur.data as Row) : null, ev, em);
+    const linha = fromDiagnosticoTentativa(nova);
+    // O REST grava jsonb a partir do objeto (não do texto).
+    const { error } = await db
+      .from("diagnosticos")
+      .upsert({ ...linha, respostas: nova.respostas, notas: nova.notas ?? null }, { onConflict: "tentativa" });
+    check(error, "upsert diagnostico");
+    return nova;
+  },
+
+  async listDiagnosticos(opts?: { chaveTelefone?: string }) {
+    let query = supabase().from("diagnosticos").select("*").order("atualizado_em", { ascending: false });
+    if (opts?.chaveTelefone) query = query.eq("chave_telefone", opts.chaveTelefone);
+    const { data, error } = await query;
+    check(error, "list diagnosticos");
+    return (data ?? []).map((r) => toDiagnosticoTentativa(r as Row));
+  },
+
+  async registrarCliqueComunidade(c: { eventId: string; leadId?: string; pageUrl?: string; em: string }) {
+    const db = supabase();
+    const cur = await db.from("comunidade_cliques").select("*").eq("event_id", c.eventId).maybeSingle();
+    check(cur.error, "get clique comunidade");
+    const novo = aplicarCliqueComunidade(cur.data ? toCliqueComunidade(cur.data as Row) : null, c);
+    const { error } = await db.from("comunidade_cliques").upsert(fromCliqueComunidade(novo), { onConflict: "event_id" });
+    check(error, "upsert clique comunidade");
+    return novo;
+  },
+
+  async listCliquesComunidade() {
+    const { data, error } = await supabase().from("comunidade_cliques").select("*").order("primeiro_em", { ascending: false });
+    check(error, "list cliques comunidade");
+    return (data ?? []).map((r) => toCliqueComunidade(r as Row));
   },
 
   async addConferencia(c: ConferenciaGasto) {

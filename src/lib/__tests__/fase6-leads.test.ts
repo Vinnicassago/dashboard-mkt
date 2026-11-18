@@ -47,6 +47,9 @@ vi.mock("@/lib/data/store", () => ({
   listLeadEvents: dubles.listLeadEvents,
   // O turno da live (Configurações → Atendimento): nada salvo = o padrão.
   getState: async () => null,
+  // Depois da inscrição (0025): o diagnóstico e o clique na comunidade.
+  listDiagnosticos: async () => [],
+  listCliquesComunidade: async () => [],
 }));
 vi.mock("@/lib/auth/guard", () => ({ can: dubles.can }));
 vi.mock("@/lib/auth/actor", () => ({ currentActor: async () => "ana", newEventId: () => "EVT-teste" }));

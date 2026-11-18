@@ -29,12 +29,16 @@ import {
   emFilaNoProcesso,
   recomecaNoReaberto,
 } from "./backend";
+import { aplicarCliqueComunidade, aplicarEventoDiagnostico } from "../diagnostico-live";
 import type {
   AcaoEstado,
   AdDaily,
   AuditEntry,
   CapiEnvio,
+  CliqueComunidade,
   ConferenciaGasto,
+  DiagnosticoTentativa,
+  EventoDiagnostico,
   SyncRun,
   Creative,
   DashboardData,
@@ -55,6 +59,10 @@ import {
   toAcaoEstado,
   toConferencia,
   fromConferencia,
+  toDiagnosticoTentativa,
+  fromDiagnosticoTentativa,
+  toCliqueComunidade,
+  fromCliqueComunidade,
   toCapiEnvio,
   fromCapiEnvio,
   capiPatchParaColunas,
@@ -113,6 +121,8 @@ const AUDIT_COLS = ["id", "at", "actor", "action", "detail"];
 const SYNC_RUN_COLS = ["id", "source", "brand", "started_at", "finished_at", "ok", "date_from", "date_to", "rows", "error"];
 const DRAFT_COLS = ["id", "brand", "status", "created_at", "updated_at", "planned_for", "type", "pillar", "hook_text", "hook_spoken", "promise", "script", "caption", "cta_type", "cta_keyword", "duration_sec", "has_burned_captions", "score", "validated_at", "playbook_version", "published_post_id", "notes", "ai_review", "validation_failed"];
 const CONFERENCIA_COLS = ["id", "brand", "periodo_de", "periodo_ate", "gasto_painel", "gasto_gerenciador", "diferenca", "ultimo_sync", "criada_em", "criada_por"];
+const DIAGNOSTICO_COLS = ["tentativa", "telefone", "chave_telefone", "etapa", "respondidas", "total", "respostas", "perfil", "notas", "conquistas", "conquistas_total", "page_url", "iniciado_em", "concluido_em", "atualizado_em", "eventos"];
+const CLIQUE_COLS = ["event_id", "primeiro_em", "ultimo_em", "cliques", "lead_id", "page_url"];
 const ACAO_ESTADO_COLS = ["id", "brand", "semana", "acao", "estado", "motivo", "titulo", "por", "em"];
 const RESUMO_COLS = ["id", "brand", "semana", "periodo_de", "periodo_ate", "analise", "origem", "criado_em"];
 const CAPI_COLS = [
@@ -808,6 +818,65 @@ export const postgresBackend: DataBackend = {
 
   async addResumoSemanal(r: ResumoSemanal) {
     await insertMany("resumos_semanais", RESUMO_COLS, [fromResumoSemanal(r)]);
+  },
+
+  // ---- Depois da inscrição na live (0025) ----
+
+  /**
+   * A régua de `aplicarEventoDiagnostico` num upsert só (atômico: dois beacons da
+   * mesma tentativa ao mesmo tempo não se perdem): o último evento vale; o
+   * resultado é o do último `resultado`; `iniciado_em` e `concluido_em` ficam com o 1º.
+   */
+  async registrarDiagnostico(ev: EventoDiagnostico, em: string): Promise<DiagnosticoTentativa> {
+    const linha = fromDiagnosticoTentativa(aplicarEventoDiagnostico(null, ev, em));
+    const { values, tuples } = buildTuples(DIAGNOSTICO_COLS, [linha]);
+    const doResultado = (c: string) =>
+      `${c} = case when excluded.etapa = 'resultado' then excluded.${c} else diagnosticos.${c} end`;
+    const rows = await q(
+      `insert into diagnosticos (${DIAGNOSTICO_COLS.join(",")}) values ${tuples}
+       on conflict (tentativa) do update set
+         telefone = excluded.telefone,
+         chave_telefone = excluded.chave_telefone,
+         etapa = excluded.etapa,
+         respondidas = excluded.respondidas,
+         total = excluded.total,
+         respostas = excluded.respostas,
+         ${["perfil", "notas", "conquistas", "conquistas_total"].map(doResultado).join(",\n         ")},
+         page_url = coalesce(excluded.page_url, diagnosticos.page_url),
+         concluido_em = coalesce(diagnosticos.concluido_em, excluded.concluido_em),
+         atualizado_em = excluded.atualizado_em,
+         eventos = diagnosticos.eventos + 1
+       returning *`,
+      values,
+    );
+    return toDiagnosticoTentativa(rows[0]);
+  },
+
+  async listDiagnosticos(opts?: { chaveTelefone?: string }): Promise<DiagnosticoTentativa[]> {
+    const rows = opts?.chaveTelefone
+      ? await q("select * from diagnosticos where chave_telefone = $1 order by atualizado_em desc", [opts.chaveTelefone])
+      : await q("select * from diagnosticos order by atualizado_em desc");
+    return rows.map(toDiagnosticoTentativa);
+  },
+
+  async registrarCliqueComunidade(c: { eventId: string; leadId?: string; pageUrl?: string; em: string }): Promise<CliqueComunidade> {
+    const linha = fromCliqueComunidade(aplicarCliqueComunidade(null, c));
+    const { values, tuples } = buildTuples(CLIQUE_COLS, [linha]);
+    const rows = await q(
+      `insert into comunidade_cliques (${CLIQUE_COLS.join(",")}) values ${tuples}
+       on conflict (event_id) do update set
+         ultimo_em = excluded.ultimo_em,
+         cliques = comunidade_cliques.cliques + 1,
+         lead_id = coalesce(excluded.lead_id, comunidade_cliques.lead_id),
+         page_url = coalesce(comunidade_cliques.page_url, excluded.page_url)
+       returning *`,
+      values,
+    );
+    return toCliqueComunidade(rows[0]);
+  },
+
+  async listCliquesComunidade(): Promise<CliqueComunidade[]> {
+    return (await q("select * from comunidade_cliques order by primeiro_em desc")).map(toCliqueComunidade);
   },
 
   // ---- Envios à Meta (Fase 7) ----

@@ -17,6 +17,7 @@ import { pageRange } from "@/lib/page-range";
 import { expedienteAtual } from "@/lib/atendimento-server";
 import { isRangeKey, rangeLabel } from "@/lib/range";
 import { estadoDoRoboAgora } from "@/lib/robo/estado";
+import { carregarDepoisDaInscricao } from "@/lib/diagnostico-server";
 
 export const dynamic = "force-dynamic";
 
@@ -64,15 +65,17 @@ export async function POST(request: Request): Promise<Response> {
   let n: number;
   let descricao: string;
   try {
-    const [data, eventos, robo] = await Promise.all([
+    const [data, eventos, robo, live] = await Promise.all([
       getData(brand),
       listLeadEvents({ brand, limit: 0 }),
       estadoDoRoboAgora(brand),
+      // As colunas do clique na comunidade e do diagnóstico: as MESMAS da tela.
+      carregarDepoisDaInscricao(brand),
     ]);
     const { range, rangeKey } = pageRange(data, rangeParam);
     const expediente = await expedienteAtual();
     const linhas = aplicarFiltro(
-      montarLinhasDeLeads(data, eventos, new Date().toISOString(), { range, expediente, robo }),
+      montarLinhasDeLeads(data, eventos, new Date().toISOString(), { range, expediente, robo, live }),
       filtro,
     );
     n = linhas.length;

@@ -88,6 +88,9 @@ vi.mock("@/lib/data/store", () => ({
   listLeadEvents: async ({ leadId }: { leadId: string }) => (h.eventos as LeadEvent[]).filter((e) => e.leadId === leadId),
   listCapiEnvios: async ({ leadId }: { leadId: string }) => (h.envios as CapiEnvio[]).filter((e) => e.leadId === leadId),
   getState: async () => null,
+  // Depois da inscrição (0025): sem diagnóstico nem clique guardado nos casos medidos.
+  listDiagnosticos: async () => [],
+  listCliquesComunidade: async () => [],
 }));
 
 // ---------------------------------------------------------------- fixture (sintética)
@@ -287,12 +290,15 @@ const maiorFrase = (t: string) => Math.max(0, ...frases(t).map((f) => palavras(`
  * tetos da spec (250 no lead típico, 310 no inscrito da live). Medido no texto do PAINEL
  * (`semIgnorados`): 223 · 188 · 184 · 279 (com o digitado, 244 · 209 · 205 · 300; antes do
  * T3, 426 · 403 · 363 · 480). Os 200 da régua esperam o redesenho da ficha (U7).
+ * Nov/26 (depois da inscrição): o inscrito da live ganhou o card "Live · …" — o título e a
+ * linha do tempo pedida (inscrição, clique na comunidade) — e perdeu a linha do clique na
+ * Automação: 279 → 286, ainda abaixo do teto de 310.
  */
 const ORCAMENTO = {
   comercialRoboLigado: 230,
   marketing: 190,
   comercialRoboDesligado: 190,
-  inscritoDaLive: 280,
+  inscritoDaLive: 290,
 };
 
 const CASOS: { nome: string; caso: () => Caso; papel: string; robo: unknown; orcamento: number }[] = [

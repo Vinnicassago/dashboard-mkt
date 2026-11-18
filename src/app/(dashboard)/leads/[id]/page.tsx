@@ -7,6 +7,10 @@ import { StatusBadge } from "@/components/tables/lead-status";
 import { DeletedLeads } from "@/components/leads/leads-directory";
 import { DescricaoEvento } from "@/components/leads/lead-activity";
 import { FichaAcoes } from "@/components/leads/ficha-acoes";
+import { FichaDepoisDaInscricao } from "@/components/leads/ficha-depois-da-inscricao";
+import { carregarDepoisDaInscricao } from "@/lib/diagnostico-server";
+import { cliquesPorLead, indiceDeEventIds, ligarDiagnosticos, maisAvancada } from "@/lib/diagnostico-live";
+import { ehInscritoDaLive, entradaNaLive } from "@/lib/live";
 import { getData, getLead, listCapiEnvios, listLeadEvents } from "@/lib/data/store";
 import { can } from "@/lib/auth/guard";
 import { getCurrentUser } from "@/lib/auth/current-user";
@@ -124,7 +128,7 @@ export default async function FichaDoLead({
   const lead = await getLead(id);
   if (!lead) notFound();
 
-  const [dados, proprios, enviosMeta, canEdit, canDelete, mensagem, user, expediente, robo] = await Promise.all([
+  const [dados, proprios, enviosMeta, canEdit, canDelete, mensagem, user, expediente, robo, live] = await Promise.all([
     getData(lead.brand),
     listLeadEvents({ leadId: id, limit: 0 }),
     listCapiEnvios({ leadId: id, limit: 0 }),
@@ -135,6 +139,8 @@ export default async function FichaDoLead({
     expedienteAtual(),
     // O MESMO estado do robô da Fila: a etapa citada no cabeçalho é a do grupo de lá.
     estadoDoRoboAgora(lead.brand),
+    // O clique na comunidade e o diagnóstico (a MESMA ligação da tela de Leads).
+    carregarDepoisDaInscricao(lead.brand),
   ]);
   const mascarar = user?.role === "marketing";
   const comRange = (href: string) => comPeriodo(href, range);
@@ -169,6 +175,23 @@ export default async function FichaDoLead({
       ),
     ),
   ].sort((a, b) => Date.parse(b.em) - Date.parse(a.em));
+
+  // Depois da inscrição: as tentativas do diagnóstico que caem NESTA pessoa (a régua de
+  // `ligarDiagnosticos`, sobre a base inteira) e o 1º clique na comunidade (o fato da ficha;
+  // sem ele, o clique guardado que chegou antes do lead).
+  const meusDiagnosticos =
+    live && !lead.deletedAt ? (ligarDiagnosticos(live.diagnosticos, dados.leads, live.cfg).porLead.get(lead.id) ?? []) : [];
+  const diagnosticoDaLive = maisAvancada(meusDiagnosticos);
+  const cliqueGuardado = live
+    ? cliquesPorLead(live.cliques, new Map([[lead.id, lead]]), indiceDeEventIds([...proprios, ...deles.flat()])).get(lead.id)
+    : undefined;
+  const comunidadeEm =
+    lead.comunidadeEm && cliqueGuardado
+      ? lead.comunidadeEm < cliqueGuardado
+        ? lead.comunidadeEm
+        : cliqueGuardado
+      : (lead.comunidadeEm ?? cliqueGuardado);
+  const daLive = Boolean(live && (ehInscritoDaLive(lead, live.cfg) || comunidadeEm || diagnosticoDaLive));
 
   const contato = resumoContato(proprios);
   // O card Atendimento é a cadência da live: as tentativas do EPISÓDIO (como a Fila e o n8n); as antigas ficam na linha do tempo.
@@ -252,9 +275,10 @@ export default async function FichaDoLead({
     !classeDoLead(lead) &&
     lead.aceiteMensagens == null &&
     [lead.bem, lead.faixaValor, lead.finalidade, lead.faixaParcela, lead.prazoCompra, lead.horarioPreferido].every((v) => !v);
-  // Automação sem nenhum fato do n8n: uma linha só, o título.
+  // Automação sem nenhum fato do n8n: uma linha só, o título. Na live, o clique na comunidade
+  // mora no card "Live" (a página de obrigado grava o mesmo fato).
   const automacaoVazia =
-    !lead.msg1EnviadaEm && !lead.msg1Status && !lead.atendimentoAvisadoEm && !lead.escaladoEm && !lead.comunidadeEm;
+    !lead.msg1EnviadaEm && !lead.msg1Status && !lead.atendimentoAvisadoEm && !lead.escaladoEm && (daLive || !lead.comunidadeEm);
   const perfilDoDiagnostico = lead.diagnostico?.perfil?.trim() ?? "";
   // Até 6 palavras, o perfil é a resposta do título; mais, é texto do n8n e fica no corpo.
   const perfilNoTitulo = perfilDoDiagnostico !== "" && perfilDoDiagnostico.split(/\s+/).length <= 6;
@@ -519,9 +543,11 @@ export default async function FichaDoLead({
                   </Linha>
                   <Linha rotulo="Atendimento avisado">{data(lead.atendimentoAvisadoEm)}</Linha>
                   <Linha rotulo="Escalado">{data(lead.escaladoEm)}</Linha>
-                  <Linha rotulo="Clicou na comunidade">
-                    {lead.comunidadeEm ? `sim · ${formatDateTimeCurta(lead.comunidadeEm)}` : "não"}
-                  </Linha>
+                  {daLive ? null : (
+                    <Linha rotulo="Clicou na comunidade">
+                      {lead.comunidadeEm ? `sim · ${formatDateTimeCurta(lead.comunidadeEm)}` : "não"}
+                    </Linha>
+                  )}
                 </dl>
               </CardContent>
             )}
@@ -572,7 +598,17 @@ export default async function FichaDoLead({
             </Card>
           ) : null}
 
-          {lead.diagnostico ? (
+          {daLive ? (
+            <FichaDepoisDaInscricao
+              inscricaoEm={entradaNaLive(lead)}
+              comunidadeEm={comunidadeEm}
+              tentativa={diagnosticoDaLive}
+              tentativas={meusDiagnosticos.length}
+            />
+          ) : null}
+
+          {/* O diagnóstico que o n8n mandava; o da página aparece no card "Live" acima. */}
+          {lead.diagnostico && !diagnosticoDaLive ? (
             <Card>
               <CardHeader>
                 <CardTitle data-titulo>
