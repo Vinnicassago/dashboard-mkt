@@ -40,6 +40,8 @@ export async function middleware(request: NextRequest) {
   return NextResponse.redirect(url);
 }
 
+// sw.js (os avisos de lead novo) e o manifesto não têm dado: o navegador os busca
+// sozinho, às vezes sem o cookie, e um redirect para /login quebraria o registro.
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|lp-tracking.js).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|lp-tracking.js|sw.js|manifest.webmanifest).*)"],
 };

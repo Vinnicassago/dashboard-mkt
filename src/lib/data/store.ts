@@ -46,6 +46,7 @@ import type {
   Goal,
   IgAccountDaily,
   IgPost,
+  InscricaoPush,
   Lead,
   LeadEvent,
   LeadStatus,
@@ -133,6 +134,12 @@ export const listDiagnosticos = (opts?: { chaveTelefone?: string }) => backend()
 export const registrarCliqueComunidade = (c: { eventId: string; leadId?: string; pageUrl?: string; em: string }) =>
   backend().registrarCliqueComunidade(c);
 export const listCliquesComunidade = () => backend().listCliquesComunidade();
+
+// ---- Avisos de lead novo por Web Push (0026) ----
+/** Upsert pelo endpoint (o mesmo navegador de novo atualiza; `criadaEm` fica). */
+export const salvarInscricaoPush = (i: InscricaoPush) => backend().salvarInscricaoPush(i);
+export const removerInscricaoPush = (endpoint: string) => backend().removerInscricaoPush(endpoint);
+export const listInscricoesPush = () => backend().listInscricoesPush();
 
 export const bumpLpDaily = (date: string, delta: LpDelta, brand: string = DEFAULT_BRAND) =>
   backend().bumpLpDaily(brand, date, delta);

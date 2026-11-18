@@ -42,6 +42,7 @@ import { idsDoUtm } from "@/lib/atribuicao";
 import { isLostStatus } from "@/lib/lead-status";
 import { newEventId } from "@/lib/auth/actor";
 import { avisarLeadNovo } from "@/lib/avisos";
+import { avisarLeadPorPush } from "@/lib/push/enviar";
 import { estadoDoRoboAgora } from "@/lib/robo/estado";
 import { enviarParaMeta, reenviarPendentes } from "@/lib/meta/capi-envios";
 import { sendGa4Event } from "@/lib/ga4/measurement-protocol";
@@ -440,7 +441,11 @@ export async function POST(request: Request) {
         createdAt: new Date().toISOString(),
       });
       const voltou = await getLead(leadId);
-      if (voltou) await avisarLeadNovo(voltou, "lead_voltou", { robo: await roboNoAviso(voltou.brand) });
+      if (voltou) {
+        await avisarLeadNovo(voltou, "lead_voltou", { robo: await roboNoAviso(voltou.brand) });
+        // Os aparelhos com o sino ligado: depois da resposta (a página não espera o push).
+        after(() => avisarLeadPorPush(voltou, "lead_voltou"));
+      }
     }
 
     // A página da live manda as 5 respostas: o painel classifica na entrada, sem
@@ -458,7 +463,11 @@ export async function POST(request: Request) {
 
   // Lead novo: avisa quem atende (n8n). Velocidade de contato é a alavanca nº 1.
   const novo = await getLead(leadId);
-  if (novo) await avisarLeadNovo(novo, "lead_novo", { robo: await roboNoAviso(novo.brand) });
+  if (novo) {
+    await avisarLeadNovo(novo, "lead_novo", { robo: await roboNoAviso(novo.brand) });
+    // E quem ligou o sino no painel (Web Push), depois da resposta: a página não espera.
+    after(() => avisarLeadPorPush(novo, "lead_novo"));
+  }
 
   // The user agent of THIS request is the visitor's browser (the landing page
   // posts directly), which is exactly what CAPI requires.

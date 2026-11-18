@@ -50,6 +50,7 @@ import type {
   Meta,
   IgAccountDaily,
   IgPost,
+  InscricaoPush,
   Lead,
   LeadEvent,
   LeadStatus,
@@ -91,6 +92,8 @@ interface LocalFile {
   diagnosticos: DiagnosticoTentativa[];
   /** Cliques em "Entrar na comunidade", um por eventId (0025). */
   comunidadeCliques: CliqueComunidade[];
+  /** Navegadores inscritos nos avisos de lead novo (Web Push, 0026), um por endpoint. */
+  pushInscricoes: InscricaoPush[];
 }
 
 let cache: LocalFile | null = null;
@@ -199,6 +202,7 @@ function load(): LocalFile {
         if (!Array.isArray(parsed.conferencias)) parsed.conferencias = [];
         if (!Array.isArray(parsed.diagnosticos)) parsed.diagnosticos = [];
         if (!Array.isArray(parsed.comunidadeCliques)) parsed.comunidadeCliques = [];
+        if (!Array.isArray(parsed.pushInscricoes)) parsed.pushInscricoes = [];
         if (!Array.isArray(parsed.data.metas)) parsed.data.metas = [];
         migrateBrand(parsed.data);
         migrateLeadStatus(parsed);
@@ -224,6 +228,7 @@ function load(): LocalFile {
     conferencias: [],
     diagnosticos: [],
     comunidadeCliques: [],
+    pushInscricoes: [],
   };
   persist(fresh);
   return fresh;
@@ -303,6 +308,8 @@ export const localBackend: DataBackend = {
       // O que as páginas da live mandaram não é exemplo: o reset não toca.
       diagnosticos: file().diagnosticos,
       comunidadeCliques: file().comunidadeCliques,
+      // Configuração dos aparelhos, não dado de exemplo: o reset não toca.
+      pushInscricoes: file().pushInscricoes,
     };
     persist(cache);
     return seed;
@@ -733,6 +740,30 @@ export const localBackend: DataBackend = {
     return file()
       .comunidadeCliques.sort((a, b) => b.primeiroEm.localeCompare(a.primeiroEm))
       .map((c) => ({ ...c }));
+  },
+
+  // ---- Avisos de lead novo por Web Push (0026) ----
+
+  async salvarInscricaoPush(i: InscricaoPush) {
+    const f = file();
+    const atual = f.pushInscricoes.find((x) => x.endpoint === i.endpoint);
+    const nova = { ...i, criadaEm: atual?.criadaEm ?? i.criadaEm };
+    f.pushInscricoes = [nova, ...f.pushInscricoes.filter((x) => x.endpoint !== i.endpoint)];
+    persist(f);
+    cache = f;
+  },
+
+  async removerInscricaoPush(endpoint: string) {
+    const f = file();
+    f.pushInscricoes = f.pushInscricoes.filter((x) => x.endpoint !== endpoint);
+    persist(f);
+    cache = f;
+  },
+
+  async listInscricoesPush() {
+    return [...file().pushInscricoes]
+      .sort((a, b) => b.atualizadaEm.localeCompare(a.atualizadaEm))
+      .map((i) => ({ ...i }));
   },
 
   // ---- Bússola (Fase 5) ----

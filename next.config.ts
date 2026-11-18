@@ -36,6 +36,20 @@ const nextConfig: NextConfig = {
       { source: "/ajustes", destination: "/configuracoes", permanent: false },
     ];
   },
+  // O service worker dos avisos de lead novo (public/sw.js): nunca em cache — a
+  // versão nova vale no próximo carregamento — e só com script da própria origem.
+  async headers() {
+    return [
+      {
+        source: "/sw.js",
+        headers: [
+          { key: "Content-Type", value: "application/javascript; charset=utf-8" },
+          { key: "Cache-Control", value: "no-cache, no-store, must-revalidate" },
+          { key: "Content-Security-Policy", value: "default-src 'self'; script-src 'self'" },
+        ],
+      },
+    ];
+  },
   experimental: {
     // Atrás de um proxy (EasyPanel/Traefik) o Next precisa saber quais origens
     // podem disparar Server Actions, senão o envio de formulários dá erro 500.

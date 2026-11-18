@@ -305,6 +305,20 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   máximo um por rodada do cron — intervalo mínimo de 13 min, `FOLGA_JANELA_AVISO_MIN` —, um
   aviso por entrada `id:motivo:desde`); falha no aviso nunca
   derruba a entrada do lead nem o sync.
+- **Avisos por Web Push** (nov/26, `lib/push/*`, `public/sw.js`, migração 0026): o sino do
+  cabeçalho (`components/layout/avisos-push.tsx`) liga/desliga os avisos NESTE navegador; só
+  aparece com `VAPID_PUBLIC_KEY` + `VAPID_PRIVATE_KEY` (a pública vai do layout ao client; a
+  privada nunca sai do servidor; `VAPID_SUBJECT`). Inscrição em `push_inscricoes` (upsert pelo
+  endpoint; é configuração do aparelho, então desligar APAGA a linha) por `/api/push/inscricao`
+  (login, só `sec-fetch-site: same-origin`, JSON; endpoint só de serviço de push conhecido —
+  `SERVICOS_DE_PUSH`, o servidor faz POST nele: SSRF). Sai em `after()` — a página e o n8n não
+  esperam — no lead CRIADO (`/api/track` e `inscrever` do n8n) e no que voltou de perdido;
+  reenvio nunca avisa. Texto em `avisoDoLead` (puro): só o PRIMEIRO nome, classe, live e robô;
+  nunca telefone/e-mail; id com WhatsApp vai para `/fila`. 404/410 apagam a inscrição; 403/5xx
+  não (403 costuma ser a NOSSA chave). Com login, inscrição de usuário que não existe mais sai.
+  O resumo do envio (só contagens) vai para Integrações. O service worker não tem `fetch` nem
+  cache e só é registrado quando a pessoa liga; `sw.js` e o manifesto (iPhone: só na Tela de
+  Início) ficam fora do middleware.
 - **Robô no painel** (Fase 1, nov/26, `lib/robo/*`): o painel NUNCA lê o banco do robô
   para desenhar uma tela — só o sync (`sincronizarRobo`: cron `/api/sync?source=robo` a
   cada 15 min, "Sincronizar agora" e a carona ao abrir a Fila, job de sistema) lê

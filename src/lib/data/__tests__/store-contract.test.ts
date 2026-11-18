@@ -866,6 +866,65 @@ function contrato(nome: string, abrir: () => Promise<{ backend: DataBackend; fec
       expect((await b.listCliquesComunidade()).find((c) => c.eventId === eventId)).toEqual(ultimo);
     });
 
+    it("inscrição de push (0026): upsert pelo endpoint mantém a 1ª data; remover apaga só a dela", async () => {
+      const endpoint = `https://push.exemplo.invalid/${sfx}`;
+      const outro = `${endpoint}-outro`;
+      await b.salvarInscricaoPush({
+        endpoint,
+        p256dh: "chave-1",
+        auth: "auth-1",
+        usuario: "ana",
+        aparelho: "Chrome · Windows",
+        criadaEm: "2031-08-01T10:00:00.000Z",
+        atualizadaEm: "2031-08-01T10:00:00.000Z",
+      });
+      await b.salvarInscricaoPush({
+        endpoint: outro,
+        p256dh: "chave-x",
+        auth: "auth-x",
+        usuario: null,
+        aparelho: null,
+        criadaEm: "2031-08-01T11:00:00.000Z",
+        atualizadaEm: "2031-08-01T11:00:00.000Z",
+      });
+      // O mesmo navegador se inscreve de novo (chave nova, outra pessoa logada).
+      await b.salvarInscricaoPush({
+        endpoint,
+        p256dh: "chave-2",
+        auth: "auth-2",
+        usuario: "bruno",
+        aparelho: "Chrome · Android",
+        criadaEm: "2031-08-02T09:00:00.000Z",
+        atualizadaEm: "2031-08-02T09:00:00.000Z",
+      });
+      const minhas = (await b.listInscricoesPush()).filter((i) => i.endpoint.startsWith(endpoint));
+      expect(minhas).toEqual([
+        {
+          endpoint,
+          p256dh: "chave-2",
+          auth: "auth-2",
+          usuario: "bruno",
+          aparelho: "Chrome · Android",
+          criadaEm: "2031-08-01T10:00:00.000Z",
+          atualizadaEm: "2031-08-02T09:00:00.000Z",
+        },
+        {
+          endpoint: outro,
+          p256dh: "chave-x",
+          auth: "auth-x",
+          usuario: null,
+          aparelho: null,
+          criadaEm: "2031-08-01T11:00:00.000Z",
+          atualizadaEm: "2031-08-01T11:00:00.000Z",
+        },
+      ]);
+      await b.removerInscricaoPush(endpoint);
+      await b.removerInscricaoPush(`${endpoint}-nunca-existiu`); // sem erro
+      expect((await b.listInscricoesPush()).filter((i) => i.endpoint.startsWith(endpoint)).map((i) => i.endpoint)).toEqual([
+        outro,
+      ]);
+    });
+
     it("registro de auditoria", async () => {
       await b.addAuditEntry({ id: `AUD-${sfx}`, at: new Date().toISOString(), actor: "admin", action: "teste", detail: "x" });
       const lista = await b.listAuditEntries(5);

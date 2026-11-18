@@ -24,6 +24,7 @@ import {
 import type {
   CliqueComunidade,
   ConferenciaGasto,
+  InscricaoPush,
   DiagnosticoTentativa,
   EtapaDoDiagnostico,
   RespostaDoDiagnostico,
@@ -476,6 +477,26 @@ export const fromConferencia = (c: ConferenciaGasto): Row => ({
   ultimo_sync: c.ultimoSync ?? null,
   criada_em: c.criadaEm,
   criada_por: c.criadaPor,
+});
+
+export const toInscricaoPush = (r: Row): InscricaoPush => ({
+  endpoint: s(r.endpoint),
+  p256dh: s(r.p256dh),
+  auth: s(r.auth),
+  usuario: r.usuario == null ? null : s(r.usuario),
+  aparelho: r.aparelho == null ? null : s(r.aparelho),
+  criadaEm: iso(r.criada_em),
+  atualizadaEm: iso(r.atualizada_em),
+});
+
+export const fromInscricaoPush = (i: InscricaoPush): Row => ({
+  endpoint: i.endpoint,
+  p256dh: i.p256dh,
+  auth: i.auth,
+  usuario: i.usuario,
+  aparelho: i.aparelho,
+  criada_em: i.criadaEm,
+  atualizada_em: i.atualizadaEm,
 });
 
 /** jsonb que chega como objeto (pg) ou texto (dado antigo, outro driver). */

@@ -45,6 +45,7 @@ import type {
   Meta,
   IgAccountDaily,
   IgPost,
+  InscricaoPush,
   Lead,
   LeadEvent,
   LeadStatus,
@@ -58,6 +59,8 @@ import {
   type Row,
   n,
   s,
+  toInscricaoPush,
+  fromInscricaoPush,
   toAcaoEstado,
   toConferencia,
   fromConferencia,
@@ -745,6 +748,30 @@ export const supabaseBackend: DataBackend = {
     const { data, error } = await supabase().from("comunidade_cliques").select("*").order("primeiro_em", { ascending: false });
     check(error, "list cliques comunidade");
     return (data ?? []).map((r) => toCliqueComunidade(r as Row));
+  },
+
+  // ---- Avisos de lead novo por Web Push (0026) ----
+  // `criada_em` fica a da 1ª vez: lê antes de gravar (o upsert do REST troca a linha inteira).
+
+  async salvarInscricaoPush(i: InscricaoPush) {
+    const db = supabase();
+    const cur = await db.from("push_inscricoes").select("criada_em").eq("endpoint", i.endpoint).maybeSingle();
+    check(cur.error, "get push inscricao");
+    const linha = fromInscricaoPush(i);
+    if (cur.data?.criada_em) linha.criada_em = cur.data.criada_em;
+    const { error } = await db.from("push_inscricoes").upsert(linha, { onConflict: "endpoint" });
+    check(error, "upsert push inscricao");
+  },
+
+  async removerInscricaoPush(endpoint: string) {
+    const { error } = await supabase().from("push_inscricoes").delete().eq("endpoint", endpoint);
+    check(error, "delete push inscricao");
+  },
+
+  async listInscricoesPush() {
+    const { data, error } = await supabase().from("push_inscricoes").select("*").order("atualizada_em", { ascending: false });
+    check(error, "list push inscricoes");
+    return (data ?? []).map((r) => toInscricaoPush(r as Row));
   },
 
   async addConferencia(c: ConferenciaGasto) {

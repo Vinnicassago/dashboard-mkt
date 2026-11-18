@@ -7,6 +7,7 @@ import { navItemFromPath } from "./nav-items";
 import { PeriodSelector } from "./period-selector";
 import { BrandSelector } from "./brand-selector";
 import { UserMenu } from "./user-menu";
+import { AvisosPush } from "./avisos-push";
 import { IndicadorAlertas } from "./alertas";
 import type { AtalhoDoSeletor } from "./periodo-do-seletor";
 import { Info } from "@/components/ui/info";
@@ -79,6 +80,7 @@ export function Header({
   geradoEm,
   atalhoLive = null,
   chavesDaLive = [],
+  chavePush = null,
 }: {
   /** De quando é o dado de cada fonte — já formatado no servidor. */
   frescor: Frescor[];
@@ -90,6 +92,8 @@ export function Header({
   atalhoLive?: AtalhoDoSeletor | null;
   /** As três chaves da régua da live (o popover "Escolher" abre vazio com elas). */
   chavesDaLive?: string[];
+  /** A chave PÚBLICA VAPID dos avisos de lead novo; `null` = avisos desligados no servidor (sem sino). */
+  chavePush?: string | null;
 }) {
   const pathname = usePathname();
   const item = navItemFromPath(pathname);
@@ -130,6 +134,7 @@ export function Header({
         <Suspense fallback={null}>
           <PeriodSelector atalho={atalhoLive} chavesDaLive={chavesDaLive} />
         </Suspense>
+        {chavePush ? <AvisosPush chavePublica={chavePush} lugar="cabecalho" /> : null}
         {username ? <UserMenu username={username} /> : null}
       </div>
     </header>

@@ -80,6 +80,10 @@ export async function fichaDoLead(lead: Lead): Promise<FichaN8n | null> {
 
 export interface ResultadoInscricao {
   criado: boolean;
+  /** O lead criado ou atualizado (o aviso de lead novo por push lê por ele). */
+  leadId: string;
+  /** Estava perdido e esta inscrição o devolveu a "Novo" (evento `reaberto`). */
+  reaberto: boolean;
   /**
    * A pessoa já era lead ANTES desta inscrição (de outra campanha, ou uma 2ª
    * inscrição) — não a mesma inscrição que a página mandou ao painel segundos antes.
@@ -143,7 +147,7 @@ export async function inscrever(i: Inscricao): Promise<ResultadoInscricao> {
         payload: { origem: "n8n" },
         createdAt: agora,
       });
-      return { criado: true, reinscricao: false, ficha: (await fichaDe(id))! };
+      return { criado: true, leadId: id, reaberto: false, reinscricao: false, ficha: (await fichaDe(id))! };
     }
 
     // Já existe: preenche o contato que faltava (nunca sobrescreve) e grava a ficha.
@@ -160,6 +164,7 @@ export async function inscrever(i: Inscricao): Promise<ResultadoInscricao> {
     const mesmaInscricao =
       Date.parse(agora) - Date.parse(ultimaEntrada(existente)) < MESMA_INSCRICAO_MIN * 60_000 && !existente.classeN8n;
     const reinscricao = Date.parse(agora) - Date.parse(existente.createdAt) >= MESMA_INSCRICAO_MIN * 60_000;
+    const reaberto = !mesmaInscricao && isLostStatus(existente.status);
     if (!mesmaInscricao) {
       await addLeadEvent({
         id: newEventId(),
@@ -176,7 +181,7 @@ export async function inscrever(i: Inscricao): Promise<ResultadoInscricao> {
         createdAt: agora,
       });
       // Quem estava perdido e se inscreveu DE NOVO quer conversa: volta para a fila.
-      if (isLostStatus(existente.status)) {
+      if (reaberto) {
         await setLeadStatus(existente.id, "lead", { lostAt: null, lostReasonDetail: null });
         await addLeadEvent({
           id: newEventId(),
@@ -194,7 +199,7 @@ export async function inscrever(i: Inscricao): Promise<ResultadoInscricao> {
     }
     const atual = (await getLead(existente.id)) ?? existente;
     await gravarFicha(atual, await comClasse(atual, i.ficha), ATOR_N8N);
-    return { criado: false, reinscricao, ficha: (await fichaDe(existente.id))! };
+    return { criado: false, leadId: existente.id, reaberto, reinscricao, ficha: (await fichaDe(existente.id))! };
   });
 }
 

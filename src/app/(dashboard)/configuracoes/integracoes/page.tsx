@@ -12,6 +12,7 @@ import {
   estadoDoAvisoResgate,
   estadoDoCronRobo,
   estadoDoRobo,
+  estadoDosAvisosPush,
   type EstadoExibido,
 } from "@/lib/configuracoes";
 import { roboDesativado } from "@/lib/integracoes";
@@ -27,7 +28,17 @@ import { DEFAULT_BRAND } from "@/lib/types";
 import { VERSAO } from "@/lib/version";
 import { gastoDoPeriodoParaConferir } from "@/lib/conferencia-periodo";
 import { hojeEmBrasilia } from "@/lib/range";
-import { getData, getState, listCapiEnvios, listConferencias, listLeadEvents, listLeads } from "@/lib/data/store";
+import {
+  getData,
+  getState,
+  listCapiEnvios,
+  listConferencias,
+  listInscricoesPush,
+  listLeadEvents,
+  listLeads,
+} from "@/lib/data/store";
+import { pushConfigurado } from "@/lib/push/config";
+import type { ResumoEnvioPush } from "@/lib/push/aviso";
 import { STATE_KEYS } from "@/lib/data/backend";
 import { capiEmModoTeste } from "@/lib/meta/capi";
 import { estadoDaCapi, estadoDoCronCapi, resumoDosEnvios } from "@/lib/capi-politica";
@@ -132,6 +143,13 @@ export default async function IntegracoesPage({ searchParams }: { searchParams: 
   ]);
   const conferir = gastoDoPeriodoParaConferir(dadosDaMarca, ctx.rangeKey, hojeEmBrasilia());
 
+  // Avisos de lead novo (Web Push): quantos aparelhos ligaram o sino e o último envio.
+  const pushLigado = pushConfigurado();
+  const [inscricoesPush, ultimoPush] = pushLigado
+    ? await Promise.all([listInscricoesPush(), getState<ResumoEnvioPush>(STATE_KEYS.pushUltimoEnvio)])
+    : [[], null];
+  const avisosPush = estadoDosAvisosPush({ configurado: pushLigado, aparelhos: inscricoesPush.length, ultimo: ultimoPush });
+
   const ingestKey = Boolean(process.env.TRACK_INGEST_KEY?.trim());
   const ia = isAiConfigured();
   const authEnabled = isAuthEnabled();
@@ -222,6 +240,7 @@ export default async function IntegracoesPage({ searchParams }: { searchParams: 
               )}
             />
             <StatusRow label="Rastreio da landing page" estado={rastreio} />
+            <StatusRow id="avisos-push" label="Avisos de lead novo (notificação)" estado={avisosPush} />
             {/* Robô: escolha operacional, não só credencial (D5). */}
             <StatusRow id="robo" label="Robô de WhatsApp" estado={robo}>
               {roboConfigurado && ctx.papeis.dados ? <RoboToggle ativo={!roboOff} /> : null}

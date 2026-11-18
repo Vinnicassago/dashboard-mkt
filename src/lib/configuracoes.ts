@@ -14,6 +14,7 @@ import { comPeriodo } from "./range";
 import { formatDateTime, formatDateTimeCurta, formatarEspera } from "./format";
 import { mensagemHumana } from "./erros";
 import type { EstadoAvisoResgate } from "./robo/aviso-resgate";
+import type { ResumoEnvioPush } from "./push/aviso";
 import { LEITURA_PARADA_MIN, leituraDoRoboParada } from "./robo/situacao";
 import { ROLES, ROLE_LABELS, hasCapability, type Role } from "./auth/roles";
 import { CONFIRMACAO_PERIGO } from "./perigo";
@@ -365,6 +366,56 @@ export function estadoDoAvisoResgate({
     rotulo: "Ligado",
     detalhe: `${ultimo} Sai com gente nova no resgate, seg–sex, 9h–18h, no máximo um por rodada do cron.`,
   };
+}
+
+/**
+ * Avisos de lead novo por Web Push: chaves no servidor, quantos aparelhos ligaram o
+ * sino e como foi o último envio (só contagens — `ResumoEnvioPush`).
+ */
+export function estadoDosAvisosPush({
+  configurado,
+  aparelhos,
+  ultimo,
+}: {
+  configurado: boolean;
+  aparelhos: number;
+  ultimo: ResumoEnvioPush | null;
+}): EstadoExibido {
+  if (!configurado) {
+    return {
+      estado: "nao-configurado",
+      rotulo: "Desligado",
+      detalhe:
+        "Defina VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY e VAPID_SUBJECT (gere as chaves com npx web-push generate-vapid-keys); o sino aparece no cabeçalho de quem estiver logado.",
+    };
+  }
+  const quantos = aparelhos === 1 ? "1 aparelho ligado" : `${aparelhos} aparelhos ligados`;
+  const comoLigar =
+    "Cada pessoa liga no sino do cabeçalho, no próprio navegador. No iPhone, só com o painel na Tela de Início (Compartilhar → Adicionar à Tela de Início).";
+  if (!ultimo) {
+    return {
+      estado: aparelhos ? "ativo" : "nunca",
+      rotulo: aparelhos ? quantos : "Nenhum aparelho",
+      detalhe: `${aparelhos ? "Nenhum lead novo desde que o 1º aparelho ligou." : "Ninguém ligou os avisos ainda."} ${comoLigar}`,
+    };
+  }
+  const resumo = `Último envio ${formatDateTime(ultimo.em)}: ${ultimo.entregues} de ${ultimo.aparelhos} entregues${
+    ultimo.removidas
+      ? ultimo.removidas === 1
+        ? " (1 aparelho saiu: desligou no navegador)"
+        : ` (${ultimo.removidas} aparelhos saíram: desligaram no navegador)`
+      : ""
+  }.`;
+  if (ultimo.falhas) {
+    return {
+      estado: "falhando",
+      rotulo: `Falhou em ${formatDateTimeCurta(ultimo.em)}`,
+      detalhe: `${resumo} ${ultimo.falhas} não chegaram ao serviço de push${
+        ultimo.erro?.startsWith("403") ? " — confira as chaves VAPID e o VAPID_SUBJECT" : ""
+      }. ${comoLigar}`,
+    };
+  }
+  return { estado: aparelhos ? "ativo" : "nunca", rotulo: aparelhos ? quantos : "Nenhum aparelho", detalhe: `${resumo} ${comoLigar}` };
 }
 
 // ---------------------------------------------------------------- papéis

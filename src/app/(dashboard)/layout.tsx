@@ -23,6 +23,7 @@ import { estadoDoRoboAgora } from "@/lib/robo/estado";
 import { activeBrand } from "@/lib/active-brand";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { isAuthEnabled } from "@/lib/auth/config";
+import { chavePublicaDoPush } from "@/lib/push/config";
 import type { Lead } from "@/lib/types";
 
 export default async function DashboardLayout({
@@ -161,6 +162,8 @@ export default async function DashboardLayout({
     }
   }
   const hrefDoInicio = inicioDoComercial(sessionUser?.role, atalhoLive);
+  // Avisos de lead novo (Web Push): a chave PÚBLICA vai ao sino; sem ela, não há sino.
+  const chavePush = chavePublicaDoPush();
 
   // CAPI: evento que não chegou à Meta (ou modo de teste em produção) — para quem cuida dos dados.
   if (status.capi && (await can("data:write"))) {
@@ -185,7 +188,7 @@ export default async function DashboardLayout({
     <div className="flex min-h-screen">
       <Sidebar brand={brand} hrefDoInicio={hrefDoInicio} />
       <div className="flex min-w-0 flex-1 flex-col">
-        <MobileNav brand={brand} hrefDoInicio={hrefDoInicio} />
+        <MobileNav brand={brand} hrefDoInicio={hrefDoInicio} chavePush={chavePush} />
         <Header
           frescor={frescor}
           username={sessionUser?.username ?? null}
@@ -193,6 +196,7 @@ export default async function DashboardLayout({
           geradoEm={agora.toISOString()}
           atalhoLive={atalhoLive}
           chavesDaLive={chavesLive}
+          chavePush={chavePush}
         />
         <main className="flex-1 p-4 md:p-6">
           <div className="mx-auto w-full max-w-[1600px]">

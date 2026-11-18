@@ -692,4 +692,20 @@ create table if not exists diagnosticos (
 );
 create index if not exists diagnosticos_chave_idx on diagnosticos (chave_telefone);
 alter table diagnosticos enable row level security;
+
+-- 0026 — avisos de lead novo por Web Push (nov/26): um navegador por linha, pelo
+-- endpoint do serviço de push (Google, Apple, Mozilla). Só TABELA NOVA. É
+-- configuração do aparelho, não fato do lead: desativar (ou o serviço dizer que a
+-- inscrição não existe mais) APAGA a linha. Sem PII: usuário do painel e um rótulo
+-- do aparelho ("Chrome · Android"); as chaves só cifram o aviso. RLS como as demais.
+create table if not exists push_inscricoes (
+  endpoint text primary key,
+  p256dh text not null,
+  auth text not null,
+  usuario text,
+  aparelho text,
+  criada_em timestamptz not null,
+  atualizada_em timestamptz not null
+);
+alter table push_inscricoes enable row level security;
 `;

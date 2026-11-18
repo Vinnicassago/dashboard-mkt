@@ -46,6 +46,7 @@ import type {
   Meta,
   IgAccountDaily,
   IgPost,
+  InscricaoPush,
   Lead,
   LeadEvent,
   LeadStatus,
@@ -56,6 +57,8 @@ import {
   FALLBACK_CAMPAIGN,
   type Row,
   s,
+  toInscricaoPush,
+  fromInscricaoPush,
   toAcaoEstado,
   toConferencia,
   fromConferencia,
@@ -123,6 +126,7 @@ const DRAFT_COLS = ["id", "brand", "status", "created_at", "updated_at", "planne
 const CONFERENCIA_COLS = ["id", "brand", "periodo_de", "periodo_ate", "gasto_painel", "gasto_gerenciador", "diferenca", "ultimo_sync", "criada_em", "criada_por"];
 const DIAGNOSTICO_COLS = ["tentativa", "telefone", "chave_telefone", "etapa", "respondidas", "total", "respostas", "perfil", "notas", "conquistas", "conquistas_total", "page_url", "iniciado_em", "concluido_em", "atualizado_em", "eventos"];
 const CLIQUE_COLS = ["event_id", "primeiro_em", "ultimo_em", "cliques", "lead_id", "page_url"];
+const PUSH_COLS = ["endpoint", "p256dh", "auth", "usuario", "aparelho", "criada_em", "atualizada_em"];
 const ACAO_ESTADO_COLS = ["id", "brand", "semana", "acao", "estado", "motivo", "titulo", "por", "em"];
 const RESUMO_COLS = ["id", "brand", "semana", "periodo_de", "periodo_ate", "analise", "origem", "criado_em"];
 const CAPI_COLS = [
@@ -877,6 +881,30 @@ export const postgresBackend: DataBackend = {
 
   async listCliquesComunidade(): Promise<CliqueComunidade[]> {
     return (await q("select * from comunidade_cliques order by primeiro_em desc")).map(toCliqueComunidade);
+  },
+
+  // ---- Avisos de lead novo por Web Push (0026) ----
+
+  async salvarInscricaoPush(i: InscricaoPush) {
+    const { values, tuples } = buildTuples(PUSH_COLS, [fromInscricaoPush(i)]);
+    await q(
+      `insert into push_inscricoes (${PUSH_COLS.join(",")}) values ${tuples}
+       on conflict (endpoint) do update set
+         p256dh = excluded.p256dh,
+         auth = excluded.auth,
+         usuario = excluded.usuario,
+         aparelho = excluded.aparelho,
+         atualizada_em = excluded.atualizada_em`,
+      values,
+    );
+  },
+
+  async removerInscricaoPush(endpoint: string) {
+    await q("delete from push_inscricoes where endpoint = $1", [endpoint]);
+  },
+
+  async listInscricoesPush(): Promise<InscricaoPush[]> {
+    return (await q("select * from push_inscricoes order by atualizada_em desc")).map(toInscricaoPush);
   },
 
   // ---- Envios à Meta (Fase 7) ----

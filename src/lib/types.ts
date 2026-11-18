@@ -648,6 +648,27 @@ export interface ConferenciaGasto {
   criadaPor: string;
 }
 
+/**
+ * Um navegador inscrito nos avisos de lead novo (Web Push, migração 0026). O
+ * `endpoint` é o endereço do serviço de push do navegador (Google, Apple, Mozilla),
+ * único por aparelho + navegador; `p256dh` e `auth` cifram o aviso de ponta a ponta
+ * (o serviço de push não lê o conteúdo). Quem desativa, ou o serviço que responde
+ * "não existe mais", apaga a linha — não é fato do lead, é configuração do aparelho.
+ */
+export interface InscricaoPush {
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  /** Quem ativou; `null` no modo aberto (sem AUTH_SECRET). Com login, só usuário que existe recebe. */
+  usuario: string | null;
+  /** "Chrome · Android" — só para reconhecer o aparelho; nunca o user-agent inteiro. */
+  aparelho: string | null;
+  /** A 1ª vez que este navegador se inscreveu (fica no reenvio). */
+  criadaEm: string;
+  /** A última vez que o navegador confirmou a inscrição (ativar ou abrir o painel). */
+  atualizadaEm: string;
+}
+
 // ------------------------- Goals ------------------------------------
 
 export type GoalMetric =

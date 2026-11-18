@@ -337,7 +337,8 @@ describe("cabeçalho — a pergunta vira o ⓘ do título", () => {
     expect(layout).toMatch(/atalhoDaLive\(cfg, hojeEmBrasilia\(agora\), brand\.type\)/);
     expect(layout).toMatch(/campanhaDaLive\(\)/);
     expect(layout).toMatch(/<Sidebar brand=\{brand\} hrefDoInicio=\{hrefDoInicio\} \/>/);
-    expect(layout).toMatch(/<MobileNav brand=\{brand\} hrefDoInicio=\{hrefDoInicio\} \/>/);
+    // No celular o sino dos avisos de lead novo mora na ponta da barra (chavePush).
+    expect(layout).toMatch(/<MobileNav brand=\{brand\} hrefDoInicio=\{hrefDoInicio\} chavePush=\{chavePush\} \/>/);
     expect(layout).toMatch(/atalhoLive=\{atalhoLive\}/);
   });
 });

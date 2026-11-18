@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { NAV_GRUPOS, hrefDoItem, itemAtivo, navForBrand } from "./nav-items";
 import { useComPeriodo } from "./use-periodo";
+import { AvisosPush } from "./avisos-push";
 import type { BrandDef } from "@/lib/brands";
 import { cn } from "@/lib/utils";
 
@@ -141,12 +142,31 @@ function MobileLinksComPeriodo({ brand, hrefDoInicio }: Omit<PropsDosLinks, "hre
 }
 
 /** A navegação do celular (md:hidden): uma linha que rola na horizontal dentro dela. */
-export function MobileNav({ brand, hrefDoInicio = null }: { brand: BrandDef; hrefDoInicio?: string | null }) {
+/**
+ * No celular, o sino dos avisos de lead novo fica na ponta desta barra, fora da
+ * rolagem: no cabeçalho, ao lado do "Sair", ele apagava o título da página a 375 px.
+ */
+export function MobileNav({
+  brand,
+  hrefDoInicio = null,
+  chavePush = null,
+}: {
+  brand: BrandDef;
+  hrefDoInicio?: string | null;
+  chavePush?: string | null;
+}) {
   return (
-    <nav className="flex gap-1 overflow-x-auto border-b bg-card px-3 py-2 [scrollbar-width:none] md:hidden [&::-webkit-scrollbar]:hidden">
-      <Suspense fallback={<MobileLinks brand={brand} hrefFor={semPeriodo} hrefDoInicio={hrefDoInicio} />}>
-        <MobileLinksComPeriodo brand={brand} hrefDoInicio={hrefDoInicio} />
-      </Suspense>
-    </nav>
+    <div className="flex items-center border-b bg-card md:hidden">
+      <nav className="flex min-w-0 flex-1 gap-1 overflow-x-auto px-3 py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <Suspense fallback={<MobileLinks brand={brand} hrefFor={semPeriodo} hrefDoInicio={hrefDoInicio} />}>
+          <MobileLinksComPeriodo brand={brand} hrefDoInicio={hrefDoInicio} />
+        </Suspense>
+      </nav>
+      {chavePush ? (
+        <div className="shrink-0 pr-3">
+          <AvisosPush chavePublica={chavePush} lugar="celular" />
+        </div>
+      ) : null}
+    </div>
   );
 }

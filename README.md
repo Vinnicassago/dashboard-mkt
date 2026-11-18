@@ -460,6 +460,35 @@ cada mudança de status registra **quem** fez, **de/para** qual status e **quand
 O ator é o usuário logado (ou "Landing page" quando o lead entra pelo formulário).
 Migration no Supabase: `supabase/migrations/0006_lead_events.sql`.
 
+### Avisos de lead novo no navegador (Web Push)
+
+Cada pessoa liga o **sino do cabeçalho** no próprio navegador — computador ou
+celular — e recebe uma notificação do sistema a cada **lead novo** (pela landing
+page ou pela API do n8n) e a cada **lead perdido que voltou**, na hora, mesmo com o
+painel fechado. Tocar no aviso abre a ficha do lead.
+
+1. Gere o par de chaves **uma vez** (não troque depois: trocar obriga cada aparelho a
+   ligar de novo):
+
+   ```bash
+   npx web-push generate-vapid-keys
+   ```
+
+2. No servidor (EasyPanel → Ambiente): `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` e
+   `VAPID_SUBJECT` (`https://<endereço do painel>` ou `mailto:<e-mail da equipe>`).
+   Implante. A tabela `push_inscricoes` (migração 0026) se cria sozinha no Postgres;
+   no Supabase, rode `supabase/migrations/0026_push_inscricoes.sql`.
+3. Cada pessoa clica no sino e aceita as notificações; chega um aviso de teste. No
+   **iPhone/iPad** (iOS 16.4+) o push só existe com o painel na Tela de Início:
+   Safari → Compartilhar → **Adicionar à Tela de Início**, abrir por lá e ligar o sino.
+
+**Configurações → Integrações** mostra quantos aparelhos ligaram e como foi o último
+envio. O aviso leva só o **primeiro nome**, a classe e de onde veio — nunca telefone
+ou e-mail (aparece na tela bloqueada); o conteúdo vai cifrado de ponta a ponta. Com
+login, só recebe quem ainda é usuário do painel; aparelho que desligou as
+notificações no navegador sai da lista sozinho. O código: `src/lib/push/`,
+`public/sw.js` e `src/components/layout/avisos-push.tsx`.
+
 ### Privacidade (LGPD)
 
 - **Nome, e-mail e telefone são armazenados** na tabela `leads` (a pedido, para o

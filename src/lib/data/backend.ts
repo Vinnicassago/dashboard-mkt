@@ -14,6 +14,7 @@ import type {
   Goal,
   IgAccountDaily,
   IgPost,
+  InscricaoPush,
   Lead,
   LeadEvent,
   LeadEventAction,
@@ -556,6 +557,18 @@ export interface DataBackend {
   registrarCliqueComunidade(c: { eventId: string; leadId?: string; pageUrl?: string; em: string }): Promise<CliqueComunidade>;
   listCliquesComunidade(): Promise<CliqueComunidade[]>;
 
+  // ---- Avisos de lead novo por Web Push (0026) ----
+  /**
+   * Grava a inscrição de um navegador. Upsert pelo `endpoint`: o mesmo aparelho que
+   * se inscreve de novo troca as chaves, o usuário, o aparelho e `atualizadaEm`;
+   * `criadaEm` fica a da 1ª vez.
+   */
+  salvarInscricaoPush(i: InscricaoPush): Promise<void>;
+  /** Apaga a inscrição (a pessoa desativou, ou o serviço de push diz que ela não existe mais). */
+  removerInscricaoPush(endpoint: string): Promise<void>;
+  /** Todas, as mais recentes primeiro (por `atualizadaEm`). */
+  listInscricoesPush(): Promise<InscricaoPush[]>;
+
   /** Accumulate landing-page counters for a brand's day (read-modify-write). */
   bumpLpDaily(brand: string, date: string, delta: LpDelta): Promise<void>;
 
@@ -695,6 +708,8 @@ export const STATE_KEYS = {
   roboFalhaDesde: "robo_falha_desde",
   /** Estado do aviso de resgate ao n8n (quem já foi avisado, último envio) — etapa B. */
   avisoResgate: "aviso_resgate",
+  /** O último envio dos avisos de lead novo por Web Push (`ResumoEnvioPush`, só contagens) — Integrações. */
+  pushUltimoEnvio: "push_ultimo_envio",
 } as const;
 
 export interface StoredToken {
