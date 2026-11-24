@@ -22,7 +22,8 @@ import {
   type ResumoDoDiagnostico,
   type SituacaoDoDiagnostico,
 } from "./diagnostico-live";
-import { ehInscritoDaLive, type CampanhaDaLive } from "./live";
+import { ehInscritoDaLive, inscritoNaJanela, type CampanhaDaLive } from "./live";
+import { periodoDaLive, rangeDoPainelLive } from "./atalho-live";
 import { DONO_LABEL, type Dono } from "./dono";
 import {
   etapaDoLead,
@@ -481,9 +482,28 @@ export function atendimentoDoLead(e: EntradaDoAtendimento): AtendimentoAgora {
 }
 
 /**
+ * O período do cabeçalho é uma das três janelas da live (o atalho "Live 01/12",
+ * `periodoDaLive`, só pela chave)? Então a lista de Leads mostra os INSCRITOS da
+ * live nessa janela, com o MESMO recorte das "Inscrições" do painel da live
+ * (`rangeDoPainelLive` + `inscritoNaJanela`) — não todo lead que entrou nessas
+ * datas pela outra campanha. `null` = período comum (pela entrada do lead).
+ */
+export function janelaDaLiveEmLeads(
+  rangeKey: string | null | undefined,
+  cfg: CampanhaDaLive,
+  hoje: string,
+): { de: string; ate: string } | null {
+  if (!periodoDaLive(rangeKey, cfg)) return null;
+  const r = rangeDoPainelLive(rangeKey!, hoje, cfg.periodo);
+  return { de: r.de, ate: r.ate };
+}
+
+/**
  * As linhas da tabela de Leads. `eventos` = histórico da marca (todas as
  * tentativas); `agora` em ISO para a função seguir pura. Com `range`, só os
- * leads que ENTRARAM no período — a coorte, como a aba Funil lê.
+ * leads que ENTRARAM no período — a coorte, como a aba Funil lê. Com
+ * `janelaDaLive` (e `live`), só os inscritos da live nessa janela, pela data da
+ * inscrição (`janelaDaLiveEmLeads`): `range` não vale.
  */
 export function montarLinhasDeLeads(
   data: DashboardData,
@@ -500,6 +520,8 @@ export function montarLinhasDeLeads(
      * diagnóstico e os cliques na comunidade. Ausente = as colunas da live ficam vazias.
      */
     live?: { cfg: CampanhaDaLive; diagnosticos: DiagnosticoTentativa[]; cliques: CliqueComunidade[] };
+    /** Período da live (`janelaDaLiveEmLeads`): só os inscritos nessa janela. Exige `live`. */
+    janelaDaLive?: { de: string; ate: string } | null;
   } = {},
 ): LinhaDeLead[] {
   const origem = origemDoLead(data);
@@ -524,7 +546,10 @@ export function montarLinhasDeLeads(
   // O mesmo contexto da Fila: quem já agendou por outro cadastro (a mesma pessoa).
   const ctx = { reunioesPorTelefone: reunioesPorTelefone(data.leads) };
 
-  const leads = filterLeads(data.leads, opts.range).filter((l) => !l.deletedAt);
+  const janela = opts.janelaDaLive && daInscricao ? opts.janelaDaLive : null;
+  const leads = janela
+    ? data.leads.filter((l) => inscritoNaJanela(l, daInscricao!.cfg, janela))
+    : filterLeads(data.leads, opts.range).filter((l) => !l.deletedAt);
   return leads.map((l): LinhaDeLead => {
     const proprios = porLead.get(l.id) ?? [];
     const contato = resumoContato(proprios);
@@ -971,9 +996,14 @@ export function linhasDaUrl(v: string | null | undefined): number {
  * título. Por papel: o Marketing lê a máscara (no lugar do WhatsApp); quem exporta lê o CSV.
  * Cada frase ≤ 25 palavras (`t3-leads-tela.test.ts`).
  */
-export function sobreALista(opts: { mascarar: boolean; exporta: boolean }): string {
+export function sobreALista(opts: { mascarar: boolean; exporta: boolean; live?: boolean }): string {
   return [
-    "Cada pessoa que entrou no período do cabeçalho (pela data de entrada), com status, até onde chegou, o atendimento agora e a origem.",
+    ...(opts.live
+      ? [
+          "No período da live, só os inscritos na live: quem se inscreveu nessas datas, inclusive quem já era lead de outra campanha.",
+          "É o mesmo número das Inscrições do painel da live no Início. Os outros leads dessas datas aparecem em 7 dias ou Campanha.",
+        ]
+      : ["Cada pessoa que entrou no período do cabeçalho (pela data de entrada), com status, até onde chegou, o atendimento agora e a origem."]),
     `A tabela abre com as ${LINHAS_POR_VEZ} entradas mais recentes; a busca, as abas e a ordenação valem para a lista inteira.`,
     opts.mascarar ? SOBRE_A_MASCARA : "O telefone abre o WhatsApp.",
     ...(opts.exporta

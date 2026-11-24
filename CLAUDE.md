@@ -575,7 +575,11 @@ campanha de lead-gen no Instagram. North Star: **Custo por Reunião (CPR)**.
   `lib/live-painel.ts` (puro, congelado). Inscrito da live = veio com a ficha (ou
   `utm_campaign`, se configurado). Custos seguem as travas: denominador zero é "—", reunião
   abaixo de `MIN_REUNIOES` é fato. Verba é da linha inteira até hoje; o resto é do período.
-  Resumo do ClickUp = `resumoSemanalDaLive`.
+  Resumo do ClickUp = `resumoSemanalDaLive`. **Em Leads** (nov/26) a mesma chave lista SÓ os
+  inscritos da janela pela data da inscrição (`janelaDaLiveEmLeads` + `inscritoNaJanela`, o
+  recorte das Inscrições do painel — um número só, `leads-periodo-da-live.test.ts`), título
+  "Inscritos na live (N)", e a exportação e o "sem inscrição" leem a mesma janela; a outra campanha
+  que roda nas mesmas datas aparecia como live (45 × 4). Período comum segue pela entrada.
 - **Criativos da live** (`lib/criativos-live.ts`, na Mídia) — recolhido em "Criativos da live 01/12", com o mesmo conteúdo; o recorte decide pela CHAVE do período: período livre (e os atalhos da live) recorta; 7/14/30/90 dias ou Campanha mostram a campanha da live até hoje (o mesmo seletor aceso nunca dá dois conteúdos); na verba, a live é UMA linha, fora do destaque: sinal é SUGESTÃO (nada é pausado no
   Meta): cedo demais até 5 dias E R$ 60; pausar acima de 2× a média dos julgáveis; o de carro só
   a partir de `carro.julgarDesde`, contra os de imóvel da mesma semana. Nomes das campanhas,

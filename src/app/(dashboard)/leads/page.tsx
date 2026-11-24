@@ -14,7 +14,8 @@ import { estadoDoRoboAgora } from "@/lib/robo/estado";
 import { can } from "@/lib/auth/guard";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { paraRevisar } from "@/lib/identidade";
-import { DICAS_DE_LEADS, montarLinhasDeLeads, sobreALista } from "@/lib/leads-vista";
+import { DICAS_DE_LEADS, janelaDaLiveEmLeads, montarLinhasDeLeads, sobreALista } from "@/lib/leads-vista";
+import { hojeEmBrasilia } from "@/lib/range";
 import { expedienteAtual } from "@/lib/atendimento-server";
 import { mascararContato, mascararEmail, mascararNoTexto, mascararTelefone } from "@/lib/lgpd";
 import { pageRange } from "@/lib/page-range";
@@ -53,7 +54,9 @@ function mascararEvento(e: LeadEvent): LeadEvent {
  *
  * A tabela não calcula nada: cada linha sai de `montarLinhasDeLeads` (puro),
  * que lê as mesmas fontes da Fila e do Funil. O período (`?range=`) filtra
- * pela ENTRADA do lead — a coorte; sem ele, a campanha inteira. Abre com 50 linhas
+ * pela ENTRADA do lead — a coorte; sem ele, a campanha inteira. Num período da
+ * live (`janelaDaLiveEmLeads`), só os inscritos da live pela data da inscrição — o
+ * número das "Inscrições" do painel da live no Início. Abre com 50 linhas
  * (`LINHAS_POR_VEZ`); o texto que explicava a lista está no ⓘ do título (T3).
  */
 export default async function LeadsPage({ searchParams }: { searchParams: Promise<{ range?: string }> }) {
@@ -87,12 +90,15 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   }));
   const origem = rotuladorDeOrigem(data);
 
-  const linhas = montarLinhasDeLeads(data, todosEventos, agora, { range, expediente, robo, live });
+  // Período da live ("Live 01/12" e sub-atalhos): só os inscritos, com o recorte do painel da live.
+  const janelaDaLive = live ? janelaDaLiveEmLeads(rangeParam, live.cfg, hojeEmBrasilia()) : null;
+  const linhas = montarLinhasDeLeads(data, todosEventos, agora, { range, expediente, robo, live, janelaDaLive });
   const rows = mascarar ? linhas.map(mascararContato) : linhas;
   // Depois da inscrição: o resumo é das MESMAS linhas da tabela (o período pela entrada).
   const resumoDaLive = resumoDepoisDaInscricao(linhas);
+  const periodoDosDiagnosticos = janelaDaLive ? { from: janelaDaLive.de, to: janelaDaLive.ate } : range;
   const semInscricao = live
-    ? diagnosticosSemInscricao(live.diagnosticos, data.leads, live.cfg, range).map((s) =>
+    ? diagnosticosSemInscricao(live.diagnosticos, data.leads, live.cfg, periodoDosDiagnosticos).map((s) =>
         mascarar ? { ...s, telefone: mascararTelefone(s.telefone) } : s,
       )
     : [];
@@ -136,8 +142,14 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
       <Card id="leads" className="scroll-mt-24">
         <CardHeader>
           <CardTitle className="flex items-center gap-0.5" data-titulo>
-            <span className="min-w-0">Leads ({rows.length})</span>
-            <Info texto={sobreALista({ mascarar, exporta: canEdit })} rotulo="Sobre a lista de leads" className="-my-1" />
+            <span className="min-w-0">
+              {janelaDaLive ? "Inscritos na live" : "Leads"} ({rows.length})
+            </span>
+            <Info
+              texto={sobreALista({ mascarar, exporta: canEdit, live: Boolean(janelaDaLive) })}
+              rotulo="Sobre a lista de leads"
+              className="-my-1"
+            />
           </CardTitle>
         </CardHeader>
         <CardContent>

@@ -8,6 +8,7 @@ import {
   aplicarFiltro,
   descreverFiltro,
   filtroDoPedido,
+  janelaDaLiveEmLeads,
   montarCsvDeLeads,
   montarLinhasDeLeads,
   periodoDoRegistro,
@@ -15,7 +16,7 @@ import {
 } from "@/lib/leads-vista";
 import { pageRange } from "@/lib/page-range";
 import { expedienteAtual } from "@/lib/atendimento-server";
-import { isRangeKey, rangeLabel } from "@/lib/range";
+import { hojeEmBrasilia, isRangeKey, rangeLabel } from "@/lib/range";
 import { estadoDoRoboAgora } from "@/lib/robo/estado";
 import { carregarDepoisDaInscricao } from "@/lib/diagnostico-server";
 
@@ -74,12 +75,15 @@ export async function POST(request: Request): Promise<Response> {
     ]);
     const { range, rangeKey } = pageRange(data, rangeParam);
     const expediente = await expedienteAtual();
+    // A MESMA lista da tela: num período da live, só os inscritos (`janelaDaLiveEmLeads`).
+    const janelaDaLive = live ? janelaDaLiveEmLeads(rangeParam, live.cfg, hojeEmBrasilia()) : null;
     const linhas = aplicarFiltro(
-      montarLinhasDeLeads(data, eventos, new Date().toISOString(), { range, expediente, robo, live }),
+      montarLinhasDeLeads(data, eventos, new Date().toISOString(), { range, expediente, robo, live, janelaDaLive }),
       filtro,
     );
     n = linhas.length;
-    descricao = descreverFiltro(filtro, periodoDoRegistro(rangeLabel(rangeKey), range));
+    const periodo = periodoDoRegistro(rangeLabel(rangeKey), range);
+    descricao = descreverFiltro(filtro, janelaDaLive ? `${periodo} · só inscritos na live` : periodo);
     csv = montarCsvDeLeads(linhas);
   } catch (e) {
     console.error("[leads/exportar] não consegui ler os leads:", e);

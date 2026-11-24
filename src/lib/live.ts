@@ -191,6 +191,17 @@ export function ehInscritoDaLive(l: Lead, cfg: CampanhaDaLive): boolean {
   return Boolean(classeDoLead(l) || l.bem || l.faixaValor || l.finalidade);
 }
 
+/**
+ * Inscrito da live com a entrada NA LIVE dentro da janela (AAAA-MM-DD, inclusivo):
+ * o recorte das "Inscrições" do painel da live (`montarPainelLive`) e da lista de
+ * Leads num período da live. Quem já era lead conta pela data da inscrição.
+ */
+export function inscritoNaJanela(l: Lead, cfg: CampanhaDaLive, janela: { de: string; ate: string }): boolean {
+  if (!ehInscritoDaLive(l, cfg)) return false;
+  const dia = diaDaEntradaNaLive(l);
+  return dia >= janela.de && dia <= janela.ate;
+}
+
 // ---------------------------------------------------------------- ler do banco
 
 const DIA = /^\d{4}-\d{2}-\d{2}$/;

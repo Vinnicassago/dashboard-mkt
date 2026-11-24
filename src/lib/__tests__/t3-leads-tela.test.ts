@@ -35,6 +35,8 @@ import {
 } from "@/lib/leads-vista";
 import { SOBRE_A_MASCARA } from "@/lib/lgpd";
 import { aplicarEventoDiagnostico } from "@/lib/diagnostico-live";
+import { chavesDaLive } from "@/lib/atalho-live";
+import { LIVE_PADRAO } from "@/lib/live";
 import { SOBRE_DEPOIS_DA_INSCRICAO, SOBRE_SEM_INSCRICAO } from "@/components/leads/depois-da-inscricao";
 import { blocos, componentesClient, contatosDe, inspecionar, palavras, type Fronteira } from "@/test/tela";
 import { AGORA, ROBO, brt, lead } from "@/test/fixtures-robo";
@@ -145,11 +147,11 @@ const maisNovos = (n: number) => Array.from({ length: n }, (_, k) => id(N - k));
 
 // ---------------------------------------------------------------- utilidades
 
-const pagina = async () => {
+const pagina = async (range?: string) => {
   const { default: LeadsPage } = await import("@/app/(dashboard)/leads/page");
-  return (await LeadsPage({ searchParams: Promise.resolve({}) })) as ReactElement;
+  return (await LeadsPage({ searchParams: Promise.resolve(range ? { range } : {}) })) as ReactElement;
 };
-const renderizar = async () => renderToStaticMarkup(await pagina());
+const renderizar = async (range?: string) => renderToStaticMarkup(await pagina(range));
 /** Do <select> só se lê a opção escolhida (a régua do script; o React marca `selected=""`). */
 const semOpcoesNaoEscolhidas = (html: string) => html.replace(/<option(?![^>]*\sselected)[^>]*>[\s\S]*?<\/option>/g, "");
 const texto = (html: string) =>
@@ -427,6 +429,25 @@ describe("Depois da inscrição: o bloco da live em Leads", () => {
     h.leads = base60();
     h.diagnosticos = [];
     expect(texto(await renderizar())).not.toContain("concluíram o diagnóstico");
+  });
+
+  it("no período da live (o atalho), a lista é só dos inscritos — a outra campanha das mesmas datas fica de fora", async () => {
+    comLive();
+    const outra = lead("outra-campanha", { createdAt: "2026-11-20T13:30:00.000Z" });
+    h.leads = [...h.leads, outra];
+    const chave = chavesDaLive(LIVE_PADRAO).campanha;
+    // o relógio da suíte é 04/11 (antes da live: a janela sai vazia); aqui, 24/11
+    vi.setSystemTime(new Date("2026-11-24T18:00:00.000Z"));
+    try {
+      const t = texto(await renderizar(chave));
+      expect(t).toContain("Inscritos na live (3)");
+      expect(t).not.toContain(outra.name!);
+      expect(t).toContain("Live · 1 de 3 concluíram o diagnóstico");
+      // "Campanha" é período comum, pela entrada: a outra campanha aparece
+      expect(texto(await renderizar("all"))).toContain(outra.name!);
+    } finally {
+      vi.setSystemTime(new Date(AGORA));
+    }
   });
 
   it("Marketing: o WhatsApp do diagnóstico sem inscrição vai mascarado, sem link", async () => {
