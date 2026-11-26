@@ -1,5 +1,7 @@
 import { NextResponse, after } from "next/server";
-import { getLead } from "@/lib/data/store";
+import { getLead, listLeads } from "@/lib/data/store";
+import { DEFAULT_BRAND } from "@/lib/types";
+import { normalizarTelefone } from "@/lib/phone";
 import { lerInscricao } from "@/lib/n8n/entrada";
 import { falhaInterna, invalido, lerJson, semAutorizacao } from "@/lib/n8n/resposta";
 import { inscrever } from "@/lib/n8n/servico";
@@ -38,5 +40,30 @@ export async function POST(request: Request) {
     );
   } catch (e) {
     return falhaInterna("POST leads", e);
+  }
+}
+
+/**
+ * GET /api/n8n/leads — a lista de contatos da marca Consórcio (sem os excluídos),
+ * para disparos únicos do n8n (ex.: o convite da live para a base). Só o que o
+ * disparo precisa: nome, WhatsApp, status, entrada, inscrição na live e o "sair"
+ * do robô. Ver docs/api-n8n.md.
+ */
+export async function GET(request: Request) {
+  const negado = semAutorizacao(request);
+  if (negado) return negado;
+  try {
+    const leads = (await listLeads(DEFAULT_BRAND)).map((l) => ({
+      id: l.id,
+      nome: l.name ?? "",
+      whatsapp: l.phone ? normalizarTelefone(l.phone) : "",
+      status: l.status,
+      criado_em: l.createdAt,
+      inscrito_live_em: l.inscritoLiveEm ?? null,
+      opt_out_em: l.roboOptOutEm ?? null,
+    }));
+    return NextResponse.json({ ok: true, total: leads.length, leads });
+  } catch (e) {
+    return falhaInterna("GET leads", e);
   }
 }
