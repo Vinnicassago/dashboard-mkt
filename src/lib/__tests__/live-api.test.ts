@@ -406,3 +406,21 @@ describe("API do n8n — quem já era lead e se inscreve na live", () => {
     expect(todos[0]).toMatchObject({ actor: "Landing page", payload: { inscricaoLive: "Live 01/12" } });
   });
 });
+
+describe("API do n8n — lista para disparo (GET)", () => {
+  it("sem token: 401; com token: a lista da marca com o WhatsApp normalizado", async () => {
+    expect((await r.leads.GET(req("/api/n8n/leads", { token: null }))).status).toBe(401);
+    await post({ ...inscricaoA, whatsapp: "11 98765-4321", nome: "Lista Disparo" });
+    const res = await r.leads.GET(req("/api/n8n/leads"));
+    expect(res.status).toBe(200);
+    const corpo = await res.json();
+    expect(corpo.ok).toBe(true);
+    expect(corpo.total).toBe(corpo.leads.length);
+    const l = corpo.leads.find((x: { whatsapp: string }) => x.whatsapp === "5511987654321");
+    expect(l).toMatchObject({ nome: "Lista Disparo", status: "lead" });
+    expect(l.inscrito_live_em).toBeTruthy();
+    expect(Object.keys(l).sort()).toEqual(
+      ["criado_em", "id", "inscrito_live_em", "nome", "opt_out_em", "status", "whatsapp"],
+    );
+  });
+});

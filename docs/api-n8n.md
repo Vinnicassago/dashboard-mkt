@@ -242,6 +242,23 @@ inscrição na live: quem já era lead e se inscreveu volta como `primeira`, com
 
 ---
 
+## 4b. Lista para disparo — `GET /api/n8n/leads`
+
+Todos os leads da marca Consórcio, sem os excluídos, mais recentes primeiro. Feito
+para disparos únicos do n8n (ex.: o convite da live para a base). Só o que o
+disparo precisa — sem e-mail, origem ou ficha:
+
+```json
+{ "ok": true, "total": 1, "leads": [
+  { "id": "LEAD-WA-5511999990000", "nome": "Maria Souza", "whatsapp": "5511999990000",
+    "status": "lead", "criado_em": "2026-11-16T22:05:00.000Z",
+    "inscrito_live_em": null, "opt_out_em": null }
+] }
+```
+
+`whatsapp` vazio = lead sem telefone. `opt_out_em` preenchido = pediu para sair
+no robô: não mandar mensagem.
+
 ## 5. A página de inscrição direto no painel (sem token)
 
 A página manda a inscrição ao painel pelo `lp-tracking.js` (o mesmo de hoje), **com
